@@ -1,0 +1,7 @@
+# Build artifacts
+/target/
+
+# Codineer local artifacts
+.codineer/settings.local.json
+.codineer/sessions/
+.codineer-agents/
