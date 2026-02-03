@@ -53,22 +53,3 @@ export XAI_API_KEY="xai-..."
 # OpenAI
 export OPENAI_API_KEY="sk-..."
 
-# Or use Anthropic OAuth:
-codineer login
-```
-
-### Run
-
-```bash
-# Interactive REPL
-codineer
-
-# One-shot prompt
-codineer prompt "explain the architecture of this project"
-
-# JSON output for scripting
-codineer -p "list all TODO items" --output-format json
-```
-
-## Core Features
-
