@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 380 80" fill="none">
+  <defs>
+    <linearGradient id="hex-s" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1F6FEB"/>
+      <stop offset="100%" stop-color="#58A6FF"/>
+    </linearGradient>
+    <linearGradient id="p-s" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#1A7F37"/>
+      <stop offset="100%" stop-color="#2DA44E"/>
+    </linearGradient>
+    <linearGradient id="c-s" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#CF222E"/>
+      <stop offset="100%" stop-color="#DA3633"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Hexagon icon -->
+  <polygon points="40,4 70,20 70,56 40,72 10,56 10,20"
+           fill="none" stroke="url(#hex-s)" stroke-width="3"/>
+
+  <!-- > prompt inside hex -->
+  <path d="M 22 26 L 40 40 L 22 54"
+        stroke="url(#p-s)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+
+  <!-- _ cursor -->
+  <rect x="44" y="48" width="16" height="4" rx="1.5" fill="url(#c-s)"/>
+
+  <!-- Text -->
+  <text x="92" y="52" fill="#1F2328" font-family="'JetBrains Mono', 'Fira Code', 'SF Mono', monospace" font-size="38" font-weight="700" letter-spacing="2">
+    Codineer
+  </text>
+</svg>
