@@ -28,3 +28,32 @@
       <feMerge>
         <feMergeNode in="blur"/>
         <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Outer hexagon (engineering precision) -->
+  <polygon points="256,32 452,144 452,368 256,480 60,368 60,144"
+           fill="url(#hex-fill)" stroke="url(#hex-stroke)" stroke-width="4"
+           filter="url(#glow-blue)"/>
+
+  <!-- Inner subtle hexagon grid lines -->
+  <polygon points="256,72 420,168 420,352 256,448 92,352 92,168"
+           fill="none" stroke="#21262D" stroke-width="1.5"/>
+
+  <!-- Terminal prompt > symbol -->
+  <g filter="url(#glow-green)">
+    <path d="M 140 190 L 240 260 L 140 330"
+          stroke="url(#prompt)" stroke-width="20" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  </g>
+
+  <!-- Underscore (typing cursor) -->
+  <rect x="270" y="310" width="100" height="16" rx="4" fill="url(#cursor-grad)">
+    <animate attributeName="opacity" values="1;0.2;1" dur="1.2s" repeatCount="indefinite"/>
+  </rect>
+
+  <!-- Bottom text -->
+  <text x="256" y="530" text-anchor="middle" fill="#C9D1D9" font-family="'JetBrains Mono', 'Fira Code', 'SF Mono', monospace" font-size="18" font-weight="600" letter-spacing="8">
+    CODINEER
+  </text>
+</svg>
