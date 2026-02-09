@@ -41,3 +41,45 @@ mod tests {
         })
     }
 
+    #[allow(clippy::too_many_lines)]
+    fn write_mock_server_script(root: &std::path::Path) -> PathBuf {
+        let script_path = root.join("mock_lsp_server.py");
+        fs::write(
+            &script_path,
+            r#"import json
+import sys
+
+
+def read_message():
+    headers = {}
+    while True:
+        line = sys.stdin.buffer.readline()
+        if not line:
+            return None
+        if line == b"\r\n":
+            break
+        key, value = line.decode("utf-8").split(":", 1)
+        headers[key.lower()] = value.strip()
+    length = int(headers["content-length"])
+    body = sys.stdin.buffer.read(length)
+    return json.loads(body)
+
+
+def write_message(payload):
+    raw = json.dumps(payload).encode("utf-8")
+    sys.stdout.buffer.write(f"Content-Length: {len(raw)}\r\n\r\n".encode("utf-8"))
+    sys.stdout.buffer.write(raw)
+    sys.stdout.buffer.flush()
+
+
+while True:
+    message = read_message()
+    if message is None:
+        break
+
+    method = message.get("method")
+    if method == "initialize":
+        write_message({
+            "jsonrpc": "2.0",
+            "id": message["id"],
+            "result": {
