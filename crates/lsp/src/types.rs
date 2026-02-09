@@ -53,3 +53,57 @@ impl WorkspaceDiagnostics {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SymbolLocation {
     pub path: PathBuf,
+    pub range: Range,
+}
+
+impl SymbolLocation {
+    #[must_use]
+    pub fn start_line(&self) -> u32 {
+        self.range.start.line + 1
+    }
+
+    #[must_use]
+    pub fn start_character(&self) -> u32 {
+        self.range.start.character + 1
+    }
+}
+
+impl Display for SymbolLocation {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}:{}:{}",
+            self.path.display(),
+            self.start_line(),
+            self.start_character()
+        )
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LspContextEnrichment {
+    pub file_path: PathBuf,
+    pub diagnostics: WorkspaceDiagnostics,
+    pub definitions: Vec<SymbolLocation>,
+    pub references: Vec<SymbolLocation>,
+}
+
+impl LspContextEnrichment {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.diagnostics.is_empty() && self.definitions.is_empty() && self.references.is_empty()
+    }
+
+    #[must_use]
+    pub fn render_prompt_section(&self) -> String {
+        const MAX_RENDERED_DIAGNOSTICS: usize = 12;
+        const MAX_RENDERED_LOCATIONS: usize = 12;
+
+        let mut lines = vec!["# LSP context".to_string()];
+        lines.push(format!(" - Focus file: {}", self.file_path.display()));
+        lines.push(format!(
+            " - Workspace diagnostics: {} across {} file(s)",
+            self.diagnostics.total_diagnostics(),
+            self.diagnostics.files.len()
+        ));
+
