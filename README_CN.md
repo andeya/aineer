@@ -41,3 +41,24 @@ brew install andeya/tap/codineer
 ```
 
 ### 认证
+
+```bash
+# Anthropic (Claude)
+export ANTHROPIC_API_KEY="sk-ant-..."
+
+# xAI (Grok)
+export XAI_API_KEY="xai-..."
+
+# OpenAI
+export OPENAI_API_KEY="sk-..."
+
+# 或使用 Anthropic OAuth：
+codineer login
+```
+
+### 运行
+
+```bash
+# 交互式 REPL
+codineer
+
