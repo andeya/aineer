@@ -40,3 +40,45 @@ impl LspManager {
         }
 
         Ok(Self {
+            server_configs: configs_by_name,
+            extension_map,
+            clients: Mutex::new(BTreeMap::new()),
+        })
+    }
+
+    #[must_use]
+    pub fn supports_path(&self, path: &Path) -> bool {
+        path.extension().is_some_and(|extension| {
+            let normalized = normalize_extension(extension.to_string_lossy().as_ref());
+            self.extension_map.contains_key(&normalized)
+        })
+    }
+
+    pub async fn open_document(&self, path: &Path, text: &str) -> Result<(), LspError> {
+        self.client_for_path(path)
+            .await?
+            .open_document(path, text)
+            .await
+    }
+
+    pub async fn sync_document_from_disk(&self, path: &Path) -> Result<(), LspError> {
+        let contents = std::fs::read_to_string(path)?;
+        self.change_document(path, &contents).await?;
+        self.save_document(path).await
+    }
+
+    pub async fn change_document(&self, path: &Path, text: &str) -> Result<(), LspError> {
+        self.client_for_path(path)
+            .await?
+            .change_document(path, text)
+            .await
+    }
+
+    pub async fn save_document(&self, path: &Path) -> Result<(), LspError> {
+        self.client_for_path(path).await?.save_document(path).await
+    }
+
+    pub async fn close_document(&self, path: &Path) -> Result<(), LspError> {
+        self.client_for_path(path).await?.close_document(path).await
+    }
+
