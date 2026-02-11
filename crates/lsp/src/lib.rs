@@ -83,3 +83,45 @@ while True:
             "jsonrpc": "2.0",
             "id": message["id"],
             "result": {
+                "capabilities": {
+                    "definitionProvider": True,
+                    "referencesProvider": True,
+                    "textDocumentSync": 1,
+                }
+            },
+        })
+    elif method == "initialized":
+        continue
+    elif method == "textDocument/didOpen":
+        document = message["params"]["textDocument"]
+        write_message({
+            "jsonrpc": "2.0",
+            "method": "textDocument/publishDiagnostics",
+            "params": {
+                "uri": document["uri"],
+                "diagnostics": [
+                    {
+                        "range": {
+                            "start": {"line": 0, "character": 0},
+                            "end": {"line": 0, "character": 3},
+                        },
+                        "severity": 1,
+                        "source": "mock-server",
+                        "message": "mock error",
+                    }
+                ],
+            },
+        })
+    elif method == "textDocument/didChange":
+        continue
+    elif method == "textDocument/didSave":
+        continue
+    elif method == "textDocument/definition":
+        uri = message["params"]["textDocument"]["uri"]
+        write_message({
+            "jsonrpc": "2.0",
+            "id": message["id"],
+            "result": [
+                {
+                    "uri": uri,
+                    "range": {
