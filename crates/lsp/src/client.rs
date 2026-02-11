@@ -51,3 +51,55 @@ impl LspClient {
 
         let client = Self {
             config,
+            writer: Mutex::new(BufWriter::new(stdin)),
+            child: Mutex::new(child),
+            pending_requests: Arc::new(Mutex::new(BTreeMap::new())),
+            diagnostics: Arc::new(Mutex::new(BTreeMap::new())),
+            open_documents: Mutex::new(BTreeMap::new()),
+            next_request_id: AtomicI64::new(1),
+        };
+
+        client.spawn_reader(stdout);
+        if let Some(stderr) = stderr {
+            Self::spawn_stderr_drain(stderr);
+        }
+        if let Err(err) = client.initialize().await {
+            let _ = client.child.lock().await.kill().await;
+            return Err(err);
+        }
+        Ok(client)
+    }
+
+    pub(crate) async fn ensure_document_open(&self, path: &Path) -> Result<(), LspError> {
+        if self.is_document_open(path).await {
+            return Ok(());
+        }
+
+        let contents = std::fs::read_to_string(path)?;
+        self.open_document(path, &contents).await
+    }
+
+    pub(crate) async fn open_document(&self, path: &Path, text: &str) -> Result<(), LspError> {
+        let uri = file_url(path)?;
+        let language_id = self
+            .config
+            .language_id_for(path)
+            .ok_or_else(|| LspError::UnsupportedDocument(path.to_path_buf()))?;
+
+        self.notify(
+            "textDocument/didOpen",
+            json!({
+                "textDocument": {
+                    "uri": uri,
+                    "languageId": language_id,
+                    "version": 1,
+                    "text": text,
+                }
+            }),
+        )
+        .await?;
+
+        self.open_documents
+            .lock()
+            .await
+            .insert(path.to_path_buf(), 1);
