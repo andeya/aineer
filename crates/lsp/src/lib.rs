@@ -125,3 +125,45 @@ while True:
                 {
                     "uri": uri,
                     "range": {
+                        "start": {"line": 0, "character": 0},
+                        "end": {"line": 0, "character": 3},
+                    },
+                }
+            ],
+        })
+    elif method == "textDocument/references":
+        uri = message["params"]["textDocument"]["uri"]
+        write_message({
+            "jsonrpc": "2.0",
+            "id": message["id"],
+            "result": [
+                {
+                    "uri": uri,
+                    "range": {
+                        "start": {"line": 0, "character": 0},
+                        "end": {"line": 0, "character": 3},
+                    },
+                },
+                {
+                    "uri": uri,
+                    "range": {
+                        "start": {"line": 1, "character": 4},
+                        "end": {"line": 1, "character": 7},
+                    },
+                },
+            ],
+        })
+    elif method == "shutdown":
+        write_message({"jsonrpc": "2.0", "id": message["id"], "result": None})
+    elif method == "exit":
+        break
+"#,
+        )
+        .expect("mock server should be written");
+        script_path
+    }
+
+    async fn wait_for_diagnostics(manager: &LspManager) {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if manager
