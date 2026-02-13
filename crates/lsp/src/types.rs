@@ -216,3 +216,111 @@ mod tests {
 
     #[test]
     fn workspace_diagnostics_counts_total() {
+        let diag = WorkspaceDiagnostics {
+            files: vec![
+                FileDiagnostics {
+                    path: PathBuf::from("/a.rs"),
+                    uri: "file:///a.rs".to_string(),
+                    diagnostics: vec![Diagnostic::default(), Diagnostic::default()],
+                },
+                FileDiagnostics {
+                    path: PathBuf::from("/b.rs"),
+                    uri: "file:///b.rs".to_string(),
+                    diagnostics: vec![Diagnostic::default()],
+                },
+            ],
+        };
+        assert_eq!(diag.total_diagnostics(), 3);
+        assert!(!diag.is_empty());
+        assert!(WorkspaceDiagnostics::default().is_empty());
+    }
+
+    #[test]
+    fn context_enrichment_renders_prompt_section_with_diagnostics() {
+        let enrichment = LspContextEnrichment {
+            file_path: PathBuf::from("/src/lib.rs"),
+            diagnostics: WorkspaceDiagnostics {
+                files: vec![FileDiagnostics {
+                    path: PathBuf::from("/src/lib.rs"),
+                    uri: "file:///src/lib.rs".to_string(),
+                    diagnostics: vec![Diagnostic {
+                        message: "unused variable".to_string(),
+                        severity: Some(DiagnosticSeverity::WARNING),
+                        range: Range {
+                            start: Position::new(4, 0),
+                            end: Position::new(4, 5),
+                        },
+                        ..Diagnostic::default()
+                    }],
+                }],
+            },
+            definitions: vec![SymbolLocation {
+                path: PathBuf::from("/src/lib.rs"),
+                range: Range {
+                    start: Position::new(0, 0),
+                    end: Position::new(0, 5),
+                },
+            }],
+            references: vec![],
+        };
+        let rendered = enrichment.render_prompt_section();
+        assert!(rendered.contains("# LSP context"));
+        assert!(rendered.contains("[warning]"));
+        assert!(rendered.contains("unused variable"));
+        assert!(rendered.contains("Definitions:"));
+        assert!(!rendered.contains("References:"));
+    }
+
+    #[test]
+    fn empty_enrichment_reports_empty() {
+        let empty = LspContextEnrichment::default();
+        assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn severity_labels_are_correct() {
+        assert_eq!(
+            diagnostic_severity_label(Some(DiagnosticSeverity::ERROR)),
+            "error"
+        );
+        assert_eq!(
+            diagnostic_severity_label(Some(DiagnosticSeverity::WARNING)),
+            "warning"
+        );
+        assert_eq!(
+            diagnostic_severity_label(Some(DiagnosticSeverity::INFORMATION)),
+            "info"
+        );
+        assert_eq!(
+            diagnostic_severity_label(Some(DiagnosticSeverity::HINT)),
+            "hint"
+        );
+        assert_eq!(diagnostic_severity_label(None), "unknown");
+    }
+
+    #[test]
+    fn language_id_for_maps_configured_extensions() {
+        let config = LspServerConfig {
+            name: "test-server".to_string(),
+            command: "echo".to_string(),
+            args: vec![],
+            env: BTreeMap::new(),
+            workspace_root: PathBuf::from("/workspace"),
+            initialization_options: None,
+            extension_to_language: BTreeMap::from([
+                (".rs".to_string(), "rust".to_string()),
+                (".py".to_string(), "python".to_string()),
+            ]),
+        };
+        assert_eq!(
+            config.language_id_for(Path::new("main.rs")),
+            Some("rust")
+        );
+        assert_eq!(
+            config.language_id_for(Path::new("script.py")),
+            Some("python")
+        );
+        assert_eq!(config.language_id_for(Path::new("style.css")), None);
+        assert_eq!(config.language_id_for(Path::new("Makefile")), None);
+    }
+}
