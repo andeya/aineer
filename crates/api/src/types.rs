@@ -108,3 +108,57 @@ pub struct MessageResponse {
     pub role: String,
     pub content: Vec<OutputContentBlock>,
     pub model: String,
+    #[serde(default)]
+    pub stop_reason: Option<String>,
+    #[serde(default)]
+    pub stop_sequence: Option<String>,
+    pub usage: Usage,
+    #[serde(default)]
+    pub request_id: Option<String>,
+}
+
+impl MessageResponse {
+    #[must_use]
+    pub fn total_tokens(&self) -> u32 {
+        self.usage.total_tokens()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum OutputContentBlock {
+    Text {
+        text: String,
+    },
+    ToolUse {
+        id: String,
+        name: String,
+        input: Value,
+    },
+    Thinking {
+        #[serde(default)]
+        thinking: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        signature: Option<String>,
+    },
+    RedactedThinking {
+        data: Value,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Usage {
+    pub input_tokens: u32,
+    #[serde(default)]
+    pub cache_creation_input_tokens: u32,
+    #[serde(default)]
+    pub cache_read_input_tokens: u32,
+    pub output_tokens: u32,
+}
+
+impl Usage {
+    #[must_use]
+    pub const fn total_tokens(&self) -> u32 {
+        self.input_tokens + self.output_tokens
+    }
+}
