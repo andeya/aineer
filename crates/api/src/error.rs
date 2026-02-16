@@ -88,3 +88,48 @@ impl Display for ApiError {
                 ..
             } => match (error_type, message) {
                 (Some(error_type), Some(message)) => {
+                    write!(f, "api returned {status} ({error_type}): {message}")
+                }
+                _ => write!(f, "api returned {status}: {body}"),
+            },
+            Self::RetriesExhausted {
+                attempts,
+                last_error,
+            } => write!(f, "api failed after {attempts} attempts: {last_error}"),
+            Self::InvalidSseFrame(message) => write!(f, "invalid sse frame: {message}"),
+            Self::BackoffOverflow {
+                attempt,
+                base_delay,
+            } => write!(
+                f,
+                "retry backoff overflowed on attempt {attempt} with base delay {base_delay:?}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ApiError {}
+
+impl From<reqwest::Error> for ApiError {
+    fn from(value: reqwest::Error) -> Self {
+        Self::Http(value)
+    }
+}
+
+impl From<std::io::Error> for ApiError {
+    fn from(value: std::io::Error) -> Self {
+        Self::Io(value)
+    }
+}
+
+impl From<serde_json::Error> for ApiError {
+    fn from(value: serde_json::Error) -> Self {
+        Self::Json(value)
+    }
+}
+
+impl From<VarError> for ApiError {
+    fn from(value: VarError) -> Self {
+        Self::InvalidApiKeyEnv(value)
+    }
+}
