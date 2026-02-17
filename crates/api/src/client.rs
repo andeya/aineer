@@ -34,3 +34,38 @@ impl ProviderClient {
         model: &str,
         default_auth: Option<AuthSource>,
     ) -> Result<Self, ApiError> {
+        let resolved_model = providers::resolve_model_alias(model);
+        match providers::detect_provider_kind(&resolved_model) {
+            ProviderKind::CodineerApi => Ok(Self::CodineerApi(match default_auth {
+                Some(auth) => CodineerApiClient::from_auth(auth),
+                None => CodineerApiClient::from_env()?,
+            })),
+            ProviderKind::Xai => Ok(Self::Xai(OpenAiCompatClient::from_env(
+                OpenAiCompatConfig::xai(),
+            )?)),
+            ProviderKind::OpenAi => Ok(Self::OpenAi(OpenAiCompatClient::from_env(
+                OpenAiCompatConfig::openai(),
+            )?)),
+        }
+    }
+
+    #[must_use]
+    pub const fn provider_kind(&self) -> ProviderKind {
+        match self {
+            Self::CodineerApi(_) => ProviderKind::CodineerApi,
+            Self::Xai(_) => ProviderKind::Xai,
+            Self::OpenAi(_) => ProviderKind::OpenAi,
+        }
+    }
+
+    pub async fn send_message(
+        &self,
+        request: &MessageRequest,
+    ) -> Result<MessageResponse, ApiError> {
+        match self {
+            Self::CodineerApi(client) => send_via_provider(client, request).await,
+            Self::Xai(client) | Self::OpenAi(client) => send_via_provider(client, request).await,
+        }
+    }
+
+    pub async fn stream_message(
