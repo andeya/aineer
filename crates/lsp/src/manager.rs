@@ -82,3 +82,45 @@ impl LspManager {
         self.client_for_path(path).await?.close_document(path).await
     }
 
+    pub async fn go_to_definition(
+        &self,
+        path: &Path,
+        position: Position,
+    ) -> Result<Vec<SymbolLocation>, LspError> {
+        let mut locations = self
+            .client_for_path(path)
+            .await?
+            .go_to_definition(path, position)
+            .await?;
+        dedupe_locations(&mut locations);
+        Ok(locations)
+    }
+
+    pub async fn find_references(
+        &self,
+        path: &Path,
+        position: Position,
+        include_declaration: bool,
+    ) -> Result<Vec<SymbolLocation>, LspError> {
+        let mut locations = self
+            .client_for_path(path)
+            .await?
+            .find_references(path, position, include_declaration)
+            .await?;
+        dedupe_locations(&mut locations);
+        Ok(locations)
+    }
+
+    pub async fn collect_workspace_diagnostics(&self) -> Result<WorkspaceDiagnostics, LspError> {
+        let clients = self
+            .clients
+            .lock()
+            .await
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut files = Vec::new();
+
+        for client in clients {
+            for (uri, diagnostics) in client.diagnostics_snapshot().await {
+                let Ok(path) = url::Url::parse(&uri).and_then(|url| {
