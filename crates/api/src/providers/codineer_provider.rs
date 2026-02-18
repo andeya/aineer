@@ -57,3 +57,120 @@ impl AuthSource {
             Self::None | Self::BearerToken(_) => None,
         }
     }
+
+    #[must_use]
+    pub fn bearer_token(&self) -> Option<&str> {
+        match self {
+            Self::BearerToken(token)
+            | Self::ApiKeyAndBearer {
+                bearer_token: token,
+                ..
+            } => Some(token),
+            Self::None | Self::ApiKey(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub fn masked_authorization_header(&self) -> &'static str {
+        if self.bearer_token().is_some() {
+            "Bearer [REDACTED]"
+        } else {
+            "<absent>"
+        }
+    }
+
+    pub fn apply(&self, mut request_builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        if let Some(api_key) = self.api_key() {
+            request_builder = request_builder.header("x-api-key", api_key);
+        }
+        if let Some(token) = self.bearer_token() {
+            request_builder = request_builder.bearer_auth(token);
+        }
+        request_builder
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct OAuthTokenSet {
+    pub access_token: String,
+    pub refresh_token: Option<String>,
+    pub expires_at: Option<u64>,
+    #[serde(default)]
+    pub scopes: Vec<String>,
+}
+
+impl From<OAuthTokenSet> for AuthSource {
+    fn from(value: OAuthTokenSet) -> Self {
+        Self::BearerToken(value.access_token)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CodineerApiClient {
+    http: reqwest::Client,
+    auth: AuthSource,
+    base_url: String,
+    max_retries: u32,
+    initial_backoff: Duration,
+    max_backoff: Duration,
+}
+
+impl CodineerApiClient {
+    #[must_use]
+    pub fn new(api_key: impl Into<String>) -> Self {
+        Self {
+            http: reqwest::Client::new(),
+            auth: AuthSource::ApiKey(api_key.into()),
+            base_url: DEFAULT_BASE_URL.to_string(),
+            max_retries: DEFAULT_MAX_RETRIES,
+            initial_backoff: DEFAULT_INITIAL_BACKOFF,
+            max_backoff: DEFAULT_MAX_BACKOFF,
+        }
+    }
+
+    #[must_use]
+    pub fn from_auth(auth: AuthSource) -> Self {
+        Self {
+            http: reqwest::Client::new(),
+            auth,
+            base_url: DEFAULT_BASE_URL.to_string(),
+            max_retries: DEFAULT_MAX_RETRIES,
+            initial_backoff: DEFAULT_INITIAL_BACKOFF,
+            max_backoff: DEFAULT_MAX_BACKOFF,
+        }
+    }
+
+    pub fn from_env() -> Result<Self, ApiError> {
+        Ok(Self::from_auth(AuthSource::from_env_or_saved()?).with_base_url(read_base_url()))
+    }
+
+    #[must_use]
+    pub fn with_auth_source(mut self, auth: AuthSource) -> Self {
+        self.auth = auth;
+        self
+    }
+
+    #[must_use]
+    pub fn with_auth_token(mut self, auth_token: Option<String>) -> Self {
+        match (
+            self.auth.api_key().map(ToOwned::to_owned),
+            auth_token.filter(|token| !token.is_empty()),
+        ) {
+            (Some(api_key), Some(bearer_token)) => {
+                self.auth = AuthSource::ApiKeyAndBearer {
+                    api_key,
+                    bearer_token,
+                };
+            }
+            (Some(api_key), None) => {
+                self.auth = AuthSource::ApiKey(api_key);
+            }
+            (None, Some(bearer_token)) => {
+                self.auth = AuthSource::BearerToken(bearer_token);
+            }
+            (None, None) => {
+                self.auth = AuthSource::None;
+            }
+        }
+        self
+    }
