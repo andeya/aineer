@@ -243,3 +243,84 @@ pub fn glob_search(pattern: &str, path: Option<&str>) -> io::Result<GlobSearchOu
             .and_then(|metadata| metadata.modified())
             .ok()
             .map(Reverse)
+    });
+
+    let truncated = matches.len() > 100;
+    let filenames = matches
+        .into_iter()
+        .take(100)
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+
+    Ok(GlobSearchOutput {
+        duration_ms: started.elapsed().as_millis(),
+        num_files: filenames.len(),
+        filenames,
+        truncated,
+    })
+}
+
+pub fn grep_search(input: &GrepSearchInput) -> io::Result<GrepSearchOutput> {
+    let base_path = input
+        .path
+        .as_deref()
+        .map(normalize_path)
+        .transpose()?
+        .unwrap_or(std::env::current_dir()?);
+
+    let regex = RegexBuilder::new(&input.pattern)
+        .case_insensitive(input.case_insensitive.unwrap_or(false))
+        .dot_matches_new_line(input.multiline.unwrap_or(false))
+        .build()
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))?;
+
+    let glob_filter = input
+        .glob
+        .as_deref()
+        .map(Pattern::new)
+        .transpose()
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))?;
+    let file_type = input.file_type.as_deref();
+    let output_mode = input
+        .output_mode
+        .clone()
+        .unwrap_or_else(|| String::from("files_with_matches"));
+    let context = input.context.or(input.context_short).unwrap_or(0);
+
+    let mut filenames = Vec::new();
+    let mut content_lines = Vec::new();
+    let mut total_matches = 0usize;
+
+    for file_path in collect_search_files(&base_path)? {
+        if !matches_optional_filters(&file_path, glob_filter.as_ref(), file_type) {
+            continue;
+        }
+
+        let Ok(file_contents) = fs::read_to_string(&file_path) else {
+            continue;
+        };
+
+        if output_mode == "count" {
+            let count = regex.find_iter(&file_contents).count();
+            if count > 0 {
+                filenames.push(file_path.to_string_lossy().into_owned());
+                total_matches += count;
+            }
+            continue;
+        }
+
+        let lines: Vec<&str> = file_contents.lines().collect();
+        let mut matched_lines = Vec::new();
+        for (index, line) in lines.iter().enumerate() {
+            if regex.is_match(line) {
+                total_matches += 1;
+                matched_lines.push(index);
+            }
+        }
+
+        if matched_lines.is_empty() {
+            continue;
+        }
+
+        filenames.push(file_path.to_string_lossy().into_owned());
+        if output_mode == "content" {
