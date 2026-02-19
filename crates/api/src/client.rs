@@ -69,3 +69,38 @@ impl ProviderClient {
     }
 
     pub async fn stream_message(
+        &self,
+        request: &MessageRequest,
+    ) -> Result<MessageStream, ApiError> {
+        match self {
+            Self::CodineerApi(client) => stream_via_provider(client, request)
+                .await
+                .map(MessageStream::CodineerApi),
+            Self::Xai(client) | Self::OpenAi(client) => stream_via_provider(client, request)
+                .await
+                .map(MessageStream::OpenAiCompat),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum MessageStream {
+    CodineerApi(codineer_provider::MessageStream),
+    OpenAiCompat(openai_compat::MessageStream),
+}
+
+impl MessageStream {
+    #[must_use]
+    pub fn request_id(&self) -> Option<&str> {
+        match self {
+            Self::CodineerApi(stream) => stream.request_id(),
+            Self::OpenAiCompat(stream) => stream.request_id(),
+        }
+    }
+
+    pub async fn next_event(&mut self) -> Result<Option<StreamEvent>, ApiError> {
+        match self {
+            Self::CodineerApi(stream) => stream.next_event().await,
+            Self::OpenAiCompat(stream) => stream.next_event().await,
+        }
+    }
