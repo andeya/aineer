@@ -124,3 +124,87 @@ impl LspManager {
         for client in clients {
             for (uri, diagnostics) in client.diagnostics_snapshot().await {
                 let Ok(path) = url::Url::parse(&uri).and_then(|url| {
+                    url.to_file_path()
+                        .map_err(|()| url::ParseError::RelativeUrlWithoutBase)
+                }) else {
+                    continue;
+                };
+                if diagnostics.is_empty() {
+                    continue;
+                }
+                files.push(FileDiagnostics {
+                    path,
+                    uri,
+                    diagnostics,
+                });
+            }
+        }
+
+        files.sort_by(|left, right| left.path.cmp(&right.path));
+        Ok(WorkspaceDiagnostics { files })
+    }
+
+    pub async fn context_enrichment(
+        &self,
+        path: &Path,
+        position: Position,
+    ) -> Result<LspContextEnrichment, LspError> {
+        Ok(LspContextEnrichment {
+            file_path: path.to_path_buf(),
+            diagnostics: self.collect_workspace_diagnostics().await?,
+            definitions: self.go_to_definition(path, position).await?,
+            references: self.find_references(path, position, true).await?,
+        })
+    }
+
+    pub async fn shutdown(&self) -> Result<(), LspError> {
+        let mut clients = self.clients.lock().await;
+        let drained = clients.values().cloned().collect::<Vec<_>>();
+        clients.clear();
+        drop(clients);
+
+        for client in drained {
+            client.shutdown().await?;
+        }
+        Ok(())
+    }
+
+    async fn client_for_path(&self, path: &Path) -> Result<Arc<LspClient>, LspError> {
+        let extension = path
+            .extension()
+            .map(|extension| normalize_extension(extension.to_string_lossy().as_ref()))
+            .ok_or_else(|| LspError::UnsupportedDocument(path.to_path_buf()))?;
+        let server_name = self
+            .extension_map
+            .get(&extension)
+            .cloned()
+            .ok_or_else(|| LspError::UnsupportedDocument(path.to_path_buf()))?;
+
+        let mut clients = self.clients.lock().await;
+        if let Some(client) = clients.get(&server_name) {
+            return Ok(client.clone());
+        }
+
+        let config = self
+            .server_configs
+            .get(&server_name)
+            .cloned()
+            .ok_or_else(|| LspError::UnknownServer(server_name.clone()))?;
+        let client = Arc::new(LspClient::connect(config).await?);
+        clients.insert(server_name, client.clone());
+        Ok(client)
+    }
+}
+
+fn dedupe_locations(locations: &mut Vec<SymbolLocation>) {
+    let mut seen = BTreeSet::new();
+    locations.retain(|location| {
+        seen.insert((
+            location.path.clone(),
+            location.range.start.line,
+            location.range.start.character,
+            location.range.end.line,
+            location.range.end.character,
+        ))
+    });
+}
