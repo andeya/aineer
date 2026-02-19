@@ -217,3 +217,166 @@ pub enum StreamEvent {
     MessageStart(MessageStartEvent),
     MessageDelta(MessageDeltaEvent),
     ContentBlockStart(ContentBlockStartEvent),
+    ContentBlockDelta(ContentBlockDeltaEvent),
+    ContentBlockStop(ContentBlockStopEvent),
+    MessageStop(MessageStopEvent),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn message_request_serializes_with_streaming_and_tools() {
+        let request = MessageRequest {
+            model: "claude-opus-4-6".to_string(),
+            max_tokens: 4096,
+            messages: vec![InputMessage::user_text("hello")],
+            system: Some("you are helpful".to_string()),
+            tools: Some(vec![ToolDefinition {
+                name: "read_file".to_string(),
+                description: Some("Read a file".to_string()),
+                input_schema: json!({"type": "object", "properties": {"path": {"type": "string"}}}),
+            }]),
+            tool_choice: Some(ToolChoice::Auto),
+            stream: false,
+        };
+        let json = serde_json::to_string(&request).expect("serialize");
+        let deserialized: MessageRequest = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(deserialized, request);
+        assert!(!json.contains("\"stream\""));
+
+        let streaming = request.with_streaming();
+        let json = serde_json::to_string(&streaming).expect("serialize streaming");
+        assert!(json.contains("\"stream\":true"));
+    }
+
+    #[test]
+    fn input_content_block_round_trips_all_variants() {
+        let text = InputContentBlock::Text {
+            text: "hello".to_string(),
+        };
+        let tool_use = InputContentBlock::ToolUse {
+            id: "t1".to_string(),
+            name: "bash".to_string(),
+            input: json!({"command": "ls"}),
+        };
+        let tool_result = InputContentBlock::ToolResult {
+            tool_use_id: "t1".to_string(),
+            content: vec![ToolResultContentBlock::Text {
+                text: "output".to_string(),
+            }],
+            is_error: false,
+        };
+        for block in [text, tool_use, tool_result] {
+            let json = serde_json::to_value(&block).expect("serialize");
+            let back: InputContentBlock = serde_json::from_value(json).expect("deserialize");
+            assert_eq!(back, block);
+        }
+    }
+
+    #[test]
+    fn output_content_block_round_trips_including_thinking() {
+        let thinking = OutputContentBlock::Thinking {
+            thinking: "reasoning...".to_string(),
+            signature: Some("sig123".to_string()),
+        };
+        let redacted = OutputContentBlock::RedactedThinking {
+            data: json!([1, 2, 3]),
+        };
+        for block in [thinking, redacted] {
+            let json = serde_json::to_value(&block).expect("serialize");
+            let back: OutputContentBlock = serde_json::from_value(json).expect("deserialize");
+            assert_eq!(back, block);
+        }
+    }
+
+    #[test]
+    fn tool_choice_variants_serialize_with_type_tag() {
+        let auto: Value = serde_json::to_value(ToolChoice::Auto).expect("auto");
+        assert_eq!(auto["type"], "auto");
+        let any: Value = serde_json::to_value(ToolChoice::Any).expect("any");
+        assert_eq!(any["type"], "any");
+        let specific: Value = serde_json::to_value(ToolChoice::Tool {
+            name: "bash".to_string(),
+        })
+        .expect("tool");
+        assert_eq!(specific["type"], "tool");
+        assert_eq!(specific["name"], "bash");
+    }
+
+    #[test]
+    fn usage_computes_total_tokens() {
+        let usage = Usage {
+            input_tokens: 100,
+            cache_creation_input_tokens: 10,
+            cache_read_input_tokens: 5,
+            output_tokens: 50,
+        };
+        assert_eq!(usage.total_tokens(), 150);
+    }
+
+    #[test]
+    fn stream_event_deserializes_all_variants() {
+        let message_start = json!({
+            "type": "message_start",
+            "message": {
+                "id": "msg-1", "type": "message", "role": "assistant",
+                "content": [], "model": "claude-opus-4-6", "stop_reason": null,
+                "usage": {"input_tokens": 10, "output_tokens": 0}
+            }
+        });
+        let _: StreamEvent = serde_json::from_value(message_start).expect("message_start");
+
+        let content_block_delta = json!({
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "text_delta", "text": "Hello"}
+        });
+        let _: StreamEvent =
+            serde_json::from_value(content_block_delta).expect("content_block_delta");
+
+        let message_stop = json!({"type": "message_stop"});
+        let _: StreamEvent = serde_json::from_value(message_stop).expect("message_stop");
+    }
+
+    #[test]
+    fn content_block_delta_all_variants_round_trip() {
+        let variants = vec![
+            ContentBlockDelta::TextDelta {
+                text: "hello".to_string(),
+            },
+            ContentBlockDelta::InputJsonDelta {
+                partial_json: "{\"key\"".to_string(),
+            },
+            ContentBlockDelta::ThinkingDelta {
+                thinking: "hmm".to_string(),
+            },
+            ContentBlockDelta::SignatureDelta {
+                signature: "sig".to_string(),
+            },
+        ];
+        for delta in variants {
+            let json = serde_json::to_value(&delta).expect("serialize");
+            let back: ContentBlockDelta = serde_json::from_value(json).expect("deserialize");
+            assert_eq!(back, delta);
+        }
+    }
+
+    #[test]
+    fn message_response_deserializes_with_defaults() {
+        let json = json!({
+            "id": "msg-1",
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "text", "text": "hi"}],
+            "model": "claude-opus-4-6",
+            "usage": {"input_tokens": 10, "output_tokens": 5}
+        });
+        let response: MessageResponse = serde_json::from_value(json).expect("deserialize");
+        assert!(response.stop_reason.is_none());
+        assert!(response.request_id.is_none());
+        assert_eq!(response.total_tokens(), 15);
+    }
+}
