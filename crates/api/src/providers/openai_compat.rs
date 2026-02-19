@@ -174,3 +174,120 @@ impl OpenAiCompatClient {
 
             tokio::time::sleep(self.backoff_for_attempt(attempts)?).await;
         };
+
+        Err(ApiError::RetriesExhausted {
+            attempts,
+            last_error: Box::new(last_error),
+        })
+    }
+
+    async fn send_raw_request(
+        &self,
+        request: &MessageRequest,
+    ) -> Result<reqwest::Response, ApiError> {
+        let request_url = chat_completions_endpoint(&self.base_url);
+        self.http
+            .post(&request_url)
+            .header("content-type", "application/json")
+            .bearer_auth(&self.api_key)
+            .json(&build_chat_completion_request(request))
+            .send()
+            .await
+            .map_err(ApiError::from)
+    }
+
+    fn backoff_for_attempt(&self, attempt: u32) -> Result<Duration, ApiError> {
+        let Some(multiplier) = 1_u32.checked_shl(attempt.saturating_sub(1)) else {
+            return Err(ApiError::BackoffOverflow {
+                attempt,
+                base_delay: self.initial_backoff,
+            });
+        };
+        Ok(self
+            .initial_backoff
+            .checked_mul(multiplier)
+            .map_or(self.max_backoff, |delay| delay.min(self.max_backoff)))
+    }
+}
+
+impl Provider for OpenAiCompatClient {
+    type Stream = MessageStream;
+
+    fn send_message<'a>(
+        &'a self,
+        request: &'a MessageRequest,
+    ) -> ProviderFuture<'a, MessageResponse> {
+        Box::pin(async move { self.send_message(request).await })
+    }
+
+    fn stream_message<'a>(
+        &'a self,
+        request: &'a MessageRequest,
+    ) -> ProviderFuture<'a, Self::Stream> {
+        Box::pin(async move { self.stream_message(request).await })
+    }
+}
+
+#[derive(Debug)]
+pub struct MessageStream {
+    request_id: Option<String>,
+    response: reqwest::Response,
+    parser: OpenAiSseParser,
+    pending: VecDeque<StreamEvent>,
+    done: bool,
+    state: StreamState,
+}
+
+impl MessageStream {
+    #[must_use]
+    pub fn request_id(&self) -> Option<&str> {
+        self.request_id.as_deref()
+    }
+
+    pub async fn next_event(&mut self) -> Result<Option<StreamEvent>, ApiError> {
+        loop {
+            if let Some(event) = self.pending.pop_front() {
+                return Ok(Some(event));
+            }
+
+            if self.done {
+                self.pending.extend(self.state.finish());
+                if let Some(event) = self.pending.pop_front() {
+                    return Ok(Some(event));
+                }
+                return Ok(None);
+            }
+
+            match self.response.chunk().await? {
+                Some(chunk) => {
+                    for parsed in self.parser.push(&chunk)? {
+                        self.pending.extend(self.state.ingest_chunk(parsed));
+                    }
+                }
+                None => {
+                    self.done = true;
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct OpenAiSseParser {
+    buffer: Vec<u8>,
+}
+
+impl OpenAiSseParser {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn push(&mut self, chunk: &[u8]) -> Result<Vec<ChatCompletionChunk>, ApiError> {
+        self.buffer.extend_from_slice(chunk);
+        let mut events = Vec::new();
+
+        while let Some(frame) = next_sse_frame(&mut self.buffer) {
+            if let Some(event) = parse_sse_frame(&frame)? {
+                events.push(event);
+            }
+        }
