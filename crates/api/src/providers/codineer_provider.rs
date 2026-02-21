@@ -232,3 +232,120 @@ impl CodineerApiClient {
             parser: SseParser::new(),
             pending: VecDeque::new(),
             done: false,
+        })
+    }
+
+    pub async fn exchange_oauth_code(
+        &self,
+        config: &OAuthConfig,
+        request: &OAuthTokenExchangeRequest,
+    ) -> Result<OAuthTokenSet, ApiError> {
+        let response = self
+            .http
+            .post(&config.token_url)
+            .header("content-type", "application/x-www-form-urlencoded")
+            .form(&request.form_params())
+            .send()
+            .await
+            .map_err(ApiError::from)?;
+        let response = expect_success(response).await?;
+        response
+            .json::<OAuthTokenSet>()
+            .await
+            .map_err(ApiError::from)
+    }
+
+    pub async fn refresh_oauth_token(
+        &self,
+        config: &OAuthConfig,
+        request: &OAuthRefreshRequest,
+    ) -> Result<OAuthTokenSet, ApiError> {
+        let response = self
+            .http
+            .post(&config.token_url)
+            .header("content-type", "application/x-www-form-urlencoded")
+            .form(&request.form_params())
+            .send()
+            .await
+            .map_err(ApiError::from)?;
+        let response = expect_success(response).await?;
+        response
+            .json::<OAuthTokenSet>()
+            .await
+            .map_err(ApiError::from)
+    }
+
+    async fn send_with_retry(
+        &self,
+        request: &MessageRequest,
+    ) -> Result<reqwest::Response, ApiError> {
+        let mut attempts = 0;
+        let mut last_error: Option<ApiError>;
+
+        loop {
+            attempts += 1;
+            match self.send_raw_request(request).await {
+                Ok(response) => match expect_success(response).await {
+                    Ok(response) => return Ok(response),
+                    Err(error) if error.is_retryable() && attempts <= self.max_retries + 1 => {
+                        last_error = Some(error);
+                    }
+                    Err(error) => return Err(error),
+                },
+                Err(error) if error.is_retryable() && attempts <= self.max_retries + 1 => {
+                    last_error = Some(error);
+                }
+                Err(error) => return Err(error),
+            }
+
+            if attempts > self.max_retries {
+                break;
+            }
+
+            tokio::time::sleep(self.backoff_for_attempt(attempts)?).await;
+        }
+
+        Err(ApiError::RetriesExhausted {
+            attempts,
+            last_error: Box::new(last_error.unwrap_or(ApiError::Auth(
+                "retry loop exited without capturing an error".into(),
+            ))),
+        })
+    }
+
+    async fn send_raw_request(
+        &self,
+        request: &MessageRequest,
+    ) -> Result<reqwest::Response, ApiError> {
+        let request_url = format!("{}/v1/messages", self.base_url.trim_end_matches('/'));
+        let request_builder = self
+            .http
+            .post(&request_url)
+            .header("anthropic-version", ANTHROPIC_VERSION)
+            .header("content-type", "application/json");
+        let mut request_builder = self.auth.apply(request_builder);
+
+        request_builder = request_builder.json(request);
+        request_builder.send().await.map_err(ApiError::from)
+    }
+
+    fn backoff_for_attempt(&self, attempt: u32) -> Result<Duration, ApiError> {
+        let Some(multiplier) = 1_u32.checked_shl(attempt.saturating_sub(1)) else {
+            return Err(ApiError::BackoffOverflow {
+                attempt,
+                base_delay: self.initial_backoff,
+            });
+        };
+        Ok(self
+            .initial_backoff
+            .checked_mul(multiplier)
+            .map_or(self.max_backoff, |delay| delay.min(self.max_backoff)))
+    }
+}
+
+impl AuthSource {
+    pub fn from_env_or_saved() -> Result<Self, ApiError> {
+        if let Some(api_key) = read_env_non_empty("ANTHROPIC_API_KEY")? {
+            return match read_env_non_empty("ANTHROPIC_AUTH_TOKEN")? {
+                Some(bearer_token) => Ok(Self::ApiKeyAndBearer {
+                    api_key,
