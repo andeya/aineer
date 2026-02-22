@@ -104,3 +104,38 @@ impl MessageStream {
             Self::OpenAiCompat(stream) => stream.next_event().await,
         }
     }
+}
+
+pub use codineer_provider::{
+    oauth_token_is_expired, resolve_saved_oauth_token, resolve_startup_auth_source, OAuthTokenSet,
+};
+#[must_use]
+pub fn read_base_url() -> String {
+    codineer_provider::read_base_url()
+}
+
+#[must_use]
+pub fn read_xai_base_url() -> String {
+    openai_compat::read_base_url(OpenAiCompatConfig::xai())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::providers::{detect_provider_kind, resolve_model_alias, ProviderKind};
+
+    #[test]
+    fn resolves_existing_and_grok_aliases() {
+        assert_eq!(resolve_model_alias("opus"), "claude-opus-4-6");
+        assert_eq!(resolve_model_alias("grok"), "grok-3");
+        assert_eq!(resolve_model_alias("grok-mini"), "grok-3-mini");
+    }
+
+    #[test]
+    fn provider_detection_prefers_model_family() {
+        assert_eq!(detect_provider_kind("grok-3"), ProviderKind::Xai);
+        assert_eq!(
+            detect_provider_kind("claude-sonnet-4-6"),
+            ProviderKind::CodineerApi
+        );
+    }
+}
