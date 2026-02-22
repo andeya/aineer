@@ -104,3 +104,24 @@ crates/
 ├── commands/         # 斜杠命令与 Agent/Skill 发现
 ├── lsp/              # Language Server Protocol 客户端
 ├── plugins/          # 插件系统与钩子
+├── runtime/          # 会话、配置、MCP、提示词、沙箱
+└── tools/            # AI 可调用的工具定义
+```
+
+## 开发
+
+```bash
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+```
+
+## 许可证
+
+[MIT](LICENSE)
+
+---
+
+<p align="center">
+  由 <a href="https://github.com/andeya">andeya</a> 使用 🦀 构建
+</p>
