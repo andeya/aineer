@@ -230,3 +230,81 @@ impl ConfigLoader {
 
         for entry in self.discover() {
             let Some(value) = read_optional_json_object(&entry.path)? else {
+                continue;
+            };
+            merge_mcp_servers(&mut mcp_servers, entry.source, &value, &entry.path)?;
+            deep_merge_objects(&mut merged, &value);
+            loaded_entries.push(entry);
+        }
+
+        let merged_value = JsonValue::Object(merged.clone());
+
+        let feature_config = RuntimeFeatureConfig {
+            hooks: parse_optional_hooks_config(&merged_value)?,
+            plugins: parse_optional_plugin_config(&merged_value)?,
+            mcp: McpConfigCollection {
+                servers: mcp_servers,
+            },
+            oauth: parse_optional_oauth_config(&merged_value, "merged settings.oauth")?,
+            model: parse_optional_model(&merged_value),
+            permission_mode: parse_optional_permission_mode(&merged_value)?,
+            sandbox: parse_optional_sandbox_config(&merged_value)?,
+        };
+
+        Ok(RuntimeConfig {
+            merged,
+            loaded_entries,
+            feature_config,
+        })
+    }
+}
+
+impl RuntimeConfig {
+    #[must_use]
+    pub fn empty() -> Self {
+        Self {
+            merged: BTreeMap::new(),
+            loaded_entries: Vec::new(),
+            feature_config: RuntimeFeatureConfig::default(),
+        }
+    }
+
+    #[must_use]
+    pub fn merged(&self) -> &BTreeMap<String, JsonValue> {
+        &self.merged
+    }
+
+    #[must_use]
+    pub fn loaded_entries(&self) -> &[ConfigEntry] {
+        &self.loaded_entries
+    }
+
+    #[must_use]
+    pub fn get(&self, key: &str) -> Option<&JsonValue> {
+        self.merged.get(key)
+    }
+
+    #[must_use]
+    pub fn as_json(&self) -> JsonValue {
+        JsonValue::Object(self.merged.clone())
+    }
+
+    #[must_use]
+    pub fn feature_config(&self) -> &RuntimeFeatureConfig {
+        &self.feature_config
+    }
+
+    #[must_use]
+    pub fn mcp(&self) -> &McpConfigCollection {
+        &self.feature_config.mcp
+    }
+
+    #[must_use]
+    pub fn hooks(&self) -> &RuntimeHookConfig {
+        &self.feature_config.hooks
+    }
+
+    #[must_use]
+    pub fn plugins(&self) -> &RuntimePluginConfig {
+        &self.feature_config.plugins
+    }
