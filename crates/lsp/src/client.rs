@@ -207,3 +207,159 @@ impl LspClient {
         &self,
         path: &Path,
         position: Position,
+        include_declaration: bool,
+    ) -> Result<Vec<SymbolLocation>, LspError> {
+        self.ensure_document_open(path).await?;
+        let response = self
+            .request::<Option<Vec<Location>>>(
+                "textDocument/references",
+                json!({
+                    "textDocument": { "uri": file_url(path)? },
+                    "position": position,
+                    "context": {
+                        "includeDeclaration": include_declaration,
+                    },
+                }),
+            )
+            .await?;
+
+        Ok(location_to_symbol_locations(response.unwrap_or_default()))
+    }
+
+    pub(crate) async fn diagnostics_snapshot(&self) -> BTreeMap<String, Vec<Diagnostic>> {
+        self.diagnostics.lock().await.clone()
+    }
+
+    pub(crate) async fn shutdown(&self) -> Result<(), LspError> {
+        let _ = self.request::<Value>("shutdown", json!({})).await;
+        let _ = self.notify("exit", Value::Null).await;
+
+        let mut child = self.child.lock().await;
+        if child.kill().await.is_err() {
+            let _ = child.wait().await;
+            return Ok(());
+        }
+        let _ = child.wait().await;
+        Ok(())
+    }
+
+    fn spawn_reader(&self, stdout: ChildStdout) {
+        let diagnostics = &self.diagnostics;
+        let pending_requests = &self.pending_requests;
+
+        let diagnostics = diagnostics.clone();
+        let pending_requests = pending_requests.clone();
+        tokio::spawn(async move {
+            let mut reader = BufReader::new(stdout);
+            let result = async {
+                while let Some(message) = read_message(&mut reader).await? {
+                    if let Some(id) = message.get("id").and_then(Value::as_i64) {
+                        let response = if let Some(error) = message.get("error") {
+                            Err(LspError::Protocol(error.to_string()))
+                        } else {
+                            Ok(message.get("result").cloned().unwrap_or(Value::Null))
+                        };
+
+                        if let Some(sender) = pending_requests.lock().await.remove(&id) {
+                            let _ = sender.send(response);
+                        }
+                        continue;
+                    }
+
+                    let Some(method) = message.get("method").and_then(Value::as_str) else {
+                        continue;
+                    };
+                    if method != "textDocument/publishDiagnostics" {
+                        continue;
+                    }
+
+                    let params = message.get("params").cloned().unwrap_or(Value::Null);
+                    let notification = serde_json::from_value::<PublishDiagnosticsParams>(params)?;
+                    let mut diagnostics_map = diagnostics.lock().await;
+                    if notification.diagnostics.is_empty() {
+                        diagnostics_map.remove(&notification.uri.to_string());
+                    } else {
+                        diagnostics_map
+                            .insert(notification.uri.to_string(), notification.diagnostics);
+                    }
+                }
+                Ok::<(), LspError>(())
+            }
+            .await;
+
+            if let Err(error) = result {
+                let mut pending = pending_requests.lock().await;
+                let drained = pending.keys().copied().collect::<Vec<_>>();
+                for id in drained {
+                    if let Some(sender) = pending.remove(&id) {
+                        let _ = sender.send(Err(LspError::Protocol(error.to_string())));
+                    }
+                }
+            }
+        });
+    }
+
+    fn spawn_stderr_drain<R>(stderr: R)
+    where
+        R: AsyncRead + Unpin + Send + 'static,
+    {
+        tokio::spawn(async move {
+            let mut reader = BufReader::new(stderr);
+            let mut sink = Vec::new();
+            let _ = reader.read_to_end(&mut sink).await;
+        });
+    }
+
+    async fn initialize(&self) -> Result<(), LspError> {
+        let workspace_uri = file_url(&self.config.workspace_root)?;
+        let _ = self
+            .request::<Value>(
+                "initialize",
+                json!({
+                    "processId": std::process::id(),
+                    "rootUri": workspace_uri,
+                    "rootPath": self.config.workspace_root,
+                    "workspaceFolders": [{
+                        "uri": workspace_uri,
+                        "name": self.config.name,
+                    }],
+                    "initializationOptions": self.config.initialization_options.clone().unwrap_or(Value::Null),
+                    "capabilities": {
+                        "textDocument": {
+                            "publishDiagnostics": {
+                                "relatedInformation": true,
+                            },
+                            "definition": {
+                                "linkSupport": true,
+                            },
+                            "references": {}
+                        },
+                        "workspace": {
+                            "configuration": false,
+                            "workspaceFolders": true,
+                        },
+                        "general": {
+                            "positionEncodings": ["utf-16"],
+                        }
+                    }
+                }),
+            )
+            .await?;
+        self.notify("initialized", json!({})).await
+    }
+
+    async fn request<T>(&self, method: &str, params: Value) -> Result<T, LspError>
+    where
+        T: for<'de> serde::Deserialize<'de>,
+    {
+        let id = self.next_request_id.fetch_add(1, Ordering::Relaxed);
+        let (sender, receiver) = oneshot::channel();
+        self.pending_requests.lock().await.insert(id, sender);
+
+        if let Err(error) = self
+            .send_message(&json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "method": method,
+                "params": params,
+            }))
