@@ -70,3 +70,75 @@ pub fn execute_bash(input: BashCommandInput) -> io::Result<BashCommandOutput> {
 
     if input.run_in_background.unwrap_or(false) {
         let mut child = prepare_command(&input.command, &cwd, &sandbox_status, false);
+        let child = child
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()?;
+
+        return Ok(BashCommandOutput {
+            stdout: String::new(),
+            stderr: String::new(),
+            raw_output_path: None,
+            interrupted: false,
+            is_image: None,
+            background_task_id: Some(child.id().to_string()),
+            backgrounded_by_user: Some(false),
+            assistant_auto_backgrounded: Some(false),
+            dangerously_disable_sandbox: input.dangerously_disable_sandbox,
+            return_code_interpretation: None,
+            no_output_expected: Some(true),
+            structured_content: None,
+            persisted_output_path: None,
+            persisted_output_size: None,
+            sandbox_status: Some(sandbox_status),
+        });
+    }
+
+    let runtime = Builder::new_current_thread().enable_all().build()?;
+    runtime.block_on(execute_bash_async(input, sandbox_status, cwd))
+}
+
+async fn execute_bash_async(
+    input: BashCommandInput,
+    sandbox_status: SandboxStatus,
+    cwd: std::path::PathBuf,
+) -> io::Result<BashCommandOutput> {
+    let mut command = prepare_tokio_command(&input.command, &cwd, &sandbox_status, true);
+
+    let output_result = if let Some(timeout_ms) = input.timeout {
+        let child = command
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()?;
+        match timeout(Duration::from_millis(timeout_ms), child.wait_with_output()).await {
+            Ok(result) => (result?, false),
+            Err(_) => {
+                return Ok(BashCommandOutput {
+                    stdout: String::new(),
+                    stderr: format!("Command exceeded timeout of {timeout_ms} ms"),
+                    raw_output_path: None,
+                    interrupted: true,
+                    is_image: None,
+                    background_task_id: None,
+                    backgrounded_by_user: None,
+                    assistant_auto_backgrounded: None,
+                    dangerously_disable_sandbox: input.dangerously_disable_sandbox,
+                    return_code_interpretation: Some(String::from("timeout")),
+                    no_output_expected: Some(true),
+                    structured_content: None,
+                    persisted_output_path: None,
+                    persisted_output_size: None,
+                    sandbox_status: Some(sandbox_status),
+                });
+            }
+        }
+    } else {
+        (command.output().await?, false)
+    };
+
+    let (output, interrupted) = output_result;
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    let no_output_expected = Some(stdout.trim().is_empty() && stderr.trim().is_empty());
