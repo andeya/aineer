@@ -290,3 +290,120 @@ impl CodineerApiClient {
                     Err(error) if error.is_retryable() && attempts <= self.max_retries + 1 => {
                         last_error = Some(error);
                     }
+                    Err(error) => return Err(error),
+                },
+                Err(error) if error.is_retryable() && attempts <= self.max_retries + 1 => {
+                    last_error = Some(error);
+                }
+                Err(error) => return Err(error),
+            }
+
+            if attempts > self.max_retries {
+                break;
+            }
+
+            tokio::time::sleep(self.backoff_for_attempt(attempts)?).await;
+        }
+
+        Err(ApiError::RetriesExhausted {
+            attempts,
+            last_error: Box::new(last_error.unwrap_or(ApiError::Auth(
+                "retry loop exited without capturing an error".into(),
+            ))),
+        })
+    }
+
+    async fn send_raw_request(
+        &self,
+        request: &MessageRequest,
+    ) -> Result<reqwest::Response, ApiError> {
+        let request_url = format!("{}/v1/messages", self.base_url.trim_end_matches('/'));
+        let request_builder = self
+            .http
+            .post(&request_url)
+            .header("anthropic-version", ANTHROPIC_VERSION)
+            .header("content-type", "application/json");
+        let mut request_builder = self.auth.apply(request_builder);
+
+        request_builder = request_builder.json(request);
+        request_builder.send().await.map_err(ApiError::from)
+    }
+
+    fn backoff_for_attempt(&self, attempt: u32) -> Result<Duration, ApiError> {
+        let Some(multiplier) = 1_u32.checked_shl(attempt.saturating_sub(1)) else {
+            return Err(ApiError::BackoffOverflow {
+                attempt,
+                base_delay: self.initial_backoff,
+            });
+        };
+        Ok(self
+            .initial_backoff
+            .checked_mul(multiplier)
+            .map_or(self.max_backoff, |delay| delay.min(self.max_backoff)))
+    }
+}
+
+impl AuthSource {
+    pub fn from_env_or_saved() -> Result<Self, ApiError> {
+        if let Some(api_key) = read_env_non_empty("ANTHROPIC_API_KEY")? {
+            return match read_env_non_empty("ANTHROPIC_AUTH_TOKEN")? {
+                Some(bearer_token) => Ok(Self::ApiKeyAndBearer {
+                    api_key,
+                    bearer_token,
+                }),
+                None => Ok(Self::ApiKey(api_key)),
+            };
+        }
+        if let Some(bearer_token) = read_env_non_empty("ANTHROPIC_AUTH_TOKEN")? {
+            return Ok(Self::BearerToken(bearer_token));
+        }
+        match load_saved_oauth_token() {
+            Ok(Some(token_set)) if oauth_token_is_expired(&token_set) => {
+                if token_set.refresh_token.is_some() {
+                    Err(ApiError::Auth(
+                        "saved OAuth token is expired; load runtime OAuth config to refresh it"
+                            .to_string(),
+                    ))
+                } else {
+                    Err(ApiError::ExpiredOAuthToken)
+                }
+            }
+            Ok(Some(token_set)) => Ok(Self::BearerToken(token_set.access_token)),
+            Ok(None) => Err(ApiError::missing_credentials(
+                "Anthropic",
+                &["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"],
+            )),
+            Err(error) => Err(error),
+        }
+    }
+}
+
+#[must_use]
+pub fn oauth_token_is_expired(token_set: &OAuthTokenSet) -> bool {
+    token_set
+        .expires_at
+        .is_some_and(|expires_at| expires_at <= now_unix_timestamp())
+}
+
+pub fn resolve_saved_oauth_token(config: &OAuthConfig) -> Result<Option<OAuthTokenSet>, ApiError> {
+    let Some(token_set) = load_saved_oauth_token()? else {
+        return Ok(None);
+    };
+    resolve_saved_oauth_token_set(config, token_set).map(Some)
+}
+
+pub fn has_auth_from_env_or_saved() -> Result<bool, ApiError> {
+    Ok(read_env_non_empty("ANTHROPIC_API_KEY")?.is_some()
+        || read_env_non_empty("ANTHROPIC_AUTH_TOKEN")?.is_some()
+        || load_saved_oauth_token()?.is_some())
+}
+
+pub fn resolve_startup_auth_source<F>(load_oauth_config: F) -> Result<AuthSource, ApiError>
+where
+    F: FnOnce() -> Result<Option<OAuthConfig>, ApiError>,
+{
+    if let Some(api_key) = read_env_non_empty("ANTHROPIC_API_KEY")? {
+        return match read_env_non_empty("ANTHROPIC_AUTH_TOKEN")? {
+            Some(bearer_token) => Ok(AuthSource::ApiKeyAndBearer {
+                api_key,
+                bearer_token,
