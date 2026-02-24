@@ -349,3 +349,120 @@ impl StreamState {
                     request_id: None,
                 },
             }));
+        }
+
+        if let Some(usage) = chunk.usage {
+            self.usage = Some(Usage {
+                input_tokens: usage.prompt_tokens,
+                cache_creation_input_tokens: 0,
+                cache_read_input_tokens: 0,
+                output_tokens: usage.completion_tokens,
+            });
+        }
+
+        for choice in chunk.choices {
+            if let Some(content) = choice.delta.content.filter(|value| !value.is_empty()) {
+                if self.text_phase == TextPhase::Pending {
+                    self.text_phase = TextPhase::Active;
+                    events.push(StreamEvent::ContentBlockStart(ContentBlockStartEvent {
+                        index: 0,
+                        content_block: OutputContentBlock::Text {
+                            text: String::new(),
+                        },
+                    }));
+                }
+                events.push(StreamEvent::ContentBlockDelta(ContentBlockDeltaEvent {
+                    index: 0,
+                    delta: ContentBlockDelta::TextDelta { text: content },
+                }));
+            }
+
+            for tool_call in choice.delta.tool_calls {
+                let state = self.tool_calls.entry(tool_call.index).or_default();
+                state.apply(tool_call);
+                let block_index = state.block_index();
+                if !state.started {
+                    if let Some(start_event) = state.start_event() {
+                        state.started = true;
+                        events.push(StreamEvent::ContentBlockStart(start_event));
+                    } else {
+                        continue;
+                    }
+                }
+                if let Some(delta_event) = state.delta_event() {
+                    events.push(StreamEvent::ContentBlockDelta(delta_event));
+                }
+                if choice.finish_reason.as_deref() == Some("tool_calls") && !state.stopped {
+                    state.stopped = true;
+                    events.push(StreamEvent::ContentBlockStop(ContentBlockStopEvent {
+                        index: block_index,
+                    }));
+                }
+            }
+
+            if let Some(finish_reason) = choice.finish_reason {
+                self.stop_reason = Some(normalize_finish_reason(&finish_reason));
+                if finish_reason == "tool_calls" {
+                    for state in self.tool_calls.values_mut() {
+                        if state.started && !state.stopped {
+                            state.stopped = true;
+                            events.push(StreamEvent::ContentBlockStop(ContentBlockStopEvent {
+                                index: state.block_index(),
+                            }));
+                        }
+                    }
+                }
+            }
+        }
+
+        events
+    }
+
+    fn finish(&mut self) -> Vec<StreamEvent> {
+        if self.finished {
+            return Vec::new();
+        }
+        self.finished = true;
+
+        let mut events = Vec::new();
+        if self.text_phase == TextPhase::Active {
+            self.text_phase = TextPhase::Done;
+            events.push(StreamEvent::ContentBlockStop(ContentBlockStopEvent {
+                index: 0,
+            }));
+        }
+
+        for state in self.tool_calls.values_mut() {
+            if !state.started {
+                if let Some(start_event) = state.start_event() {
+                    state.started = true;
+                    events.push(StreamEvent::ContentBlockStart(start_event));
+                    if let Some(delta_event) = state.delta_event() {
+                        events.push(StreamEvent::ContentBlockDelta(delta_event));
+                    }
+                }
+            }
+            if state.started && !state.stopped {
+                state.stopped = true;
+                events.push(StreamEvent::ContentBlockStop(ContentBlockStopEvent {
+                    index: state.block_index(),
+                }));
+            }
+        }
+
+        if self.message_started {
+            events.push(StreamEvent::MessageDelta(MessageDeltaEvent {
+                delta: MessageDelta {
+                    stop_reason: Some(
+                        self.stop_reason
+                            .clone()
+                            .unwrap_or_else(|| "end_turn".to_string()),
+                    ),
+                    stop_sequence: None,
+                },
+                usage: self.usage.clone().unwrap_or(Usage {
+                    input_tokens: 0,
+                    cache_creation_input_tokens: 0,
+                    cache_read_input_tokens: 0,
+                    output_tokens: 0,
+                }),
