@@ -407,3 +407,120 @@ where
             Some(bearer_token) => Ok(AuthSource::ApiKeyAndBearer {
                 api_key,
                 bearer_token,
+            }),
+            None => Ok(AuthSource::ApiKey(api_key)),
+        };
+    }
+    if let Some(bearer_token) = read_env_non_empty("ANTHROPIC_AUTH_TOKEN")? {
+        return Ok(AuthSource::BearerToken(bearer_token));
+    }
+
+    let Some(token_set) = load_saved_oauth_token()? else {
+        return Err(ApiError::missing_credentials(
+            "Anthropic",
+            &["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"],
+        ));
+    };
+    if !oauth_token_is_expired(&token_set) {
+        return Ok(AuthSource::BearerToken(token_set.access_token));
+    }
+    if token_set.refresh_token.is_none() {
+        return Err(ApiError::ExpiredOAuthToken);
+    }
+
+    let Some(config) = load_oauth_config()? else {
+        return Err(ApiError::Auth(
+            "saved OAuth token is expired; runtime OAuth config is missing".to_string(),
+        ));
+    };
+    Ok(AuthSource::from(resolve_saved_oauth_token_set(
+        &config, token_set,
+    )?))
+}
+
+fn resolve_saved_oauth_token_set(
+    config: &OAuthConfig,
+    token_set: OAuthTokenSet,
+) -> Result<OAuthTokenSet, ApiError> {
+    if !oauth_token_is_expired(&token_set) {
+        return Ok(token_set);
+    }
+    let Some(refresh_token) = token_set.refresh_token.clone() else {
+        return Err(ApiError::ExpiredOAuthToken);
+    };
+    let client = CodineerApiClient::from_auth(AuthSource::None).with_base_url(read_base_url());
+    let refreshed = client_runtime_block_on(async {
+        client
+            .refresh_oauth_token(
+                config,
+                &OAuthRefreshRequest::from_config(
+                    config,
+                    refresh_token,
+                    Some(token_set.scopes.clone()),
+                ),
+            )
+            .await
+    })?;
+    let resolved = OAuthTokenSet {
+        access_token: refreshed.access_token,
+        refresh_token: refreshed.refresh_token.or(token_set.refresh_token),
+        expires_at: refreshed.expires_at,
+        scopes: refreshed.scopes,
+    };
+    save_oauth_credentials(&runtime::OAuthTokenSet {
+        access_token: resolved.access_token.clone(),
+        refresh_token: resolved.refresh_token.clone(),
+        expires_at: resolved.expires_at,
+        scopes: resolved.scopes.clone(),
+    })
+    .map_err(ApiError::from)?;
+    Ok(resolved)
+}
+
+fn client_runtime_block_on<F, T>(future: F) -> Result<T, ApiError>
+where
+    F: std::future::Future<Output = Result<T, ApiError>>,
+{
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => tokio::task::block_in_place(|| handle.block_on(future)),
+        Err(_) => tokio::runtime::Runtime::new()
+            .map_err(ApiError::from)?
+            .block_on(future),
+    }
+}
+
+fn load_saved_oauth_token() -> Result<Option<OAuthTokenSet>, ApiError> {
+    let token_set = load_oauth_credentials().map_err(ApiError::from)?;
+    Ok(token_set.map(|token_set| OAuthTokenSet {
+        access_token: token_set.access_token,
+        refresh_token: token_set.refresh_token,
+        expires_at: token_set.expires_at,
+        scopes: token_set.scopes,
+    }))
+}
+
+fn now_unix_timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_secs())
+}
+
+fn read_env_non_empty(key: &str) -> Result<Option<String>, ApiError> {
+    match std::env::var(key) {
+        Ok(value) if !value.is_empty() => Ok(Some(value)),
+        Ok(_) | Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(error) => Err(ApiError::from(error)),
+    }
+}
+
+#[cfg(test)]
+fn read_api_key() -> Result<String, ApiError> {
+    let auth = AuthSource::from_env_or_saved()?;
+    auth.api_key()
+        .or_else(|| auth.bearer_token())
+        .map(ToOwned::to_owned)
+        .ok_or(ApiError::missing_credentials(
+            "Anthropic",
+            &["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"],
+        ))
+}
