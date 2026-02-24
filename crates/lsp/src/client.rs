@@ -363,3 +363,55 @@ impl LspClient {
                 "method": method,
                 "params": params,
             }))
+            .await
+        {
+            self.pending_requests.lock().await.remove(&id);
+            return Err(error);
+        }
+
+        let response = receiver
+            .await
+            .map_err(|_| LspError::Protocol(format!("request channel closed for {method}")))??;
+        Ok(serde_json::from_value(response)?)
+    }
+
+    async fn notify(&self, method: &str, params: Value) -> Result<(), LspError> {
+        self.send_message(&json!({
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params,
+        }))
+        .await
+    }
+
+    async fn send_message(&self, payload: &Value) -> Result<(), LspError> {
+        let body = serde_json::to_vec(payload)?;
+        let mut writer = self.writer.lock().await;
+        writer
+            .write_all(format!("Content-Length: {}\r\n\r\n", body.len()).as_bytes())
+            .await?;
+        writer.write_all(&body).await?;
+        writer.flush().await?;
+        Ok(())
+    }
+}
+
+async fn read_message<R>(reader: &mut BufReader<R>) -> Result<Option<Value>, LspError>
+where
+    R: AsyncRead + Unpin,
+{
+    let mut content_length = None;
+
+    loop {
+        let mut line = String::new();
+        let read = reader.read_line(&mut line).await?;
+        if read == 0 {
+            return Ok(None);
+        }
+
+        if line == "\r\n" {
+            break;
+        }
+
+        let trimmed = line.trim_end_matches(['\r', '\n']);
+        if let Some((name, value)) = trimmed.split_once(':') {
