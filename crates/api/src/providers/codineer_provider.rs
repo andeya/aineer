@@ -466,3 +466,119 @@ fn resolve_saved_oauth_token_set(
         refresh_token: refreshed.refresh_token.or(token_set.refresh_token),
         expires_at: refreshed.expires_at,
         scopes: refreshed.scopes,
+    };
+    save_oauth_credentials(&runtime::OAuthTokenSet {
+        access_token: resolved.access_token.clone(),
+        refresh_token: resolved.refresh_token.clone(),
+        expires_at: resolved.expires_at,
+        scopes: resolved.scopes.clone(),
+    })
+    .map_err(ApiError::from)?;
+    Ok(resolved)
+}
+
+fn client_runtime_block_on<F, T>(future: F) -> Result<T, ApiError>
+where
+    F: std::future::Future<Output = Result<T, ApiError>>,
+{
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => tokio::task::block_in_place(|| handle.block_on(future)),
+        Err(_) => tokio::runtime::Runtime::new()
+            .map_err(ApiError::from)?
+            .block_on(future),
+    }
+}
+
+fn load_saved_oauth_token() -> Result<Option<OAuthTokenSet>, ApiError> {
+    let token_set = load_oauth_credentials().map_err(ApiError::from)?;
+    Ok(token_set.map(|token_set| OAuthTokenSet {
+        access_token: token_set.access_token,
+        refresh_token: token_set.refresh_token,
+        expires_at: token_set.expires_at,
+        scopes: token_set.scopes,
+    }))
+}
+
+fn now_unix_timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_secs())
+}
+
+fn read_env_non_empty(key: &str) -> Result<Option<String>, ApiError> {
+    match std::env::var(key) {
+        Ok(value) if !value.is_empty() => Ok(Some(value)),
+        Ok(_) | Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(error) => Err(ApiError::from(error)),
+    }
+}
+
+#[cfg(test)]
+fn read_api_key() -> Result<String, ApiError> {
+    let auth = AuthSource::from_env_or_saved()?;
+    auth.api_key()
+        .or_else(|| auth.bearer_token())
+        .map(ToOwned::to_owned)
+        .ok_or(ApiError::missing_credentials(
+            "Anthropic",
+            &["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"],
+        ))
+}
+
+#[cfg(test)]
+fn read_auth_token() -> Option<String> {
+    read_env_non_empty("ANTHROPIC_AUTH_TOKEN")
+        .ok()
+        .and_then(std::convert::identity)
+}
+
+#[must_use]
+pub fn read_base_url() -> String {
+    std::env::var("ANTHROPIC_BASE_URL").unwrap_or_else(|_| DEFAULT_BASE_URL.to_string())
+}
+
+fn request_id_from_headers(headers: &reqwest::header::HeaderMap) -> Option<String> {
+    headers
+        .get(REQUEST_ID_HEADER)
+        .or_else(|| headers.get(ALT_REQUEST_ID_HEADER))
+        .and_then(|value| value.to_str().ok())
+        .map(ToOwned::to_owned)
+}
+
+impl Provider for CodineerApiClient {
+    type Stream = MessageStream;
+
+    fn send_message<'a>(
+        &'a self,
+        request: &'a MessageRequest,
+    ) -> ProviderFuture<'a, MessageResponse> {
+        Box::pin(async move { self.send_message(request).await })
+    }
+
+    fn stream_message<'a>(
+        &'a self,
+        request: &'a MessageRequest,
+    ) -> ProviderFuture<'a, Self::Stream> {
+        Box::pin(async move { self.stream_message(request).await })
+    }
+}
+
+#[derive(Debug)]
+pub struct MessageStream {
+    request_id: Option<String>,
+    response: reqwest::Response,
+    parser: SseParser,
+    pending: VecDeque<StreamEvent>,
+    done: bool,
+}
+
+impl MessageStream {
+    #[must_use]
+    pub fn request_id(&self) -> Option<&str> {
+        self.request_id.as_deref()
+    }
+
+    pub async fn next_event(&mut self) -> Result<Option<StreamEvent>, ApiError> {
+        loop {
+            if let Some(event) = self.pending.pop_front() {
+                return Ok(Some(event));
