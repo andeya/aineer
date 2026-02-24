@@ -95,3 +95,100 @@ async fn stream_message_parses_sse_events_with_tool_use() {
     );
     let server = spawn_server(
         state.clone(),
+        vec![http_response_with_headers(
+            "200 OK",
+            "text/event-stream",
+            sse,
+            &[("request-id", "req_stream_456")],
+        )],
+    )
+    .await;
+
+    let client = ApiClient::new("test-key")
+        .with_auth_token(Some("proxy-token".to_string()))
+        .with_base_url(server.base_url());
+    let mut stream = client
+        .stream_message(&sample_request(false))
+        .await
+        .expect("stream should start");
+
+    assert_eq!(stream.request_id(), Some("req_stream_456"));
+
+    let mut events = Vec::new();
+    while let Some(event) = stream
+        .next_event()
+        .await
+        .expect("stream event should parse")
+    {
+        events.push(event);
+    }
+
+    assert_eq!(events.len(), 6);
+    assert!(matches!(events[0], StreamEvent::MessageStart(_)));
+    assert!(matches!(
+        events[1],
+        StreamEvent::ContentBlockStart(ContentBlockStartEvent {
+            content_block: OutputContentBlock::ToolUse { .. },
+            ..
+        })
+    ));
+    assert!(matches!(
+        events[2],
+        StreamEvent::ContentBlockDelta(ContentBlockDeltaEvent {
+            delta: ContentBlockDelta::InputJsonDelta { .. },
+            ..
+        })
+    ));
+    assert!(matches!(events[3], StreamEvent::ContentBlockStop(_)));
+    assert!(matches!(
+        events[4],
+        StreamEvent::MessageDelta(MessageDeltaEvent { .. })
+    ));
+    assert!(matches!(events[5], StreamEvent::MessageStop(_)));
+
+    match &events[1] {
+        StreamEvent::ContentBlockStart(ContentBlockStartEvent {
+            content_block: OutputContentBlock::ToolUse { name, input, .. },
+            ..
+        }) => {
+            assert_eq!(name, "get_weather");
+            assert_eq!(input, &json!({}));
+        }
+        other => panic!("expected tool_use block, got {other:?}"),
+    }
+
+    let captured = state.lock().await;
+    let request = captured.first().expect("server should capture request");
+    assert!(request.body.contains("\"stream\":true"));
+}
+
+#[tokio::test]
+async fn retries_retryable_failures_before_succeeding() {
+    let state = Arc::new(Mutex::new(Vec::<CapturedRequest>::new()));
+    let server = spawn_server(
+        state.clone(),
+        vec![
+            http_response(
+                "429 Too Many Requests",
+                "application/json",
+                "{\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"slow down\"}}",
+            ),
+            http_response(
+                "200 OK",
+                "application/json",
+                "{\"id\":\"msg_retry\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Recovered\"}],\"model\":\"claude-sonnet-4-6\",\"stop_reason\":\"end_turn\",\"stop_sequence\":null,\"usage\":{\"input_tokens\":3,\"output_tokens\":2}}",
+            ),
+        ],
+    )
+    .await;
+
+    let client = ApiClient::new("test-key")
+        .with_base_url(server.base_url())
+        .with_retry_policy(2, Duration::from_millis(1), Duration::from_millis(2));
+
+    let response = client
+        .send_message(&sample_request(false))
+        .await
+        .expect("retry should eventually succeed");
+
+    assert_eq!(response.total_tokens(), 5);
