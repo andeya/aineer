@@ -192,3 +192,51 @@ async fn retries_retryable_failures_before_succeeding() {
         .expect("retry should eventually succeed");
 
     assert_eq!(response.total_tokens(), 5);
+    assert_eq!(state.lock().await.len(), 2);
+}
+
+#[tokio::test]
+async fn provider_client_dispatches_api_requests() {
+    let state = Arc::new(Mutex::new(Vec::<CapturedRequest>::new()));
+    let server = spawn_server(
+        state.clone(),
+        vec![http_response(
+            "200 OK",
+            "application/json",
+            "{\"id\":\"msg_provider\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Dispatched\"}],\"model\":\"claude-sonnet-4-6\",\"stop_reason\":\"end_turn\",\"stop_sequence\":null,\"usage\":{\"input_tokens\":3,\"output_tokens\":2}}",
+        )],
+    )
+    .await;
+
+    let client = ProviderClient::from_model_with_default_auth(
+        "claude-sonnet-4-6",
+        Some(AuthSource::ApiKey("test-key".to_string())),
+    )
+    .expect("api provider client should be constructed");
+    let client = match client {
+        ProviderClient::CodineerApi(client) => {
+            ProviderClient::CodineerApi(client.with_base_url(server.base_url()))
+        }
+        other => panic!("expected default provider, got {other:?}"),
+    };
+
+    let response = client
+        .send_message(&sample_request(false))
+        .await
+        .expect("provider-dispatched request should succeed");
+
+    assert_eq!(response.total_tokens(), 5);
+
+    let captured = state.lock().await;
+    let request = captured.first().expect("server should capture request");
+    assert_eq!(request.path, "/v1/messages");
+    assert_eq!(
+        request.headers.get("x-api-key").map(String::as_str),
+        Some("test-key")
+    );
+}
+
+#[tokio::test]
+async fn surfaces_retry_exhaustion_for_persistent_retryable_errors() {
+    let state = Arc::new(Mutex::new(Vec::<CapturedRequest>::new()));
+    let server = spawn_server(
