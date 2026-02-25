@@ -7,3 +7,12 @@ on:
   pull_request:
     branches:
       - main
+
+jobs:
+  rust:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
