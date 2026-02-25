@@ -582,3 +582,62 @@ impl MessageStream {
         loop {
             if let Some(event) = self.pending.pop_front() {
                 return Ok(Some(event));
+            }
+
+            if self.done {
+                let remaining = self.parser.finish()?;
+                self.pending.extend(remaining);
+                if let Some(event) = self.pending.pop_front() {
+                    return Ok(Some(event));
+                }
+                return Ok(None);
+            }
+
+            match self.response.chunk().await? {
+                Some(chunk) => {
+                    self.pending.extend(self.parser.push(&chunk)?);
+                }
+                None => {
+                    self.done = true;
+                }
+            }
+        }
+    }
+}
+
+async fn expect_success(response: reqwest::Response) -> Result<reqwest::Response, ApiError> {
+    let status = response.status();
+    if status.is_success() {
+        return Ok(response);
+    }
+
+    let body = response.text().await.unwrap_or_else(|_| String::new());
+    let parsed_error = serde_json::from_str::<ApiErrorEnvelope>(&body).ok();
+    let retryable = is_retryable_status(status);
+
+    Err(ApiError::Api {
+        status,
+        error_type: parsed_error
+            .as_ref()
+            .map(|error| error.error.error_type.clone()),
+        message: parsed_error
+            .as_ref()
+            .map(|error| error.error.message.clone()),
+        body,
+        retryable,
+    })
+}
+
+const fn is_retryable_status(status: reqwest::StatusCode) -> bool {
+    matches!(status.as_u16(), 408 | 409 | 429 | 500 | 502 | 503 | 504)
+}
+
+#[derive(Debug, Deserialize)]
+struct ApiErrorEnvelope {
+    error: ApiErrorBody,
+}
+
+#[derive(Debug, Deserialize)]
+struct ApiErrorBody {
+    #[serde(rename = "type")]
+    error_type: String,
