@@ -487,3 +487,84 @@ fn normalize_path_allow_missing(path: &str) -> io::Result<PathBuf> {
         std::env::current_dir()?.join(path)
     };
 
+    if let Ok(canonical) = candidate.canonicalize() {
+        enforce_workspace_boundary(&canonical)?;
+        return Ok(canonical);
+    }
+
+    if let Some(parent) = candidate.parent() {
+        let canonical_parent = parent
+            .canonicalize()
+            .unwrap_or_else(|_| parent.to_path_buf());
+        enforce_workspace_boundary(&canonical_parent)?;
+        if let Some(name) = candidate.file_name() {
+            return Ok(canonical_parent.join(name));
+        }
+    }
+
+    Ok(candidate)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::{edit_file, glob_search, grep_search, read_file, write_file, GrepSearchInput};
+
+    fn temp_path(name: &str) -> std::path::PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should move forward")
+            .as_nanos();
+        std::env::temp_dir().join(format!("codineer-native-{name}-{unique}"))
+    }
+
+    fn allow_temp_workspace() {
+        let tmp = std::env::temp_dir()
+            .canonicalize()
+            .unwrap_or_else(|_| std::env::temp_dir());
+        std::env::set_var("CODINEER_WORKSPACE_ROOT", tmp);
+    }
+
+    #[test]
+    fn reads_and_writes_files() {
+        allow_temp_workspace();
+        let path = temp_path("read-write.txt");
+        let write_output = write_file(path.to_string_lossy().as_ref(), "one\ntwo\nthree")
+            .expect("write should succeed");
+        assert_eq!(write_output.kind, "create");
+
+        let read_output = read_file(path.to_string_lossy().as_ref(), Some(1), Some(1))
+            .expect("read should succeed");
+        assert_eq!(read_output.file.content, "two");
+    }
+
+    #[test]
+    fn edits_file_contents() {
+        allow_temp_workspace();
+        let path = temp_path("edit.txt");
+        write_file(path.to_string_lossy().as_ref(), "alpha beta alpha")
+            .expect("initial write should succeed");
+        let output = edit_file(path.to_string_lossy().as_ref(), "alpha", "omega", true)
+            .expect("edit should succeed");
+        assert!(output.replace_all);
+    }
+
+    #[test]
+    fn globs_and_greps_directory() {
+        allow_temp_workspace();
+        let dir = temp_path("search-dir");
+        std::fs::create_dir_all(&dir).expect("directory should be created");
+        let file = dir.join("demo.rs");
+        write_file(
+            file.to_string_lossy().as_ref(),
+            "fn main() {\n println!(\"hello\");\n}\n",
+        )
+        .expect("file write should succeed");
+
+        let globbed = glob_search("**/*.rs", Some(dir.to_string_lossy().as_ref()))
+            .expect("glob should succeed");
+        assert_eq!(globbed.num_files, 1);
+
+        let grep_output = grep_search(&GrepSearchInput {
+            pattern: String::from("hello"),
