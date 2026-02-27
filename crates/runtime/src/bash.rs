@@ -142,3 +142,75 @@ async fn execute_bash_async(
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     let no_output_expected = Some(stdout.trim().is_empty() && stderr.trim().is_empty());
+    let return_code_interpretation = output.status.code().and_then(|code| {
+        if code == 0 {
+            None
+        } else {
+            Some(format!("exit_code:{code}"))
+        }
+    });
+
+    Ok(BashCommandOutput {
+        stdout,
+        stderr,
+        raw_output_path: None,
+        interrupted,
+        is_image: None,
+        background_task_id: None,
+        backgrounded_by_user: None,
+        assistant_auto_backgrounded: None,
+        dangerously_disable_sandbox: input.dangerously_disable_sandbox,
+        return_code_interpretation,
+        no_output_expected,
+        structured_content: None,
+        persisted_output_path: None,
+        persisted_output_size: None,
+        sandbox_status: Some(sandbox_status),
+    })
+}
+
+fn sandbox_status_for_input(input: &BashCommandInput, cwd: &std::path::Path) -> SandboxStatus {
+    let config = ConfigLoader::default_for(cwd).load().map_or_else(
+        |_| SandboxConfig::default(),
+        |runtime_config| runtime_config.sandbox().clone(),
+    );
+    let request = config.resolve_request(
+        input.dangerously_disable_sandbox.map(|disabled| !disabled),
+        input.namespace_restrictions,
+        input.isolate_network,
+        input.filesystem_mode,
+        input.allowed_mounts.clone(),
+    );
+    resolve_sandbox_status_for_request(&request, cwd)
+}
+
+fn prepare_command(
+    command: &str,
+    cwd: &std::path::Path,
+    sandbox_status: &SandboxStatus,
+    create_dirs: bool,
+) -> Command {
+    if create_dirs {
+        prepare_sandbox_dirs(cwd);
+    }
+
+    if let Some(launcher) = build_sandbox_command(command, cwd, sandbox_status) {
+        let mut prepared = Command::new(launcher.program);
+        prepared.args(launcher.args);
+        prepared.current_dir(cwd);
+        prepared.envs(launcher.env);
+        return prepared;
+    }
+
+    let mut prepared = Command::new("sh");
+    prepared.arg("-lc").arg(command).current_dir(cwd);
+    if sandbox_status.filesystem_active {
+        prepared.env("HOME", cwd.join(".sandbox-home"));
+        prepared.env("TMPDIR", cwd.join(".sandbox-tmp"));
+    }
+    prepared
+}
+
+fn prepare_tokio_command(
+    command: &str,
+    cwd: &std::path::Path,
