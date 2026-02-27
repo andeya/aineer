@@ -251,3 +251,45 @@ while True:
 
         // given
         let root = temp_dir("prompt");
+        fs::create_dir_all(root.join("src")).expect("workspace root should exist");
+        let script_path = write_mock_server_script(&root);
+        let source_path = root.join("src").join("lib.rs");
+        fs::write(&source_path, "pub fn answer() -> i32 { 42 }\n")
+            .expect("source file should exist");
+        let manager = LspManager::new(vec![LspServerConfig {
+            name: "rust-analyzer".to_string(),
+            command: python,
+            args: vec![script_path.display().to_string()],
+            env: BTreeMap::new(),
+            workspace_root: root.clone(),
+            initialization_options: None,
+            extension_to_language: BTreeMap::from([(".rs".to_string(), "rust".to_string())]),
+        }])
+        .expect("manager should build");
+        manager
+            .open_document(
+                &source_path,
+                &fs::read_to_string(&source_path).expect("source read should succeed"),
+            )
+            .await
+            .expect("document should open");
+        wait_for_diagnostics(&manager).await;
+
+        // when
+        let enrichment = manager
+            .context_enrichment(&source_path, Position::new(0, 0))
+            .await
+            .expect("context enrichment should succeed");
+        let rendered = enrichment.render_prompt_section();
+
+        // then
+        assert!(rendered.contains("# LSP context"));
+        assert!(rendered.contains("Workspace diagnostics: 1 across 1 file(s)"));
+        assert!(rendered.contains("Definitions:"));
+        assert!(rendered.contains("References:"));
+        assert!(rendered.contains("mock error"));
+
+        manager.shutdown().await.expect("shutdown should succeed");
+        fs::remove_dir_all(root).expect("temp workspace should be removed");
+    }
+}
