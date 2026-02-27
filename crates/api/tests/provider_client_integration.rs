@@ -41,3 +41,46 @@ fn provider_client_uses_explicit_auth_without_env_lookup() {
         Some(AuthSource::ApiKey("codineer-test-key".to_string())),
     )
     .expect("explicit auth should avoid env lookup");
+
+    assert_eq!(client.provider_kind(), ProviderKind::CodineerApi);
+}
+
+#[test]
+fn read_xai_base_url_prefers_env_override() {
+    let _lock = env_lock();
+    let _xai_base_url = EnvVarGuard::set("XAI_BASE_URL", Some("https://example.xai.test/v1"));
+
+    assert_eq!(read_xai_base_url(), "https://example.xai.test/v1");
+}
+
+fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+struct EnvVarGuard {
+    key: &'static str,
+    original: Option<OsString>,
+}
+
+impl EnvVarGuard {
+    fn set(key: &'static str, value: Option<&str>) -> Self {
+        let original = std::env::var_os(key);
+        match value {
+            Some(value) => std::env::set_var(key, value),
+            None => std::env::remove_var(key),
+        }
+        Self { key, original }
+    }
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        match &self.original {
+            Some(value) => std::env::set_var(self.key, value),
+            None => std::env::remove_var(self.key),
+        }
+    }
+}
