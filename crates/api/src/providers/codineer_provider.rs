@@ -699,3 +699,62 @@ mod tests {
     }
 
     fn spawn_token_server(response_body: &'static str) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind listener");
+        let address = listener.local_addr().expect("local addr");
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept connection");
+            let mut buffer = [0_u8; 4096];
+            let _ = stream.read(&mut buffer).expect("read request");
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
+                response_body.len(),
+                response_body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("write response");
+        });
+        format!("http://{address}/oauth/token")
+    }
+
+    #[test]
+    fn read_api_key_requires_presence() {
+        let _guard = env_lock();
+        std::env::remove_var("ANTHROPIC_AUTH_TOKEN");
+        std::env::remove_var("ANTHROPIC_API_KEY");
+        std::env::remove_var("CODINEER_CONFIG_HOME");
+        let error = super::read_api_key().expect_err("missing key should error");
+        assert!(matches!(
+            error,
+            crate::error::ApiError::MissingCredentials { .. }
+        ));
+    }
+
+    #[test]
+    fn read_api_key_requires_non_empty_value() {
+        let _guard = env_lock();
+        std::env::set_var("ANTHROPIC_AUTH_TOKEN", "");
+        std::env::remove_var("ANTHROPIC_API_KEY");
+        let error = super::read_api_key().expect_err("empty key should error");
+        assert!(matches!(
+            error,
+            crate::error::ApiError::MissingCredentials { .. }
+        ));
+        std::env::remove_var("ANTHROPIC_AUTH_TOKEN");
+    }
+
+    #[test]
+    fn read_api_key_prefers_api_key_env() {
+        let _guard = env_lock();
+        std::env::set_var("ANTHROPIC_AUTH_TOKEN", "auth-token");
+        std::env::set_var("ANTHROPIC_API_KEY", "legacy-key");
+        assert_eq!(
+            super::read_api_key().expect("api key should load"),
+            "legacy-key"
+        );
+        std::env::remove_var("ANTHROPIC_AUTH_TOKEN");
+        std::env::remove_var("ANTHROPIC_API_KEY");
+    }
+
+    #[test]
+    fn read_auth_token_reads_auth_token_env() {
