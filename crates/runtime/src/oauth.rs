@@ -80,3 +80,85 @@ pub struct OAuthCallbackParams {
 #[serde(rename_all = "camelCase")]
 struct StoredOAuthCredentials {
     access_token: String,
+    #[serde(default)]
+    refresh_token: Option<String>,
+    #[serde(default)]
+    expires_at: Option<u64>,
+    #[serde(default)]
+    scopes: Vec<String>,
+}
+
+impl From<OAuthTokenSet> for StoredOAuthCredentials {
+    fn from(value: OAuthTokenSet) -> Self {
+        Self {
+            access_token: value.access_token,
+            refresh_token: value.refresh_token,
+            expires_at: value.expires_at,
+            scopes: value.scopes,
+        }
+    }
+}
+
+impl From<StoredOAuthCredentials> for OAuthTokenSet {
+    fn from(value: StoredOAuthCredentials) -> Self {
+        Self {
+            access_token: value.access_token,
+            refresh_token: value.refresh_token,
+            expires_at: value.expires_at,
+            scopes: value.scopes,
+        }
+    }
+}
+
+impl OAuthAuthorizationRequest {
+    #[must_use]
+    pub fn from_config(
+        config: &OAuthConfig,
+        redirect_uri: impl Into<String>,
+        state: impl Into<String>,
+        pkce: &PkceCodePair,
+    ) -> Self {
+        Self {
+            authorize_url: config.authorize_url.clone(),
+            client_id: config.client_id.clone(),
+            redirect_uri: redirect_uri.into(),
+            scopes: config.scopes.clone(),
+            state: state.into(),
+            code_challenge: pkce.challenge.clone(),
+            code_challenge_method: pkce.challenge_method,
+            extra_params: BTreeMap::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn with_extra_param(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.extra_params.insert(key.into(), value.into());
+        self
+    }
+
+    #[must_use]
+    pub fn build_url(&self) -> String {
+        let mut params = vec![
+            ("response_type", "code".to_string()),
+            ("client_id", self.client_id.clone()),
+            ("redirect_uri", self.redirect_uri.clone()),
+            ("scope", self.scopes.join(" ")),
+            ("state", self.state.clone()),
+            ("code_challenge", self.code_challenge.clone()),
+            (
+                "code_challenge_method",
+                self.code_challenge_method.as_str().to_string(),
+            ),
+        ];
+        params.extend(
+            self.extra_params
+                .iter()
+                .map(|(key, value)| (key.as_str(), value.clone())),
+        );
+        let query = params
+            .into_iter()
+            .map(|(key, value)| format!("{}={}", percent_encode(key), percent_encode(&value)))
+            .collect::<Vec<_>>()
+            .join("&");
+        format!(
+            "{}{}{}",
