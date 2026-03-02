@@ -540,3 +540,80 @@ fn merge_mcp_servers(
     path: &Path,
 ) -> Result<(), ConfigError> {
     let Some(mcp_servers) = root.get("mcpServers") else {
+        return Ok(());
+    };
+    let servers = expect_object(mcp_servers, &format!("{}: mcpServers", path.display()))?;
+    for (name, value) in servers {
+        let parsed = parse_mcp_server_config(
+            name,
+            value,
+            &format!("{}: mcpServers.{name}", path.display()),
+        )?;
+        target.insert(
+            name.clone(),
+            ScopedMcpServerConfig {
+                scope: source,
+                config: parsed,
+            },
+        );
+    }
+    Ok(())
+}
+
+fn parse_optional_model(root: &JsonValue) -> Option<String> {
+    root.as_object()
+        .and_then(|object| object.get("model"))
+        .and_then(JsonValue::as_str)
+        .map(ToOwned::to_owned)
+}
+
+fn parse_optional_hooks_config(root: &JsonValue) -> Result<RuntimeHookConfig, ConfigError> {
+    let Some(object) = root.as_object() else {
+        return Ok(RuntimeHookConfig::default());
+    };
+    let Some(hooks_value) = object.get("hooks") else {
+        return Ok(RuntimeHookConfig::default());
+    };
+    let hooks = expect_object(hooks_value, "merged settings.hooks")?;
+    Ok(RuntimeHookConfig {
+        pre_tool_use: optional_string_array(hooks, "PreToolUse", "merged settings.hooks")?
+            .unwrap_or_default(),
+        post_tool_use: optional_string_array(hooks, "PostToolUse", "merged settings.hooks")?
+            .unwrap_or_default(),
+    })
+}
+
+fn parse_optional_plugin_config(root: &JsonValue) -> Result<RuntimePluginConfig, ConfigError> {
+    let Some(object) = root.as_object() else {
+        return Ok(RuntimePluginConfig::default());
+    };
+
+    let mut config = RuntimePluginConfig::default();
+    if let Some(enabled_plugins) = object.get("enabledPlugins") {
+        config.enabled_plugins = parse_bool_map(enabled_plugins, "merged settings.enabledPlugins")?;
+    }
+
+    let Some(plugins_value) = object.get("plugins") else {
+        return Ok(config);
+    };
+    let plugins = expect_object(plugins_value, "merged settings.plugins")?;
+
+    if let Some(enabled_value) = plugins.get("enabled") {
+        config.enabled_plugins = parse_bool_map(enabled_value, "merged settings.plugins.enabled")?;
+    }
+    config.external_directories =
+        optional_string_array(plugins, "externalDirectories", "merged settings.plugins")?
+            .unwrap_or_default();
+    config.install_root =
+        optional_string(plugins, "installRoot", "merged settings.plugins")?.map(str::to_string);
+    config.registry_path =
+        optional_string(plugins, "registryPath", "merged settings.plugins")?.map(str::to_string);
+    config.bundled_root =
+        optional_string(plugins, "bundledRoot", "merged settings.plugins")?.map(str::to_string);
+    Ok(config)
+}
+
+fn parse_optional_permission_mode(
+    root: &JsonValue,
+) -> Result<Option<ResolvedPermissionMode>, ConfigError> {
+    let Some(object) = root.as_object() else {
