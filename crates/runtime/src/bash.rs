@@ -214,3 +214,75 @@ fn prepare_command(
 fn prepare_tokio_command(
     command: &str,
     cwd: &std::path::Path,
+    sandbox_status: &SandboxStatus,
+    create_dirs: bool,
+) -> TokioCommand {
+    if create_dirs {
+        prepare_sandbox_dirs(cwd);
+    }
+
+    if let Some(launcher) = build_sandbox_command(command, cwd, sandbox_status) {
+        let mut prepared = TokioCommand::new(launcher.program);
+        prepared.args(launcher.args);
+        prepared.current_dir(cwd);
+        prepared.envs(launcher.env);
+        return prepared;
+    }
+
+    let mut prepared = TokioCommand::new("sh");
+    prepared.arg("-lc").arg(command).current_dir(cwd);
+    if sandbox_status.filesystem_active {
+        prepared.env("HOME", cwd.join(".sandbox-home"));
+        prepared.env("TMPDIR", cwd.join(".sandbox-tmp"));
+    }
+    prepared
+}
+
+fn prepare_sandbox_dirs(cwd: &std::path::Path) {
+    let _ = std::fs::create_dir_all(cwd.join(".sandbox-home"));
+    let _ = std::fs::create_dir_all(cwd.join(".sandbox-tmp"));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{execute_bash, BashCommandInput};
+    use crate::sandbox::FilesystemIsolationMode;
+
+    #[test]
+    fn executes_simple_command() {
+        let output = execute_bash(BashCommandInput {
+            command: String::from("printf 'hello'"),
+            timeout: Some(1_000),
+            description: None,
+            run_in_background: Some(false),
+            dangerously_disable_sandbox: Some(false),
+            namespace_restrictions: Some(false),
+            isolate_network: Some(false),
+            filesystem_mode: Some(FilesystemIsolationMode::WorkspaceOnly),
+            allowed_mounts: None,
+        })
+        .expect("bash command should execute");
+
+        assert_eq!(output.stdout, "hello");
+        assert!(!output.interrupted);
+        assert!(output.sandbox_status.is_some());
+    }
+
+    #[test]
+    fn disables_sandbox_when_requested() {
+        let output = execute_bash(BashCommandInput {
+            command: String::from("printf 'hello'"),
+            timeout: Some(1_000),
+            description: None,
+            run_in_background: Some(false),
+            dangerously_disable_sandbox: Some(true),
+            namespace_restrictions: None,
+            isolate_network: None,
+            filesystem_mode: None,
+            allowed_mounts: None,
+        })
+        .expect("bash command should execute");
+
+        assert!(!output.sandbox_status.expect("sandbox status").enabled);
+    }
+}
