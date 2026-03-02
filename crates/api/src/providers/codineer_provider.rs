@@ -758,3 +758,119 @@ mod tests {
 
     #[test]
     fn read_auth_token_reads_auth_token_env() {
+        let _guard = env_lock();
+        std::env::set_var("ANTHROPIC_AUTH_TOKEN", "auth-token");
+        assert_eq!(super::read_auth_token().as_deref(), Some("auth-token"));
+        std::env::remove_var("ANTHROPIC_AUTH_TOKEN");
+    }
+
+    #[test]
+    fn oauth_token_maps_to_bearer_auth_source() {
+        let auth = AuthSource::from(OAuthTokenSet {
+            access_token: "access-token".to_string(),
+            refresh_token: Some("refresh".to_string()),
+            expires_at: Some(123),
+            scopes: vec!["scope:a".to_string()],
+        });
+        assert_eq!(auth.bearer_token(), Some("access-token"));
+        assert_eq!(auth.api_key(), None);
+    }
+
+    #[test]
+    fn auth_source_from_env_combines_api_key_and_bearer_token() {
+        let _guard = env_lock();
+        std::env::set_var("ANTHROPIC_AUTH_TOKEN", "auth-token");
+        std::env::set_var("ANTHROPIC_API_KEY", "legacy-key");
+        let auth = AuthSource::from_env().expect("env auth");
+        assert_eq!(auth.api_key(), Some("legacy-key"));
+        assert_eq!(auth.bearer_token(), Some("auth-token"));
+        std::env::remove_var("ANTHROPIC_AUTH_TOKEN");
+        std::env::remove_var("ANTHROPIC_API_KEY");
+    }
+
+    #[test]
+    fn auth_source_from_saved_oauth_when_env_absent() {
+        let _guard = env_lock();
+        let config_home = temp_config_home();
+        std::env::set_var("CODINEER_CONFIG_HOME", &config_home);
+        std::env::remove_var("ANTHROPIC_AUTH_TOKEN");
+        std::env::remove_var("ANTHROPIC_API_KEY");
+        save_oauth_credentials(&runtime::OAuthTokenSet {
+            access_token: "saved-access-token".to_string(),
+            refresh_token: Some("refresh".to_string()),
+            expires_at: Some(now_unix_timestamp() + 300),
+            scopes: vec!["scope:a".to_string()],
+        })
+        .expect("save oauth credentials");
+
+        let auth = AuthSource::from_env_or_saved().expect("saved auth");
+        assert_eq!(auth.bearer_token(), Some("saved-access-token"));
+
+        clear_oauth_credentials().expect("clear credentials");
+        std::env::remove_var("CODINEER_CONFIG_HOME");
+        cleanup_temp_config_home(&config_home);
+    }
+
+    #[test]
+    fn oauth_token_expiry_uses_expires_at_timestamp() {
+        assert!(oauth_token_is_expired(&OAuthTokenSet {
+            access_token: "access-token".to_string(),
+            refresh_token: None,
+            expires_at: Some(1),
+            scopes: Vec::new(),
+        }));
+        assert!(!oauth_token_is_expired(&OAuthTokenSet {
+            access_token: "access-token".to_string(),
+            refresh_token: None,
+            expires_at: Some(now_unix_timestamp() + 60),
+            scopes: Vec::new(),
+        }));
+    }
+
+    #[test]
+    fn resolve_saved_oauth_token_refreshes_expired_credentials() {
+        let _guard = env_lock();
+        let config_home = temp_config_home();
+        std::env::set_var("CODINEER_CONFIG_HOME", &config_home);
+        std::env::remove_var("ANTHROPIC_AUTH_TOKEN");
+        std::env::remove_var("ANTHROPIC_API_KEY");
+        save_oauth_credentials(&runtime::OAuthTokenSet {
+            access_token: "expired-access-token".to_string(),
+            refresh_token: Some("refresh-token".to_string()),
+            expires_at: Some(1),
+            scopes: vec!["scope:a".to_string()],
+        })
+        .expect("save expired oauth credentials");
+
+        let token_url = spawn_token_server(
+            "{\"access_token\":\"refreshed-token\",\"refresh_token\":\"fresh-refresh\",\"expires_at\":9999999999,\"scopes\":[\"scope:a\"]}",
+        );
+        let resolved = resolve_saved_oauth_token(&sample_oauth_config(token_url))
+            .expect("resolve refreshed token")
+            .expect("token set present");
+        assert_eq!(resolved.access_token, "refreshed-token");
+        let stored = runtime::load_oauth_credentials()
+            .expect("load stored credentials")
+            .expect("stored token set");
+        assert_eq!(stored.access_token, "refreshed-token");
+
+        clear_oauth_credentials().expect("clear credentials");
+        std::env::remove_var("CODINEER_CONFIG_HOME");
+        cleanup_temp_config_home(&config_home);
+    }
+
+    #[test]
+    fn resolve_startup_auth_source_uses_saved_oauth_without_loading_config() {
+        let _guard = env_lock();
+        let config_home = temp_config_home();
+        std::env::set_var("CODINEER_CONFIG_HOME", &config_home);
+        std::env::remove_var("ANTHROPIC_AUTH_TOKEN");
+        std::env::remove_var("ANTHROPIC_API_KEY");
+        save_oauth_credentials(&runtime::OAuthTokenSet {
+            access_token: "saved-access-token".to_string(),
+            refresh_token: Some("refresh".to_string()),
+            expires_at: Some(now_unix_timestamp() + 300),
+            scopes: vec!["scope:a".to_string()],
+        })
+        .expect("save oauth credentials");
+
