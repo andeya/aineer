@@ -43,3 +43,91 @@ pub struct UsageCostEstimate {
 }
 
 impl UsageCostEstimate {
+    #[must_use]
+    pub fn total_cost_usd(self) -> f64 {
+        self.input_cost_usd
+            + self.output_cost_usd
+            + self.cache_creation_cost_usd
+            + self.cache_read_cost_usd
+    }
+}
+
+#[must_use]
+pub fn pricing_for_model(model: &str) -> Option<ModelPricing> {
+    let normalized = model.to_ascii_lowercase();
+    if normalized.contains("haiku") {
+        return Some(ModelPricing {
+            input_cost_per_million: 1.0,
+            output_cost_per_million: 5.0,
+            cache_creation_cost_per_million: 1.25,
+            cache_read_cost_per_million: 0.1,
+        });
+    }
+    if normalized.contains("opus") {
+        return Some(ModelPricing {
+            input_cost_per_million: 15.0,
+            output_cost_per_million: 75.0,
+            cache_creation_cost_per_million: 18.75,
+            cache_read_cost_per_million: 1.5,
+        });
+    }
+    if normalized.contains("sonnet") {
+        return Some(ModelPricing::default_sonnet_tier());
+    }
+    None
+}
+
+impl TokenUsage {
+    #[must_use]
+    pub fn total_tokens(self) -> u32 {
+        self.input_tokens
+            + self.output_tokens
+            + self.cache_creation_input_tokens
+            + self.cache_read_input_tokens
+    }
+
+    #[must_use]
+    pub fn estimate_cost_usd(self) -> UsageCostEstimate {
+        self.estimate_cost_usd_with_pricing(ModelPricing::default_sonnet_tier())
+    }
+
+    #[must_use]
+    pub fn estimate_cost_usd_with_pricing(self, pricing: ModelPricing) -> UsageCostEstimate {
+        UsageCostEstimate {
+            input_cost_usd: cost_for_tokens(self.input_tokens, pricing.input_cost_per_million),
+            output_cost_usd: cost_for_tokens(self.output_tokens, pricing.output_cost_per_million),
+            cache_creation_cost_usd: cost_for_tokens(
+                self.cache_creation_input_tokens,
+                pricing.cache_creation_cost_per_million,
+            ),
+            cache_read_cost_usd: cost_for_tokens(
+                self.cache_read_input_tokens,
+                pricing.cache_read_cost_per_million,
+            ),
+        }
+    }
+
+    #[must_use]
+    pub fn summary_lines(self, label: &str) -> Vec<String> {
+        self.summary_lines_for_model(label, None)
+    }
+
+    #[must_use]
+    pub fn summary_lines_for_model(self, label: &str, model: Option<&str>) -> Vec<String> {
+        let pricing = model.and_then(pricing_for_model);
+        let cost = pricing.map_or_else(
+            || self.estimate_cost_usd(),
+            |pricing| self.estimate_cost_usd_with_pricing(pricing),
+        );
+        let model_suffix =
+            model.map_or_else(String::new, |model_name| format!(" model={model_name}"));
+        let pricing_suffix = if pricing.is_some() {
+            ""
+        } else if model.is_some() {
+            " pricing=estimated-default"
+        } else {
+            ""
+        };
+        vec![
+            format!(
+                "{label}: total_tokens={} input={} output={} cache_write={} cache_read={} estimated_cost={}{}{}",
