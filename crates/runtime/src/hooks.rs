@@ -100,3 +100,54 @@ impl HookRunner {
             Some(tool_output),
             is_error,
         )
+    }
+
+    fn run_commands(
+        event: HookEvent,
+        commands: &[String],
+        tool_name: &str,
+        tool_input: &str,
+        tool_output: Option<&str>,
+        is_error: bool,
+    ) -> HookRunResult {
+        if commands.is_empty() {
+            return HookRunResult::allow(Vec::new());
+        }
+
+        let payload = json!({
+            "hook_event_name": event.as_str(),
+            "tool_name": tool_name,
+            "tool_input": parse_tool_input(tool_input),
+            "tool_input_json": tool_input,
+            "tool_output": tool_output,
+            "tool_result_is_error": is_error,
+        })
+        .to_string();
+
+        let mut messages = Vec::new();
+
+        for command in commands {
+            match Self::run_command(
+                command,
+                HookCommandRequest {
+                    event,
+                    tool_name,
+                    tool_input,
+                    tool_output,
+                    is_error,
+                    payload: &payload,
+                },
+            ) {
+                HookCommandOutcome::Allow { message } => {
+                    if let Some(message) = message {
+                        messages.push(message);
+                    }
+                }
+                HookCommandOutcome::Deny { message } => {
+                    let message = message.unwrap_or_else(|| {
+                        format!("{} hook denied tool `{tool_name}`", event.as_str())
+                    });
+                    messages.push(message);
+                    return HookRunResult {
+                        denied: true,
+                        messages,
