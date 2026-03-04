@@ -816,3 +816,178 @@ mod tests {
         assert!(oauth_token_is_expired(&OAuthTokenSet {
             access_token: "access-token".to_string(),
             refresh_token: None,
+            expires_at: Some(1),
+            scopes: Vec::new(),
+        }));
+        assert!(!oauth_token_is_expired(&OAuthTokenSet {
+            access_token: "access-token".to_string(),
+            refresh_token: None,
+            expires_at: Some(now_unix_timestamp() + 60),
+            scopes: Vec::new(),
+        }));
+    }
+
+    #[test]
+    fn resolve_saved_oauth_token_refreshes_expired_credentials() {
+        let _guard = env_lock();
+        let config_home = temp_config_home();
+        std::env::set_var("CODINEER_CONFIG_HOME", &config_home);
+        std::env::remove_var("ANTHROPIC_AUTH_TOKEN");
+        std::env::remove_var("ANTHROPIC_API_KEY");
+        save_oauth_credentials(&runtime::OAuthTokenSet {
+            access_token: "expired-access-token".to_string(),
+            refresh_token: Some("refresh-token".to_string()),
+            expires_at: Some(1),
+            scopes: vec!["scope:a".to_string()],
+        })
+        .expect("save expired oauth credentials");
+
+        let token_url = spawn_token_server(
+            "{\"access_token\":\"refreshed-token\",\"refresh_token\":\"fresh-refresh\",\"expires_at\":9999999999,\"scopes\":[\"scope:a\"]}",
+        );
+        let resolved = resolve_saved_oauth_token(&sample_oauth_config(token_url))
+            .expect("resolve refreshed token")
+            .expect("token set present");
+        assert_eq!(resolved.access_token, "refreshed-token");
+        let stored = runtime::load_oauth_credentials()
+            .expect("load stored credentials")
+            .expect("stored token set");
+        assert_eq!(stored.access_token, "refreshed-token");
+
+        clear_oauth_credentials().expect("clear credentials");
+        std::env::remove_var("CODINEER_CONFIG_HOME");
+        cleanup_temp_config_home(&config_home);
+    }
+
+    #[test]
+    fn resolve_startup_auth_source_uses_saved_oauth_without_loading_config() {
+        let _guard = env_lock();
+        let config_home = temp_config_home();
+        std::env::set_var("CODINEER_CONFIG_HOME", &config_home);
+        std::env::remove_var("ANTHROPIC_AUTH_TOKEN");
+        std::env::remove_var("ANTHROPIC_API_KEY");
+        save_oauth_credentials(&runtime::OAuthTokenSet {
+            access_token: "saved-access-token".to_string(),
+            refresh_token: Some("refresh".to_string()),
+            expires_at: Some(now_unix_timestamp() + 300),
+            scopes: vec!["scope:a".to_string()],
+        })
+        .expect("save oauth credentials");
+
+        let auth = resolve_startup_auth_source(|| panic!("config should not be loaded"))
+            .expect("startup auth");
+        assert_eq!(auth.bearer_token(), Some("saved-access-token"));
+
+        clear_oauth_credentials().expect("clear credentials");
+        std::env::remove_var("CODINEER_CONFIG_HOME");
+        cleanup_temp_config_home(&config_home);
+    }
+
+    #[test]
+    fn resolve_startup_auth_source_errors_when_refreshable_token_lacks_config() {
+        let _guard = env_lock();
+        let config_home = temp_config_home();
+        std::env::set_var("CODINEER_CONFIG_HOME", &config_home);
+        std::env::remove_var("ANTHROPIC_AUTH_TOKEN");
+        std::env::remove_var("ANTHROPIC_API_KEY");
+        save_oauth_credentials(&runtime::OAuthTokenSet {
+            access_token: "expired-access-token".to_string(),
+            refresh_token: Some("refresh-token".to_string()),
+            expires_at: Some(1),
+            scopes: vec!["scope:a".to_string()],
+        })
+        .expect("save expired oauth credentials");
+
+        let error =
+            resolve_startup_auth_source(|| Ok(None)).expect_err("missing config should error");
+        assert!(
+            matches!(error, crate::error::ApiError::Auth(message) if message.contains("runtime OAuth config is missing"))
+        );
+
+        let stored = runtime::load_oauth_credentials()
+            .expect("load stored credentials")
+            .expect("stored token set");
+        assert_eq!(stored.access_token, "expired-access-token");
+        assert_eq!(stored.refresh_token.as_deref(), Some("refresh-token"));
+
+        clear_oauth_credentials().expect("clear credentials");
+        std::env::remove_var("CODINEER_CONFIG_HOME");
+        cleanup_temp_config_home(&config_home);
+    }
+
+    #[test]
+    fn resolve_saved_oauth_token_preserves_refresh_token_when_refresh_response_omits_it() {
+        let _guard = env_lock();
+        let config_home = temp_config_home();
+        std::env::set_var("CODINEER_CONFIG_HOME", &config_home);
+        std::env::remove_var("ANTHROPIC_AUTH_TOKEN");
+        std::env::remove_var("ANTHROPIC_API_KEY");
+        save_oauth_credentials(&runtime::OAuthTokenSet {
+            access_token: "expired-access-token".to_string(),
+            refresh_token: Some("refresh-token".to_string()),
+            expires_at: Some(1),
+            scopes: vec!["scope:a".to_string()],
+        })
+        .expect("save expired oauth credentials");
+
+        let token_url = spawn_token_server(
+            "{\"access_token\":\"refreshed-token\",\"expires_at\":9999999999,\"scopes\":[\"scope:a\"]}",
+        );
+        let resolved = resolve_saved_oauth_token(&sample_oauth_config(token_url))
+            .expect("resolve refreshed token")
+            .expect("token set present");
+        assert_eq!(resolved.access_token, "refreshed-token");
+        assert_eq!(resolved.refresh_token.as_deref(), Some("refresh-token"));
+        let stored = runtime::load_oauth_credentials()
+            .expect("load stored credentials")
+            .expect("stored token set");
+        assert_eq!(stored.refresh_token.as_deref(), Some("refresh-token"));
+
+        clear_oauth_credentials().expect("clear credentials");
+        std::env::remove_var("CODINEER_CONFIG_HOME");
+        cleanup_temp_config_home(&config_home);
+    }
+
+    #[test]
+    fn message_request_stream_helper_sets_stream_true() {
+        let request = MessageRequest {
+            model: "claude-opus-4-6".to_string(),
+            max_tokens: 64,
+            messages: vec![],
+            system: None,
+            tools: None,
+            tool_choice: None,
+            stream: false,
+        };
+
+        assert!(request.with_streaming().stream);
+    }
+
+    #[test]
+    fn backoff_doubles_until_maximum() {
+        let client = CodineerApiClient::new("test-key").with_retry_policy(
+            3,
+            Duration::from_millis(10),
+            Duration::from_millis(25),
+        );
+        assert_eq!(
+            client.backoff_for_attempt(1).expect("attempt 1"),
+            Duration::from_millis(10)
+        );
+        assert_eq!(
+            client.backoff_for_attempt(2).expect("attempt 2"),
+            Duration::from_millis(20)
+        );
+        assert_eq!(
+            client.backoff_for_attempt(3).expect("attempt 3"),
+            Duration::from_millis(25)
+        );
+    }
+
+    #[test]
+    fn retryable_statuses_are_detected() {
+        assert!(super::is_retryable_status(
+            reqwest::StatusCode::TOO_MANY_REQUESTS
+        ));
+        assert!(super::is_retryable_status(
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR
