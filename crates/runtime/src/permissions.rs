@@ -62,3 +62,66 @@ impl PermissionPolicy {
     }
 
     #[must_use]
+    pub fn with_tool_requirement(
+        mut self,
+        tool_name: impl Into<String>,
+        required_mode: PermissionMode,
+    ) -> Self {
+        self.tool_requirements
+            .insert(tool_name.into(), required_mode);
+        self
+    }
+
+    #[must_use]
+    pub fn active_mode(&self) -> PermissionMode {
+        self.active_mode
+    }
+
+    #[must_use]
+    pub fn required_mode_for(&self, tool_name: &str) -> PermissionMode {
+        self.tool_requirements
+            .get(tool_name)
+            .copied()
+            .unwrap_or(PermissionMode::DangerFullAccess)
+    }
+
+    #[must_use]
+    pub fn authorize(
+        &self,
+        tool_name: &str,
+        input: &str,
+        mut prompter: Option<&mut dyn PermissionPrompter>,
+    ) -> PermissionOutcome {
+        let current_mode = self.active_mode();
+        let required_mode = self.required_mode_for(tool_name);
+
+        if current_mode == PermissionMode::Allow {
+            return PermissionOutcome::Allow;
+        }
+
+        if current_mode == PermissionMode::Prompt {
+            let request = PermissionRequest {
+                tool_name: tool_name.to_string(),
+                input: input.to_string(),
+                current_mode,
+                required_mode,
+            };
+            return match prompter.as_mut() {
+                Some(prompter) => match prompter.decide(&request) {
+                    PermissionPromptDecision::Allow => PermissionOutcome::Allow,
+                    PermissionPromptDecision::Deny { reason } => PermissionOutcome::Deny { reason },
+                },
+                None => PermissionOutcome::Deny {
+                    reason: format!(
+                        "tool '{tool_name}' requires approval to escalate from {} to {}",
+                        current_mode.as_str(),
+                        required_mode.as_str()
+                    ),
+                },
+            };
+        }
+
+        if current_mode >= required_mode {
+            return PermissionOutcome::Allow;
+        }
+
