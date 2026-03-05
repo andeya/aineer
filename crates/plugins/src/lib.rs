@@ -112,3 +112,116 @@ pub struct PluginManifest {
     #[serde(rename = "defaultEnabled", default)]
     pub default_enabled: bool,
     #[serde(default)]
+    pub hooks: PluginHooks,
+    #[serde(default)]
+    pub lifecycle: PluginLifecycle,
+    #[serde(default)]
+    pub tools: Vec<PluginToolManifest>,
+    #[serde(default)]
+    pub commands: Vec<PluginCommandManifest>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PluginPermission {
+    Read,
+    Write,
+    Execute,
+}
+
+impl PluginPermission {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Read => "read",
+            Self::Write => "write",
+            Self::Execute => "execute",
+        }
+    }
+
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "read" => Some(Self::Read),
+            "write" => Some(Self::Write),
+            "execute" => Some(Self::Execute),
+            _ => None,
+        }
+    }
+}
+
+impl AsRef<str> for PluginPermission {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PluginToolManifest {
+    pub name: String,
+    pub description: String,
+    #[serde(rename = "inputSchema")]
+    pub input_schema: Value,
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    pub required_permission: PluginToolPermission,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PluginToolPermission {
+    ReadOnly,
+    WorkspaceWrite,
+    DangerFullAccess,
+}
+
+impl PluginToolPermission {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ReadOnly => "read-only",
+            Self::WorkspaceWrite => "workspace-write",
+            Self::DangerFullAccess => "danger-full-access",
+        }
+    }
+
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "read-only" => Some(Self::ReadOnly),
+            "workspace-write" => Some(Self::WorkspaceWrite),
+            "danger-full-access" => Some(Self::DangerFullAccess),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PluginToolDefinition {
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(rename = "inputSchema")]
+    pub input_schema: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluginCommandManifest {
+    pub name: String,
+    pub description: String,
+    pub command: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct RawPluginManifest {
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    #[serde(default)]
+    pub permissions: Vec<String>,
+    #[serde(rename = "defaultEnabled", default)]
+    pub default_enabled: bool,
+    #[serde(default)]
+    pub hooks: PluginHooks,
+    #[serde(default)]
+    pub lifecycle: PluginLifecycle,
+    #[serde(default)]
