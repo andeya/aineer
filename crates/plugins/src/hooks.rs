@@ -97,3 +97,53 @@ fn run_hook_commands(
     event: HookEvent,
     commands: &[String],
     tool_name: &str,
+    tool_input: &str,
+    tool_output: Option<&str>,
+    is_error: bool,
+) -> HookRunResult {
+    if commands.is_empty() {
+        return HookRunResult::allow(Vec::new());
+    }
+
+    let payload = json!({
+        "hook_event_name": event.as_str(),
+        "tool_name": tool_name,
+        "tool_input": parse_tool_input(tool_input),
+        "tool_input_json": tool_input,
+        "tool_output": tool_output,
+        "tool_result_is_error": is_error,
+    })
+    .to_string();
+
+    let mut messages = Vec::new();
+
+    let context = HookContext {
+        event,
+        tool_name,
+        tool_input,
+        tool_output,
+        is_error,
+        payload: &payload,
+    };
+
+    for command in commands {
+        match run_hook_command(command, &context) {
+            HookCommandOutcome::Allow { message } => {
+                if let Some(message) = message {
+                    messages.push(message);
+                }
+            }
+            HookCommandOutcome::Deny { message } => {
+                messages.push(message.unwrap_or_else(|| {
+                    format!("{} hook denied tool `{tool_name}`", event.as_str())
+                }));
+                return HookRunResult {
+                    denied: true,
+                    messages,
+                };
+            }
+            HookCommandOutcome::Warn { message } => messages.push(message),
+        }
+    }
+
+    HookRunResult::allow(messages)
