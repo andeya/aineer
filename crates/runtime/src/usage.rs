@@ -87,3 +87,92 @@ impl TokenUsage {
     }
 
     #[must_use]
+    pub fn estimate_cost_usd(self) -> UsageCostEstimate {
+        self.estimate_cost_usd_with_pricing(ModelPricing::default_sonnet_tier())
+    }
+
+    #[must_use]
+    pub fn estimate_cost_usd_with_pricing(self, pricing: ModelPricing) -> UsageCostEstimate {
+        UsageCostEstimate {
+            input_cost_usd: cost_for_tokens(self.input_tokens, pricing.input_cost_per_million),
+            output_cost_usd: cost_for_tokens(self.output_tokens, pricing.output_cost_per_million),
+            cache_creation_cost_usd: cost_for_tokens(
+                self.cache_creation_input_tokens,
+                pricing.cache_creation_cost_per_million,
+            ),
+            cache_read_cost_usd: cost_for_tokens(
+                self.cache_read_input_tokens,
+                pricing.cache_read_cost_per_million,
+            ),
+        }
+    }
+
+    #[must_use]
+    pub fn summary_lines(self, label: &str) -> Vec<String> {
+        self.summary_lines_for_model(label, None)
+    }
+
+    #[must_use]
+    pub fn summary_lines_for_model(self, label: &str, model: Option<&str>) -> Vec<String> {
+        let pricing = model.and_then(pricing_for_model);
+        let cost = pricing.map_or_else(
+            || self.estimate_cost_usd(),
+            |pricing| self.estimate_cost_usd_with_pricing(pricing),
+        );
+        let model_suffix =
+            model.map_or_else(String::new, |model_name| format!(" model={model_name}"));
+        let pricing_suffix = if pricing.is_some() {
+            ""
+        } else if model.is_some() {
+            " pricing=estimated-default"
+        } else {
+            ""
+        };
+        vec![
+            format!(
+                "{label}: total_tokens={} input={} output={} cache_write={} cache_read={} estimated_cost={}{}{}",
+                self.total_tokens(),
+                self.input_tokens,
+                self.output_tokens,
+                self.cache_creation_input_tokens,
+                self.cache_read_input_tokens,
+                format_usd(cost.total_cost_usd()),
+                model_suffix,
+                pricing_suffix,
+            ),
+            format!(
+                "  cost breakdown: input={} output={} cache_write={} cache_read={}",
+                format_usd(cost.input_cost_usd),
+                format_usd(cost.output_cost_usd),
+                format_usd(cost.cache_creation_cost_usd),
+                format_usd(cost.cache_read_cost_usd),
+            ),
+        ]
+    }
+}
+
+fn cost_for_tokens(tokens: u32, usd_per_million_tokens: f64) -> f64 {
+    f64::from(tokens) / 1_000_000.0 * usd_per_million_tokens
+}
+
+#[must_use]
+pub fn format_usd(amount: f64) -> String {
+    format!("${amount:.4}")
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UsageTracker {
+    latest_turn: TokenUsage,
+    cumulative: TokenUsage,
+    turns: u32,
+}
+
+impl UsageTracker {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[must_use]
+    pub fn from_session(session: &Session) -> Self {
+        let mut tracker = Self::new();
