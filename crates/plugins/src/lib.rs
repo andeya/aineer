@@ -338,3 +338,229 @@ impl PluginTool {
     }
 }
 
+fn default_tool_permission_label() -> String {
+    "danger-full-access".to_string()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum PluginInstallSource {
+    LocalPath { path: PathBuf },
+    GitUrl { url: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InstalledPluginRecord {
+    #[serde(default = "default_plugin_kind")]
+    pub kind: PluginKind,
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    pub install_path: PathBuf,
+    pub source: PluginInstallSource,
+    pub installed_at_unix_ms: u128,
+    pub updated_at_unix_ms: u128,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InstalledPluginRegistry {
+    #[serde(default)]
+    pub plugins: BTreeMap<String, InstalledPluginRecord>,
+}
+
+fn default_plugin_kind() -> PluginKind {
+    PluginKind::External
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BuiltinPlugin {
+    metadata: PluginMetadata,
+    hooks: PluginHooks,
+    lifecycle: PluginLifecycle,
+    tools: Vec<PluginTool>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BundledPlugin {
+    metadata: PluginMetadata,
+    hooks: PluginHooks,
+    lifecycle: PluginLifecycle,
+    tools: Vec<PluginTool>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExternalPlugin {
+    metadata: PluginMetadata,
+    hooks: PluginHooks,
+    lifecycle: PluginLifecycle,
+    tools: Vec<PluginTool>,
+}
+
+pub trait Plugin {
+    fn metadata(&self) -> &PluginMetadata;
+    fn hooks(&self) -> &PluginHooks;
+    fn lifecycle(&self) -> &PluginLifecycle;
+    fn tools(&self) -> &[PluginTool];
+    fn validate(&self) -> Result<(), PluginError>;
+    fn initialize(&self) -> Result<(), PluginError>;
+    fn shutdown(&self) -> Result<(), PluginError>;
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PluginDefinition {
+    Builtin(BuiltinPlugin),
+    Bundled(BundledPlugin),
+    External(ExternalPlugin),
+}
+
+impl Plugin for BuiltinPlugin {
+    fn metadata(&self) -> &PluginMetadata {
+        &self.metadata
+    }
+
+    fn hooks(&self) -> &PluginHooks {
+        &self.hooks
+    }
+
+    fn lifecycle(&self) -> &PluginLifecycle {
+        &self.lifecycle
+    }
+
+    fn tools(&self) -> &[PluginTool] {
+        &self.tools
+    }
+
+    fn validate(&self) -> Result<(), PluginError> {
+        Ok(())
+    }
+
+    fn initialize(&self) -> Result<(), PluginError> {
+        Ok(())
+    }
+
+    fn shutdown(&self) -> Result<(), PluginError> {
+        Ok(())
+    }
+}
+
+impl Plugin for BundledPlugin {
+    fn metadata(&self) -> &PluginMetadata {
+        &self.metadata
+    }
+
+    fn hooks(&self) -> &PluginHooks {
+        &self.hooks
+    }
+
+    fn lifecycle(&self) -> &PluginLifecycle {
+        &self.lifecycle
+    }
+
+    fn tools(&self) -> &[PluginTool] {
+        &self.tools
+    }
+
+    fn validate(&self) -> Result<(), PluginError> {
+        validate_hook_paths(self.metadata.root.as_deref(), &self.hooks)?;
+        validate_lifecycle_paths(self.metadata.root.as_deref(), &self.lifecycle)?;
+        validate_tool_paths(self.metadata.root.as_deref(), &self.tools)
+    }
+
+    fn initialize(&self) -> Result<(), PluginError> {
+        run_lifecycle_commands(
+            self.metadata(),
+            self.lifecycle(),
+            "init",
+            &self.lifecycle.init,
+        )
+    }
+
+    fn shutdown(&self) -> Result<(), PluginError> {
+        run_lifecycle_commands(
+            self.metadata(),
+            self.lifecycle(),
+            "shutdown",
+            &self.lifecycle.shutdown,
+        )
+    }
+}
+
+impl Plugin for ExternalPlugin {
+    fn metadata(&self) -> &PluginMetadata {
+        &self.metadata
+    }
+
+    fn hooks(&self) -> &PluginHooks {
+        &self.hooks
+    }
+
+    fn lifecycle(&self) -> &PluginLifecycle {
+        &self.lifecycle
+    }
+
+    fn tools(&self) -> &[PluginTool] {
+        &self.tools
+    }
+
+    fn validate(&self) -> Result<(), PluginError> {
+        validate_hook_paths(self.metadata.root.as_deref(), &self.hooks)?;
+        validate_lifecycle_paths(self.metadata.root.as_deref(), &self.lifecycle)?;
+        validate_tool_paths(self.metadata.root.as_deref(), &self.tools)
+    }
+
+    fn initialize(&self) -> Result<(), PluginError> {
+        run_lifecycle_commands(
+            self.metadata(),
+            self.lifecycle(),
+            "init",
+            &self.lifecycle.init,
+        )
+    }
+
+    fn shutdown(&self) -> Result<(), PluginError> {
+        run_lifecycle_commands(
+            self.metadata(),
+            self.lifecycle(),
+            "shutdown",
+            &self.lifecycle.shutdown,
+        )
+    }
+}
+
+impl Plugin for PluginDefinition {
+    fn metadata(&self) -> &PluginMetadata {
+        match self {
+            Self::Builtin(plugin) => plugin.metadata(),
+            Self::Bundled(plugin) => plugin.metadata(),
+            Self::External(plugin) => plugin.metadata(),
+        }
+    }
+
+    fn hooks(&self) -> &PluginHooks {
+        match self {
+            Self::Builtin(plugin) => plugin.hooks(),
+            Self::Bundled(plugin) => plugin.hooks(),
+            Self::External(plugin) => plugin.hooks(),
+        }
+    }
+
+    fn lifecycle(&self) -> &PluginLifecycle {
+        match self {
+            Self::Builtin(plugin) => plugin.lifecycle(),
+            Self::Bundled(plugin) => plugin.lifecycle(),
+            Self::External(plugin) => plugin.lifecycle(),
+        }
+    }
+
+    fn tools(&self) -> &[PluginTool] {
+        match self {
+            Self::Builtin(plugin) => plugin.tools(),
+            Self::Bundled(plugin) => plugin.tools(),
+            Self::External(plugin) => plugin.tools(),
+        }
+    }
+
+    fn validate(&self) -> Result<(), PluginError> {
+        match self {
+            Self::Builtin(plugin) => plugin.validate(),
