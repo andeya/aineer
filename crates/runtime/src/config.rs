@@ -849,3 +849,80 @@ fn parse_bool_map(value: &JsonValue, context: &str) -> Result<BTreeMap<String, b
             "{context}: expected JSON object"
         )));
     };
+    map.iter()
+        .map(|(key, value)| {
+            value
+                .as_bool()
+                .map(|enabled| (key.clone(), enabled))
+                .ok_or_else(|| {
+                    ConfigError::Parse(format!("{context}: field {key} must be a boolean"))
+                })
+        })
+        .collect()
+}
+
+fn optional_string_array(
+    object: &BTreeMap<String, JsonValue>,
+    key: &str,
+    context: &str,
+) -> Result<Option<Vec<String>>, ConfigError> {
+    match object.get(key) {
+        Some(value) => {
+            let Some(array) = value.as_array() else {
+                return Err(ConfigError::Parse(format!(
+                    "{context}: field {key} must be an array"
+                )));
+            };
+            array
+                .iter()
+                .map(|item| {
+                    item.as_str().map(ToOwned::to_owned).ok_or_else(|| {
+                        ConfigError::Parse(format!(
+                            "{context}: field {key} must contain only strings"
+                        ))
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .map(Some)
+        }
+        None => Ok(None),
+    }
+}
+
+fn optional_string_map(
+    object: &BTreeMap<String, JsonValue>,
+    key: &str,
+    context: &str,
+) -> Result<Option<BTreeMap<String, String>>, ConfigError> {
+    match object.get(key) {
+        Some(value) => {
+            let Some(map) = value.as_object() else {
+                return Err(ConfigError::Parse(format!(
+                    "{context}: field {key} must be an object"
+                )));
+            };
+            map.iter()
+                .map(|(entry_key, entry_value)| {
+                    entry_value
+                        .as_str()
+                        .map(|text| (entry_key.clone(), text.to_string()))
+                        .ok_or_else(|| {
+                            ConfigError::Parse(format!(
+                                "{context}: field {key} must contain only string values"
+                            ))
+                        })
+                })
+                .collect::<Result<BTreeMap<_, _>, _>>()
+                .map(Some)
+        }
+        None => Ok(None),
+    }
+}
+
+fn deep_merge_objects(
+    target: &mut BTreeMap<String, JsonValue>,
+    source: &BTreeMap<String, JsonValue>,
+) {
+    for (key, value) in source {
+        match (target.get_mut(key), value) {
+            (Some(JsonValue::Object(existing)), JsonValue::Object(incoming)) => {
