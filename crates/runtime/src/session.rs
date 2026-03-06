@@ -212,3 +212,74 @@ impl ConversationMessage {
             JsonValue::Array(self.blocks.iter().map(ContentBlock::to_json).collect()),
         );
         if let Some(usage) = self.usage {
+            object.insert("usage".to_string(), usage_to_json(usage));
+        }
+        JsonValue::Object(object)
+    }
+
+    fn from_json(value: &JsonValue) -> Result<Self, SessionError> {
+        let object = value
+            .as_object()
+            .ok_or_else(|| SessionError::Format("message must be an object".to_string()))?;
+        let role = match object
+            .get("role")
+            .and_then(JsonValue::as_str)
+            .ok_or_else(|| SessionError::Format("missing role".to_string()))?
+        {
+            "system" => MessageRole::System,
+            "user" => MessageRole::User,
+            "assistant" => MessageRole::Assistant,
+            "tool" => MessageRole::Tool,
+            other => {
+                return Err(SessionError::Format(format!(
+                    "unsupported message role: {other}"
+                )))
+            }
+        };
+        let blocks = object
+            .get("blocks")
+            .and_then(JsonValue::as_array)
+            .ok_or_else(|| SessionError::Format("missing blocks".to_string()))?
+            .iter()
+            .map(ContentBlock::from_json)
+            .collect::<Result<Vec<_>, _>>()?;
+        let usage = object.get("usage").map(usage_from_json).transpose()?;
+        Ok(Self {
+            role,
+            blocks,
+            usage,
+        })
+    }
+}
+
+impl ContentBlock {
+    #[must_use]
+    pub fn to_json(&self) -> JsonValue {
+        let mut object = BTreeMap::new();
+        match self {
+            Self::Text { text } => {
+                object.insert("type".to_string(), JsonValue::String("text".to_string()));
+                object.insert("text".to_string(), JsonValue::String(text.clone()));
+            }
+            Self::ToolUse { id, name, input } => {
+                object.insert(
+                    "type".to_string(),
+                    JsonValue::String("tool_use".to_string()),
+                );
+                object.insert("id".to_string(), JsonValue::String(id.clone()));
+                object.insert("name".to_string(), JsonValue::String(name.clone()));
+                object.insert("input".to_string(), JsonValue::String(input.clone()));
+            }
+            Self::ToolResult {
+                tool_use_id,
+                tool_name,
+                output,
+                is_error,
+            } => {
+                object.insert(
+                    "type".to_string(),
+                    JsonValue::String("tool_result".to_string()),
+                );
+                object.insert(
+                    "tool_use_id".to_string(),
+                    JsonValue::String(tool_use_id.clone()),
