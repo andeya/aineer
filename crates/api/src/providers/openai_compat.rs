@@ -642,3 +642,61 @@ fn build_chat_completion_request(request: &MessageRequest) -> Value {
             "content": system,
         }));
     }
+    for message in &request.messages {
+        messages.extend(translate_message(message));
+    }
+
+    let mut payload = json!({
+        "model": request.model,
+        "max_tokens": request.max_tokens,
+        "messages": messages,
+        "stream": request.stream,
+    });
+
+    if let Some(tools) = &request.tools {
+        payload["tools"] =
+            Value::Array(tools.iter().map(openai_tool_definition).collect::<Vec<_>>());
+    }
+    if let Some(tool_choice) = &request.tool_choice {
+        payload["tool_choice"] = openai_tool_choice(tool_choice);
+    }
+
+    payload
+}
+
+fn translate_message(message: &InputMessage) -> Vec<Value> {
+    match message.role.as_str() {
+        "assistant" => {
+            let mut text = String::new();
+            let mut tool_calls = Vec::new();
+            for block in &message.content {
+                match block {
+                    InputContentBlock::Text { text: value } => text.push_str(value),
+                    InputContentBlock::ToolUse { id, name, input } => tool_calls.push(json!({
+                        "id": id,
+                        "type": "function",
+                        "function": {
+                            "name": name,
+                            "arguments": input.to_string(),
+                        }
+                    })),
+                    InputContentBlock::ToolResult { .. } => {}
+                }
+            }
+            if text.is_empty() && tool_calls.is_empty() {
+                Vec::new()
+            } else {
+                vec![json!({
+                    "role": "assistant",
+                    "content": (!text.is_empty()).then_some(text),
+                    "tool_calls": tool_calls,
+                })]
+            }
+        }
+        _ => message
+            .content
+            .iter()
+            .filter_map(|block| match block {
+                InputContentBlock::Text { text } => Some(json!({
+                    "role": "user",
+                    "content": text,
