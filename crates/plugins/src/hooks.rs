@@ -147,3 +147,52 @@ fn run_hook_commands(
     }
 
     HookRunResult::allow(messages)
+}
+
+struct HookContext<'a> {
+    event: HookEvent,
+    tool_name: &'a str,
+    tool_input: &'a str,
+    tool_output: Option<&'a str>,
+    is_error: bool,
+    payload: &'a str,
+}
+
+fn run_hook_command(command: &str, ctx: &HookContext<'_>) -> HookCommandOutcome {
+    let mut child = shell_command(command);
+    child.stdin(std::process::Stdio::piped());
+    child.stdout(std::process::Stdio::piped());
+    child.stderr(std::process::Stdio::piped());
+    child.env("HOOK_EVENT", ctx.event.as_str());
+    child.env("HOOK_TOOL_NAME", ctx.tool_name);
+    child.env("HOOK_TOOL_INPUT", ctx.tool_input);
+    child.env("HOOK_TOOL_IS_ERROR", if ctx.is_error { "1" } else { "0" });
+    if let Some(tool_output) = ctx.tool_output {
+        child.env("HOOK_TOOL_OUTPUT", tool_output);
+    }
+
+    match child.output_with_stdin(ctx.payload.as_bytes()) {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            let message = (!stdout.is_empty()).then_some(stdout);
+            match output.status.code() {
+                Some(0) => HookCommandOutcome::Allow { message },
+                Some(2) => HookCommandOutcome::Deny { message },
+                Some(code) => HookCommandOutcome::Warn {
+                    message: format_hook_warning(
+                        command,
+                        code,
+                        message.as_deref(),
+                        stderr.as_str(),
+                    ),
+                },
+                None => HookCommandOutcome::Warn {
+                    message: format!(
+                        "{} hook `{command}` terminated by signal while handling `{}`",
+                        ctx.event.as_str(),
+                        ctx.tool_name,
+                    ),
+                },
+            }
+        }
