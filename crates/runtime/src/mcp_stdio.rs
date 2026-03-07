@@ -344,3 +344,90 @@ impl McpServerManager {
         }
 
         Self {
+            servers: managed_servers,
+            unsupported_servers,
+            tool_index: BTreeMap::new(),
+            next_request_id: 1,
+        }
+    }
+
+    #[must_use]
+    pub fn unsupported_servers(&self) -> &[UnsupportedMcpServer] {
+        &self.unsupported_servers
+    }
+
+    pub async fn discover_tools(&mut self) -> Result<Vec<ManagedMcpTool>, McpServerManagerError> {
+        let server_names = self.servers.keys().cloned().collect::<Vec<_>>();
+        let mut discovered_tools = Vec::new();
+
+        for server_name in server_names {
+            self.ensure_server_ready(&server_name).await?;
+            self.clear_routes_for_server(&server_name);
+
+            let mut cursor = None;
+            loop {
+                let request_id = self.take_request_id();
+                let response = {
+                    let server = self.server_mut(&server_name)?;
+                    let process = server.process.as_mut().ok_or_else(|| {
+                        McpServerManagerError::InvalidResponse {
+                            server_name: server_name.clone(),
+                            method: "tools/list",
+                            details: "server process missing after initialization".to_string(),
+                        }
+                    })?;
+                    process
+                        .list_tools(
+                            request_id,
+                            Some(McpListToolsParams {
+                                cursor: cursor.clone(),
+                            }),
+                        )
+                        .await?
+                };
+
+                if let Some(error) = response.error {
+                    return Err(McpServerManagerError::JsonRpc {
+                        server_name: server_name.clone(),
+                        method: "tools/list",
+                        error,
+                    });
+                }
+
+                let result =
+                    response
+                        .result
+                        .ok_or_else(|| McpServerManagerError::InvalidResponse {
+                            server_name: server_name.clone(),
+                            method: "tools/list",
+                            details: "missing result payload".to_string(),
+                        })?;
+
+                for tool in result.tools {
+                    let qualified_name = mcp_tool_name(&server_name, &tool.name);
+                    self.tool_index.insert(
+                        qualified_name.clone(),
+                        ToolRoute {
+                            server_name: server_name.clone(),
+                            raw_name: tool.name.clone(),
+                        },
+                    );
+                    discovered_tools.push(ManagedMcpTool {
+                        server_name: server_name.clone(),
+                        qualified_name,
+                        raw_name: tool.name.clone(),
+                        tool,
+                    });
+                }
+
+                match result.next_cursor {
+                    Some(next_cursor) => cursor = Some(next_cursor),
+                    None => break,
+                }
+            }
+        }
+
+        Ok(discovered_tools)
+    }
+
+    pub async fn call_tool(
