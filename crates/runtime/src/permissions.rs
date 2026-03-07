@@ -125,3 +125,67 @@ impl PermissionPolicy {
             return PermissionOutcome::Allow;
         }
 
+        let needs_prompt = current_mode == PermissionMode::WorkspaceWrite
+            && required_mode == PermissionMode::DangerFullAccess;
+
+        let request = PermissionRequest {
+            tool_name: tool_name.to_string(),
+            input: input.to_string(),
+            current_mode,
+            required_mode,
+        };
+
+        if needs_prompt {
+            return match prompter.as_mut() {
+                Some(prompter) => match prompter.decide(&request) {
+                    PermissionPromptDecision::Allow => PermissionOutcome::Allow,
+                    PermissionPromptDecision::Deny { reason } => PermissionOutcome::Deny { reason },
+                },
+                None => PermissionOutcome::Deny {
+                    reason: format!(
+                        "tool '{tool_name}' requires approval to escalate from {} to {}",
+                        current_mode.as_str(),
+                        required_mode.as_str()
+                    ),
+                },
+            };
+        }
+
+        PermissionOutcome::Deny {
+            reason: format!(
+                "tool '{tool_name}' requires {} permission; current mode is {}",
+                required_mode.as_str(),
+                current_mode.as_str()
+            ),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        PermissionMode, PermissionOutcome, PermissionPolicy, PermissionPromptDecision,
+        PermissionPrompter, PermissionRequest,
+    };
+
+    struct RecordingPrompter {
+        seen: Vec<PermissionRequest>,
+        allow: bool,
+    }
+
+    impl PermissionPrompter for RecordingPrompter {
+        fn decide(&mut self, request: &PermissionRequest) -> PermissionPromptDecision {
+            self.seen.push(request.clone());
+            if self.allow {
+                PermissionPromptDecision::Allow
+            } else {
+                PermissionPromptDecision::Deny {
+                    reason: "not now".to_string(),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn allows_tools_when_active_mode_meets_requirement() {
+        let policy = PermissionPolicy::new(PermissionMode::WorkspaceWrite)
