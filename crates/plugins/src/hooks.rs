@@ -196,3 +196,53 @@ fn run_hook_command(command: &str, ctx: &HookContext<'_>) -> HookCommandOutcome 
                 },
             }
         }
+        Err(error) => HookCommandOutcome::Warn {
+            message: format!(
+                "{} hook `{command}` failed to start for `{}`: {error}",
+                ctx.event.as_str(),
+                ctx.tool_name,
+            ),
+        },
+    }
+}
+
+enum HookCommandOutcome {
+    Allow { message: Option<String> },
+    Deny { message: Option<String> },
+    Warn { message: String },
+}
+
+fn parse_tool_input(tool_input: &str) -> serde_json::Value {
+    serde_json::from_str(tool_input).unwrap_or_else(|_| json!({ "raw": tool_input }))
+}
+
+fn format_hook_warning(command: &str, code: i32, stdout: Option<&str>, stderr: &str) -> String {
+    let mut message =
+        format!("Hook `{command}` exited with status {code}; allowing tool execution to continue");
+    if let Some(stdout) = stdout.filter(|stdout| !stdout.is_empty()) {
+        message.push_str(": ");
+        message.push_str(stdout);
+    } else if !stderr.is_empty() {
+        message.push_str(": ");
+        message.push_str(stderr);
+    }
+    message
+}
+
+fn shell_command(command: &str) -> CommandWithStdin {
+    #[cfg(windows)]
+    let command_builder = {
+        let mut command_builder = Command::new("cmd");
+        command_builder.arg("/C").arg(command);
+        CommandWithStdin::new(command_builder)
+    };
+
+    #[cfg(not(windows))]
+    let command_builder = if Path::new(command).exists() {
+        let mut command_builder = Command::new("sh");
+        command_builder.arg(command);
+        CommandWithStdin::new(command_builder)
+    } else {
+        let mut command_builder = Command::new("sh");
+        command_builder.arg("-lc").arg(command);
+        CommandWithStdin::new(command_builder)
