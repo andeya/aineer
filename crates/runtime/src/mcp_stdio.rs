@@ -431,3 +431,89 @@ impl McpServerManager {
     }
 
     pub async fn call_tool(
+        &mut self,
+        qualified_tool_name: &str,
+        arguments: Option<JsonValue>,
+    ) -> Result<JsonRpcResponse<McpToolCallResult>, McpServerManagerError> {
+        let route = self
+            .tool_index
+            .get(qualified_tool_name)
+            .cloned()
+            .ok_or_else(|| McpServerManagerError::UnknownTool {
+                qualified_name: qualified_tool_name.to_string(),
+            })?;
+
+        self.ensure_server_ready(&route.server_name).await?;
+        let request_id = self.take_request_id();
+        let response =
+            {
+                let server = self.server_mut(&route.server_name)?;
+                let process = server.process.as_mut().ok_or_else(|| {
+                    McpServerManagerError::InvalidResponse {
+                        server_name: route.server_name.clone(),
+                        method: "tools/call",
+                        details: "server process missing after initialization".to_string(),
+                    }
+                })?;
+                process
+                    .call_tool(
+                        request_id,
+                        McpToolCallParams {
+                            name: route.raw_name,
+                            arguments,
+                            meta: None,
+                        },
+                    )
+                    .await?
+            };
+        Ok(response)
+    }
+
+    pub async fn shutdown(&mut self) -> Result<(), McpServerManagerError> {
+        let server_names = self.servers.keys().cloned().collect::<Vec<_>>();
+        for server_name in server_names {
+            let server = self.server_mut(&server_name)?;
+            if let Some(process) = server.process.as_mut() {
+                process.shutdown().await?;
+            }
+            server.process = None;
+            server.initialized = false;
+        }
+        Ok(())
+    }
+
+    fn clear_routes_for_server(&mut self, server_name: &str) {
+        self.tool_index
+            .retain(|_, route| route.server_name != server_name);
+    }
+
+    fn server_mut(
+        &mut self,
+        server_name: &str,
+    ) -> Result<&mut ManagedMcpServer, McpServerManagerError> {
+        self.servers
+            .get_mut(server_name)
+            .ok_or_else(|| McpServerManagerError::UnknownServer {
+                server_name: server_name.to_string(),
+            })
+    }
+
+    fn take_request_id(&mut self) -> JsonRpcId {
+        let id = self.next_request_id;
+        self.next_request_id = self.next_request_id.saturating_add(1);
+        JsonRpcId::Number(id)
+    }
+
+    async fn ensure_server_ready(
+        &mut self,
+        server_name: &str,
+    ) -> Result<(), McpServerManagerError> {
+        let needs_spawn = self
+            .servers
+            .get(server_name)
+            .map(|server| server.process.is_none())
+            .ok_or_else(|| McpServerManagerError::UnknownServer {
+                server_name: server_name.to_string(),
+            })?;
+
+        if needs_spawn {
