@@ -759,3 +759,61 @@ fn normalize_response(
         .into_iter()
         .next()
         .ok_or(ApiError::InvalidSseFrame(
+            "chat completion response missing choices",
+        ))?;
+    let mut content = Vec::new();
+    if let Some(text) = choice.message.content.filter(|value| !value.is_empty()) {
+        content.push(OutputContentBlock::Text { text });
+    }
+    for tool_call in choice.message.tool_calls {
+        content.push(OutputContentBlock::ToolUse {
+            id: tool_call.id,
+            name: tool_call.function.name,
+            input: parse_tool_arguments(&tool_call.function.arguments),
+        });
+    }
+
+    Ok(MessageResponse {
+        id: response.id,
+        kind: "message".to_string(),
+        role: choice.message.role,
+        content,
+        model: response.model.if_empty_then(model.to_string()),
+        stop_reason: choice
+            .finish_reason
+            .map(|value| normalize_finish_reason(&value)),
+        stop_sequence: None,
+        usage: Usage {
+            input_tokens: response
+                .usage
+                .as_ref()
+                .map_or(0, |usage| usage.prompt_tokens),
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+            output_tokens: response
+                .usage
+                .as_ref()
+                .map_or(0, |usage| usage.completion_tokens),
+        },
+        request_id: None,
+    })
+}
+
+fn parse_tool_arguments(arguments: &str) -> Value {
+    serde_json::from_str(arguments).unwrap_or_else(|_| json!({ "raw": arguments }))
+}
+
+fn next_sse_frame(buffer: &mut Vec<u8>) -> Option<String> {
+    let separator = buffer
+        .windows(2)
+        .position(|window| window == b"\n\n")
+        .map(|position| (position, 2))
+        .or_else(|| {
+            buffer
+                .windows(4)
+                .position(|window| window == b"\r\n\r\n")
+                .map(|position| (position, 4))
+        })?;
+
+    let (position, separator_len) = separator;
+    let frame = buffer.drain(..position + separator_len).collect::<Vec<_>>();
