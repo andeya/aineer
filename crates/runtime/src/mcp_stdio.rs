@@ -604,3 +604,89 @@ impl McpStdioProcess {
         })
     }
 
+    pub async fn write_all(&mut self, bytes: &[u8]) -> io::Result<()> {
+        self.stdin.write_all(bytes).await
+    }
+
+    pub async fn flush(&mut self) -> io::Result<()> {
+        self.stdin.flush().await
+    }
+
+    pub async fn write_line(&mut self, line: &str) -> io::Result<()> {
+        self.write_all(line.as_bytes()).await?;
+        self.write_all(b"\n").await?;
+        self.flush().await
+    }
+
+    pub async fn read_line(&mut self) -> io::Result<String> {
+        let mut line = String::new();
+        let bytes_read = self.stdout.read_line(&mut line).await?;
+        if bytes_read == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "MCP stdio stream closed while reading line",
+            ));
+        }
+        Ok(line)
+    }
+
+    pub async fn read_available(&mut self) -> io::Result<Vec<u8>> {
+        let mut buffer = vec![0_u8; 4096];
+        let read = self.stdout.read(&mut buffer).await?;
+        buffer.truncate(read);
+        Ok(buffer)
+    }
+
+    pub async fn write_frame(&mut self, payload: &[u8]) -> io::Result<()> {
+        let encoded = encode_frame(payload);
+        self.write_all(&encoded).await?;
+        self.flush().await
+    }
+
+    pub async fn read_frame(&mut self) -> io::Result<Vec<u8>> {
+        const MAX_FRAME_SIZE: usize = 50 * 1024 * 1024; // 50 MiB
+        let mut content_length = None;
+        loop {
+            let mut line = String::new();
+            let bytes_read = self.stdout.read_line(&mut line).await?;
+            if bytes_read == 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "MCP stdio stream closed while reading headers",
+                ));
+            }
+            if line == "\r\n" {
+                break;
+            }
+            if let Some(value) = line.strip_prefix("Content-Length:") {
+                let parsed = value
+                    .trim()
+                    .parse::<usize>()
+                    .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+                content_length = Some(parsed);
+            }
+        }
+
+        let content_length = content_length.ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "missing Content-Length header")
+        })?;
+        if content_length > MAX_FRAME_SIZE {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "MCP frame too large: {content_length} bytes exceeds {MAX_FRAME_SIZE} limit"
+                ),
+            ));
+        }
+        let mut payload = vec![0_u8; content_length];
+        self.stdout.read_exact(&mut payload).await?;
+        Ok(payload)
+    }
+
+    pub async fn write_jsonrpc_message<T: Serialize>(&mut self, message: &T) -> io::Result<()> {
+        let body = serde_json::to_vec(message)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        self.write_frame(&body).await
+    }
+
+    pub async fn read_jsonrpc_message<T: DeserializeOwned>(&mut self) -> io::Result<T> {
