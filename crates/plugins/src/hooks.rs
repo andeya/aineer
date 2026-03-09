@@ -246,3 +246,52 @@ fn shell_command(command: &str) -> CommandWithStdin {
         let mut command_builder = Command::new("sh");
         command_builder.arg("-lc").arg(command);
         CommandWithStdin::new(command_builder)
+    };
+
+    command_builder
+}
+
+struct CommandWithStdin {
+    command: Command,
+}
+
+impl CommandWithStdin {
+    fn new(command: Command) -> Self {
+        Self { command }
+    }
+
+    fn stdin(&mut self, cfg: std::process::Stdio) -> &mut Self {
+        self.command.stdin(cfg);
+        self
+    }
+
+    fn stdout(&mut self, cfg: std::process::Stdio) -> &mut Self {
+        self.command.stdout(cfg);
+        self
+    }
+
+    fn stderr(&mut self, cfg: std::process::Stdio) -> &mut Self {
+        self.command.stderr(cfg);
+        self
+    }
+
+    fn env<K, V>(&mut self, key: K, value: V) -> &mut Self
+    where
+        K: AsRef<OsStr>,
+        V: AsRef<OsStr>,
+    {
+        self.command.env(key, value);
+        self
+    }
+
+    fn output_with_stdin(&mut self, stdin: &[u8]) -> std::io::Result<std::process::Output> {
+        let mut child = self.command.spawn()?;
+        if let Some(mut child_stdin) = child.stdin.take() {
+            use std::io::Write as _;
+            child_stdin.write_all(stdin)?;
+        }
+        child.wait_with_output()
+    }
+}
+
+#[cfg(test)]
