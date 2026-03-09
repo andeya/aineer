@@ -517,3 +517,90 @@ impl McpServerManager {
             })?;
 
         if needs_spawn {
+            let server = self.server_mut(server_name)?;
+            server.process = Some(spawn_mcp_stdio_process(&server.bootstrap)?);
+            server.initialized = false;
+        }
+
+        let needs_initialize = self
+            .servers
+            .get(server_name)
+            .map(|server| !server.initialized)
+            .ok_or_else(|| McpServerManagerError::UnknownServer {
+                server_name: server_name.to_string(),
+            })?;
+
+        if needs_initialize {
+            let request_id = self.take_request_id();
+            let response = {
+                let server = self.server_mut(server_name)?;
+                let process = server.process.as_mut().ok_or_else(|| {
+                    McpServerManagerError::InvalidResponse {
+                        server_name: server_name.to_string(),
+                        method: "initialize",
+                        details: "server process missing before initialize".to_string(),
+                    }
+                })?;
+                process
+                    .initialize(request_id, default_initialize_params())
+                    .await?
+            };
+
+            if let Some(error) = response.error {
+                return Err(McpServerManagerError::JsonRpc {
+                    server_name: server_name.to_string(),
+                    method: "initialize",
+                    error,
+                });
+            }
+
+            if response.result.is_none() {
+                return Err(McpServerManagerError::InvalidResponse {
+                    server_name: server_name.to_string(),
+                    method: "initialize",
+                    details: "missing result payload".to_string(),
+                });
+            }
+
+            let server = self.server_mut(server_name)?;
+            server.initialized = true;
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct McpStdioProcess {
+    child: Child,
+    stdin: ChildStdin,
+    stdout: BufReader<ChildStdout>,
+}
+
+impl McpStdioProcess {
+    pub fn spawn(transport: &McpStdioTransport) -> io::Result<Self> {
+        let mut command = Command::new(&transport.command);
+        command
+            .args(&transport.args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit());
+        apply_env(&mut command, &transport.env);
+
+        let mut child = command.spawn()?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| io::Error::other("stdio MCP process missing stdin pipe"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| io::Error::other("stdio MCP process missing stdout pipe"))?;
+
+        Ok(Self {
+            child,
+            stdin,
+            stdout: BufReader::new(stdout),
+        })
+    }
+
