@@ -275,3 +275,95 @@ async fn spawn_server(
                 if read == 0 {
                     break;
                 }
+                buffer.extend_from_slice(&chunk[..read]);
+                if let Some(position) = find_header_end(&buffer) {
+                    header_end = Some(position);
+                    break;
+                }
+            }
+
+            let header_end = header_end.expect("headers should exist");
+            let (header_bytes, remaining) = buffer.split_at(header_end);
+            let header_text = String::from_utf8(header_bytes.to_vec()).expect("utf8 headers");
+            let mut lines = header_text.split("\r\n");
+            let request_line = lines.next().expect("request line");
+            let path = request_line
+                .split_whitespace()
+                .nth(1)
+                .expect("path")
+                .to_string();
+            let mut headers = HashMap::new();
+            let mut content_length = 0_usize;
+            for line in lines {
+                if line.is_empty() {
+                    continue;
+                }
+                let (name, value) = line.split_once(':').expect("header");
+                let value = value.trim().to_string();
+                if name.eq_ignore_ascii_case("content-length") {
+                    content_length = value.parse().expect("content length");
+                }
+                headers.insert(name.to_ascii_lowercase(), value);
+            }
+
+            let mut body = remaining[4..].to_vec();
+            while body.len() < content_length {
+                let mut chunk = vec![0_u8; content_length - body.len()];
+                let read = socket.read(&mut chunk).await.expect("read body");
+                if read == 0 {
+                    break;
+                }
+                body.extend_from_slice(&chunk[..read]);
+            }
+
+            state.lock().await.push(CapturedRequest {
+                path,
+                headers,
+                body: String::from_utf8(body).expect("utf8 body"),
+            });
+
+            socket
+                .write_all(response.as_bytes())
+                .await
+                .expect("write response");
+        }
+    });
+
+    TestServer {
+        base_url: format!("http://{address}"),
+        join_handle,
+    }
+}
+
+fn find_header_end(bytes: &[u8]) -> Option<usize> {
+    bytes.windows(4).position(|window| window == b"\r\n\r\n")
+}
+
+fn http_response(status: &str, content_type: &str, body: &str) -> String {
+    http_response_with_headers(status, content_type, body, &[])
+}
+
+fn http_response_with_headers(
+    status: &str,
+    content_type: &str,
+    body: &str,
+    headers: &[(&str, &str)],
+) -> String {
+    let mut extra_headers = String::new();
+    for (name, value) in headers {
+        use std::fmt::Write as _;
+        write!(&mut extra_headers, "{name}: {value}\r\n").expect("header write");
+    }
+    format!(
+        "HTTP/1.1 {status}\r\ncontent-type: {content_type}\r\n{extra_headers}content-length: {}\r\nconnection: close\r\n\r\n{body}",
+        body.len()
+    )
+}
+
+fn sample_request(stream: bool) -> MessageRequest {
+    MessageRequest {
+        model: "grok-3".to_string(),
+        max_tokens: 64,
+        messages: vec![InputMessage {
+            role: "user".to_string(),
+            content: vec![InputContentBlock::Text {
