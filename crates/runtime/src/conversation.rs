@@ -267,3 +267,93 @@ where
     }
 
     #[must_use]
+    pub fn compact(&self, config: CompactionConfig) -> CompactionResult {
+        compact_session(&self.session, config)
+    }
+
+    #[must_use]
+    pub fn estimated_tokens(&self) -> usize {
+        estimate_session_tokens(&self.session)
+    }
+
+    #[must_use]
+    pub fn usage(&self) -> &UsageTracker {
+        &self.usage_tracker
+    }
+
+    #[must_use]
+    pub fn session(&self) -> &Session {
+        &self.session
+    }
+
+    #[must_use]
+    pub fn into_session(self) -> Session {
+        self.session
+    }
+}
+
+fn build_assistant_message(
+    events: Vec<AssistantEvent>,
+) -> Result<(ConversationMessage, Option<TokenUsage>), RuntimeError> {
+    let mut text = String::new();
+    let mut blocks = Vec::new();
+    let mut finished = false;
+    let mut usage = None;
+
+    for event in events {
+        match event {
+            AssistantEvent::TextDelta(delta) => text.push_str(&delta),
+            AssistantEvent::ToolUse { id, name, input } => {
+                flush_text_block(&mut text, &mut blocks);
+                blocks.push(ContentBlock::ToolUse { id, name, input });
+            }
+            AssistantEvent::Usage(value) => usage = Some(value),
+            AssistantEvent::MessageStop => {
+                finished = true;
+            }
+        }
+    }
+
+    flush_text_block(&mut text, &mut blocks);
+
+    if !finished {
+        return Err(RuntimeError::new(
+            "assistant stream ended without a message stop event",
+        ));
+    }
+    if blocks.is_empty() {
+        return Err(RuntimeError::new("assistant stream produced no content"));
+    }
+
+    Ok((
+        ConversationMessage::assistant_with_usage(blocks, usage),
+        usage,
+    ))
+}
+
+fn flush_text_block(text: &mut String, blocks: &mut Vec<ContentBlock>) {
+    if !text.is_empty() {
+        blocks.push(ContentBlock::Text {
+            text: std::mem::take(text),
+        });
+    }
+}
+
+fn format_hook_message(result: &HookRunResult, fallback: &str) -> String {
+    if result.messages().is_empty() {
+        fallback.to_string()
+    } else {
+        result.messages().join("\n")
+    }
+}
+
+fn merge_hook_feedback(messages: &[String], output: String, denied: bool) -> String {
+    if messages.is_empty() {
+        return output;
+    }
+
+    let mut sections = Vec::new();
+    if !output.trim().is_empty() {
+        sections.push(output);
+    }
+    let label = if denied {
