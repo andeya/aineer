@@ -244,3 +244,85 @@ fn build_linux_sandbox_command(
     command: &str,
     cwd: &Path,
     status: &SandboxStatus,
+) -> Option<SandboxCommand> {
+    if !command_exists("unshare") {
+        return None;
+    }
+
+    let mut args = vec![
+        "--user".to_string(),
+        "--map-root-user".to_string(),
+        "--mount".to_string(),
+        "--ipc".to_string(),
+        "--pid".to_string(),
+        "--uts".to_string(),
+        "--fork".to_string(),
+    ];
+    if status.network.active {
+        args.push("--net".to_string());
+    }
+    args.push("sh".to_string());
+    args.push("-lc".to_string());
+    args.push(command.to_string());
+
+    Some(SandboxCommand {
+        program: "unshare".to_string(),
+        args,
+        env: sandbox_env(cwd, status),
+    })
+}
+
+fn build_macos_sandbox_command(
+    command: &str,
+    cwd: &Path,
+    status: &SandboxStatus,
+) -> Option<SandboxCommand> {
+    if !command_exists("sandbox-exec") {
+        return None;
+    }
+
+    let profile = generate_seatbelt_profile(cwd, status);
+    let args = vec![
+        "-p".to_string(),
+        profile,
+        "sh".to_string(),
+        "-lc".to_string(),
+        command.to_string(),
+    ];
+
+    Some(SandboxCommand {
+        program: "sandbox-exec".to_string(),
+        args,
+        env: sandbox_env(cwd, status),
+    })
+}
+
+fn sandbox_env(cwd: &Path, status: &SandboxStatus) -> Vec<(String, String)> {
+    let sandbox_home = cwd.join(".sandbox-home");
+    let sandbox_tmp = cwd.join(".sandbox-tmp");
+    let mut env = vec![
+        ("HOME".to_string(), sandbox_home.display().to_string()),
+        ("TMPDIR".to_string(), sandbox_tmp.display().to_string()),
+        (
+            "CODINEER_SANDBOX_FILESYSTEM_MODE".to_string(),
+            status.filesystem_mode.as_str().to_string(),
+        ),
+        (
+            "CODINEER_SANDBOX_ALLOWED_MOUNTS".to_string(),
+            status.allowed_mounts.join(":"),
+        ),
+    ];
+    if let Ok(path) = env::var("PATH") {
+        env.push(("PATH".to_string(), path));
+    }
+    env
+}
+
+#[must_use]
+pub fn generate_seatbelt_profile(cwd: &Path, status: &SandboxStatus) -> String {
+    let cwd_str = cwd.display();
+    let sandbox_home = cwd.join(".sandbox-home");
+    let sandbox_tmp = cwd.join(".sandbox-tmp");
+
+    let mut rules = vec![
+        "(version 1)".to_string(),
