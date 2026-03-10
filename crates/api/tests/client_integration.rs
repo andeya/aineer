@@ -337,3 +337,52 @@ impl Drop for TestServer {
 }
 
 async fn spawn_server(
+    state: Arc<Mutex<Vec<CapturedRequest>>>,
+    responses: Vec<String>,
+) -> TestServer {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("listener should bind");
+    let address = listener
+        .local_addr()
+        .expect("listener should have local addr");
+    let join_handle = tokio::spawn(async move {
+        for response in responses {
+            let (mut socket, _) = listener.accept().await.expect("server should accept");
+            let mut buffer = Vec::new();
+            let mut header_end = None;
+
+            loop {
+                let mut chunk = [0_u8; 1024];
+                let read = socket
+                    .read(&mut chunk)
+                    .await
+                    .expect("request read should succeed");
+                if read == 0 {
+                    break;
+                }
+                buffer.extend_from_slice(&chunk[..read]);
+                if let Some(position) = find_header_end(&buffer) {
+                    header_end = Some(position);
+                    break;
+                }
+            }
+
+            let header_end = header_end.expect("request should include headers");
+            let (header_bytes, remaining) = buffer.split_at(header_end);
+            let header_text =
+                String::from_utf8(header_bytes.to_vec()).expect("headers should be utf8");
+            let mut lines = header_text.split("\r\n");
+            let request_line = lines.next().expect("request line should exist");
+            let mut parts = request_line.split_whitespace();
+            let method = parts.next().expect("method should exist").to_string();
+            let path = parts.next().expect("path should exist").to_string();
+            let mut headers = HashMap::new();
+            let mut content_length = 0_usize;
+            for line in lines {
+                if line.is_empty() {
+                    continue;
+                }
+                let (name, value) = line.split_once(':').expect("header should have colon");
+                let value = value.trim().to_string();
+                if name.eq_ignore_ascii_case("content-length") {
