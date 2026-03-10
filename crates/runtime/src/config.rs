@@ -926,3 +926,81 @@ fn deep_merge_objects(
     for (key, value) in source {
         match (target.get_mut(key), value) {
             (Some(JsonValue::Object(existing)), JsonValue::Object(incoming)) => {
+                deep_merge_objects(existing, incoming);
+            }
+            _ => {
+                target.insert(key.clone(), value.clone());
+            }
+        }
+    }
+}
+
+fn extend_unique(target: &mut Vec<String>, values: &[String]) {
+    for value in values {
+        push_unique(target, value.clone());
+    }
+}
+
+fn push_unique(target: &mut Vec<String>, value: String) {
+    if !target.iter().any(|existing| existing == &value) {
+        target.push(value);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        ConfigLoader, ConfigSource, McpServerConfig, McpTransport, ResolvedPermissionMode,
+        CODINEER_SETTINGS_SCHEMA_NAME,
+    };
+    use crate::json::JsonValue;
+    use crate::sandbox::FilesystemIsolationMode;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir() -> std::path::PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be after epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("runtime-config-{nanos}"))
+    }
+
+    #[test]
+    fn rejects_non_object_settings_files() {
+        let root = temp_dir();
+        let cwd = root.join("project");
+        let home = root.join("home").join(".codineer");
+        fs::create_dir_all(&home).expect("home config dir");
+        fs::create_dir_all(&cwd).expect("project dir");
+        fs::write(home.join("settings.json"), "[]").expect("write bad settings");
+
+        let error = ConfigLoader::new(&cwd, &home)
+            .load()
+            .expect_err("config should fail");
+        assert!(error
+            .to_string()
+            .contains("top-level settings value must be a JSON object"));
+
+        fs::remove_dir_all(root).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn loads_and_merges_config_files_by_precedence() {
+        let root = temp_dir();
+        let cwd = root.join("project");
+        let home = root.join("home").join(".codineer");
+        fs::create_dir_all(cwd.join(".codineer")).expect("project config dir");
+        fs::create_dir_all(&home).expect("home config dir");
+
+        fs::write(
+            home.parent().expect("home parent").join(".codineer.json"),
+            r#"{"model":"haiku","env":{"A":"1"},"mcpServers":{"home":{"command":"uvx","args":["home"]}}}"#,
+        )
+        .expect("write user compat config");
+        fs::write(
+            home.join("settings.json"),
+            r#"{"model":"sonnet","env":{"A2":"1"},"hooks":{"PreToolUse":["base"]},"permissions":{"defaultMode":"plan"}}"#,
+        )
+        .expect("write user settings");
+        fs::write(
