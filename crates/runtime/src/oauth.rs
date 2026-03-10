@@ -325,3 +325,85 @@ pub fn save_oauth_credentials(token_set: &OAuthTokenSet) -> io::Result<()> {
     let mut root = read_credentials_root(&path)?;
     root.insert(
         "oauth".to_string(),
+        serde_json::to_value(StoredOAuthCredentials::from(token_set.clone()))
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?,
+    );
+    write_credentials_root(&path, &root)
+}
+
+pub fn clear_oauth_credentials() -> io::Result<()> {
+    clear_from_keyring();
+
+    let path = credentials_path()?;
+    let mut root = read_credentials_root(&path)?;
+    root.remove("oauth");
+    write_credentials_root(&path, &root)
+}
+
+pub fn parse_oauth_callback_request_target(target: &str) -> Result<OAuthCallbackParams, String> {
+    let (path, query) = target
+        .split_once('?')
+        .map_or((target, ""), |(path, query)| (path, query));
+    if path != "/callback" {
+        return Err(format!("unexpected callback path: {path}"));
+    }
+    parse_oauth_callback_query(query)
+}
+
+pub fn parse_oauth_callback_query(query: &str) -> Result<OAuthCallbackParams, String> {
+    let mut params = BTreeMap::new();
+    for pair in query.split('&').filter(|pair| !pair.is_empty()) {
+        let (key, value) = pair
+            .split_once('=')
+            .map_or((pair, ""), |(key, value)| (key, value));
+        params.insert(percent_decode(key)?, percent_decode(value)?);
+    }
+    Ok(OAuthCallbackParams {
+        code: params.get("code").cloned(),
+        state: params.get("state").cloned(),
+        error: params.get("error").cloned(),
+        error_description: params.get("error_description").cloned(),
+    })
+}
+
+fn generate_random_token(bytes: usize) -> io::Result<String> {
+    let mut buffer = vec![0_u8; bytes];
+    File::open("/dev/urandom")?.read_exact(&mut buffer)?;
+    Ok(base64url_encode(&buffer))
+}
+
+fn credentials_home_dir() -> io::Result<PathBuf> {
+    if let Some(path) = std::env::var_os("CODINEER_CONFIG_HOME") {
+        return Ok(PathBuf::from(path));
+    }
+    let home = std::env::var_os("HOME")
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "HOME is not set"))?;
+    Ok(PathBuf::from(home).join(".codineer"))
+}
+
+fn read_credentials_root(path: &PathBuf) -> io::Result<Map<String, Value>> {
+    match fs::read_to_string(path) {
+        Ok(contents) => {
+            if contents.trim().is_empty() {
+                return Ok(Map::new());
+            }
+            serde_json::from_str::<Value>(&contents)
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?
+                .as_object()
+                .cloned()
+                .ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "credentials file must contain a JSON object",
+                    )
+                })
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Map::new()),
+        Err(error) => Err(error),
+    }
+}
+
+fn write_credentials_root(path: &PathBuf, root: &Map<String, Value>) -> io::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
