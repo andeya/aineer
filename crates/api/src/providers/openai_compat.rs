@@ -876,3 +876,61 @@ fn chat_completions_endpoint(base_url: &str) -> String {
     } else {
         format!("{trimmed}/chat/completions")
     }
+}
+
+fn request_id_from_headers(headers: &reqwest::header::HeaderMap) -> Option<String> {
+    headers
+        .get(REQUEST_ID_HEADER)
+        .or_else(|| headers.get(ALT_REQUEST_ID_HEADER))
+        .and_then(|value| value.to_str().ok())
+        .map(ToOwned::to_owned)
+}
+
+async fn expect_success(response: reqwest::Response) -> Result<reqwest::Response, ApiError> {
+    let status = response.status();
+    if status.is_success() {
+        return Ok(response);
+    }
+
+    let body = response.text().await.unwrap_or_default();
+    let parsed_error = serde_json::from_str::<ErrorEnvelope>(&body).ok();
+    let retryable = is_retryable_status(status);
+
+    Err(ApiError::Api {
+        status,
+        error_type: parsed_error
+            .as_ref()
+            .and_then(|error| error.error.error_type.clone()),
+        message: parsed_error
+            .as_ref()
+            .and_then(|error| error.error.message.clone()),
+        body,
+        retryable,
+    })
+}
+
+const fn is_retryable_status(status: reqwest::StatusCode) -> bool {
+    matches!(status.as_u16(), 408 | 409 | 429 | 500 | 502 | 503 | 504)
+}
+
+fn normalize_finish_reason(value: &str) -> String {
+    match value {
+        "stop" => "end_turn",
+        "tool_calls" => "tool_use",
+        other => other,
+    }
+    .to_string()
+}
+
+trait StringExt {
+    fn if_empty_then(self, fallback: String) -> String;
+}
+
+impl StringExt for String {
+    fn if_empty_then(self, fallback: String) -> String {
+        if self.is_empty() {
+            fallback
+        } else {
+            self
+        }
+    }
