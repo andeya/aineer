@@ -690,3 +690,90 @@ impl McpStdioProcess {
     }
 
     pub async fn read_jsonrpc_message<T: DeserializeOwned>(&mut self) -> io::Result<T> {
+        let payload = self.read_frame().await?;
+        serde_json::from_slice(&payload)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+    }
+
+    pub async fn send_request<T: Serialize>(
+        &mut self,
+        request: &JsonRpcRequest<T>,
+    ) -> io::Result<()> {
+        self.write_jsonrpc_message(request).await
+    }
+
+    pub async fn read_response<T: DeserializeOwned>(&mut self) -> io::Result<JsonRpcResponse<T>> {
+        self.read_jsonrpc_message().await
+    }
+
+    pub async fn request<TParams: Serialize, TResult: DeserializeOwned>(
+        &mut self,
+        id: JsonRpcId,
+        method: impl Into<String>,
+        params: Option<TParams>,
+    ) -> io::Result<JsonRpcResponse<TResult>> {
+        let request = JsonRpcRequest::new(id, method, params);
+        self.send_request(&request).await?;
+        self.read_response().await
+    }
+
+    pub async fn initialize(
+        &mut self,
+        id: JsonRpcId,
+        params: McpInitializeParams,
+    ) -> io::Result<JsonRpcResponse<McpInitializeResult>> {
+        self.request(id, "initialize", Some(params)).await
+    }
+
+    pub async fn list_tools(
+        &mut self,
+        id: JsonRpcId,
+        params: Option<McpListToolsParams>,
+    ) -> io::Result<JsonRpcResponse<McpListToolsResult>> {
+        self.request(id, "tools/list", params).await
+    }
+
+    pub async fn call_tool(
+        &mut self,
+        id: JsonRpcId,
+        params: McpToolCallParams,
+    ) -> io::Result<JsonRpcResponse<McpToolCallResult>> {
+        self.request(id, "tools/call", Some(params)).await
+    }
+
+    pub async fn list_resources(
+        &mut self,
+        id: JsonRpcId,
+        params: Option<McpListResourcesParams>,
+    ) -> io::Result<JsonRpcResponse<McpListResourcesResult>> {
+        self.request(id, "resources/list", params).await
+    }
+
+    pub async fn read_resource(
+        &mut self,
+        id: JsonRpcId,
+        params: McpReadResourceParams,
+    ) -> io::Result<JsonRpcResponse<McpReadResourceResult>> {
+        self.request(id, "resources/read", Some(params)).await
+    }
+
+    pub async fn terminate(&mut self) -> io::Result<()> {
+        self.child.kill().await
+    }
+
+    pub async fn wait(&mut self) -> io::Result<std::process::ExitStatus> {
+        self.child.wait().await
+    }
+
+    async fn shutdown(&mut self) -> io::Result<()> {
+        if self.child.try_wait()?.is_none() {
+            self.child.kill().await?;
+        }
+        let _ = self.child.wait().await?;
+        Ok(())
+    }
+}
+
+pub fn spawn_mcp_stdio_process(bootstrap: &McpClientBootstrap) -> io::Result<McpStdioProcess> {
+    match &bootstrap.transport {
+        McpClientTransport::Stdio(transport) => McpStdioProcess::spawn(transport),
