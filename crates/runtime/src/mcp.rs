@@ -340,3 +340,51 @@ mod tests {
             id: "p1".into(),
         });
         assert_eq!(
+            mcp_server_signature(&proxy),
+            Some("url:https://proxy.example".into())
+        );
+    }
+
+    #[test]
+    fn signature_for_sse_and_http_servers() {
+        let sse = McpServerConfig::Sse(McpRemoteServerConfig {
+            url: "https://sse.example/events".into(),
+            headers: BTreeMap::new(),
+            headers_helper: None,
+            oauth: None,
+        });
+        assert_eq!(
+            mcp_server_signature(&sse),
+            Some("url:https://sse.example/events".into())
+        );
+    }
+
+    #[test]
+    fn scoped_hash_for_managed_proxy() {
+        use crate::config::McpManagedProxyServerConfig;
+
+        let config = ScopedMcpServerConfig {
+            scope: ConfigSource::Project,
+            config: McpServerConfig::ManagedProxy(McpManagedProxyServerConfig {
+                url: "https://proxy.example".into(),
+                id: "p1".into(),
+            }),
+        };
+        let hash = scoped_mcp_config_hash(&config);
+        assert!(!hash.is_empty());
+    }
+
+    #[test]
+    fn scoped_hash_for_sdk() {
+        use crate::config::McpSdkServerConfig;
+
+        let config = ScopedMcpServerConfig {
+            scope: ConfigSource::User,
+            config: McpServerConfig::Sdk(McpSdkServerConfig {
+                name: "built-in".into(),
+            }),
+        };
+        let hash = scoped_mcp_config_hash(&config);
+        assert!(!hash.is_empty());
+    }
+}
