@@ -70,3 +70,74 @@ impl GlobalToolRegistry {
     }
 
     pub fn with_plugin_tools(plugin_tools: Vec<PluginTool>) -> Result<Self, String> {
+        let builtin_names = mvp_tool_specs()
+            .into_iter()
+            .map(|spec| spec.name.to_string())
+            .collect::<BTreeSet<_>>();
+        let mut seen_plugin_names = BTreeSet::new();
+
+        for tool in &plugin_tools {
+            let name = tool.definition().name.clone();
+            if builtin_names.contains(&name) {
+                return Err(format!(
+                    "plugin tool `{name}` conflicts with a built-in tool name"
+                ));
+            }
+            if !seen_plugin_names.insert(name.clone()) {
+                return Err(format!("duplicate plugin tool name `{name}`"));
+            }
+        }
+
+        Ok(Self { plugin_tools })
+    }
+
+    pub fn normalize_allowed_tools(
+        &self,
+        values: &[String],
+    ) -> Result<Option<BTreeSet<String>>, String> {
+        if values.is_empty() {
+            return Ok(None);
+        }
+
+        let builtin_specs = mvp_tool_specs();
+        let canonical_names = builtin_specs
+            .iter()
+            .map(|spec| spec.name.to_string())
+            .chain(
+                self.plugin_tools
+                    .iter()
+                    .map(|tool| tool.definition().name.clone()),
+            )
+            .collect::<Vec<_>>();
+        let mut name_map = canonical_names
+            .iter()
+            .map(|name| (normalize_tool_name(name), name.clone()))
+            .collect::<BTreeMap<_, _>>();
+
+        for (alias, canonical) in [
+            ("read", "read_file"),
+            ("write", "write_file"),
+            ("edit", "edit_file"),
+            ("glob", "glob_search"),
+            ("grep", "grep_search"),
+        ] {
+            name_map.insert(alias.to_string(), canonical.to_string());
+        }
+
+        let mut allowed = BTreeSet::new();
+        for value in values {
+            for token in value
+                .split(|ch: char| ch == ',' || ch.is_whitespace())
+                .filter(|token| !token.is_empty())
+            {
+                let normalized = normalize_tool_name(token);
+                let canonical = name_map.get(&normalized).ok_or_else(|| {
+                    format!(
+                        "unsupported tool in --allowedTools: {token} (expected one of: {})",
+                        canonical_names.join(", ")
+                    )
+                })?;
+                allowed.insert(canonical.clone());
+            }
+        }
+
