@@ -326,3 +326,85 @@ pub fn generate_seatbelt_profile(cwd: &Path, status: &SandboxStatus) -> String {
 
     let mut rules = vec![
         "(version 1)".to_string(),
+        "(deny default)".to_string(),
+        "(allow process-exec*)".to_string(),
+        "(allow process-fork)".to_string(),
+        "(allow sysctl-read)".to_string(),
+        "(allow mach-lookup)".to_string(),
+        "(allow signal (target self))".to_string(),
+        "(allow ipc-posix-shm*)".to_string(),
+        "(allow file-read* (subpath \"/usr\"))".to_string(),
+        "(allow file-read* (subpath \"/bin\"))".to_string(),
+        "(allow file-read* (subpath \"/sbin\"))".to_string(),
+        "(allow file-read* (subpath \"/Library\"))".to_string(),
+        "(allow file-read* (subpath \"/System\"))".to_string(),
+        "(allow file-read* (subpath \"/private\"))".to_string(),
+        "(allow file-read* (subpath \"/dev\"))".to_string(),
+        "(allow file-read* (subpath \"/var\"))".to_string(),
+        "(allow file-read* (subpath \"/etc\"))".to_string(),
+        "(allow file-read* (subpath \"/opt\"))".to_string(),
+        "(allow file-read* (subpath \"/tmp\"))".to_string(),
+        "(allow file-read* (subpath \"/Applications\"))".to_string(),
+    ];
+
+    if let Some(home) = env::var_os("HOME") {
+        let home_str = home.to_string_lossy();
+        rules.push(format!(
+            "(allow file-read* (subpath \"{home_str}/.cargo\"))"
+        ));
+        rules.push(format!(
+            "(allow file-read* (subpath \"{home_str}/.rustup\"))"
+        ));
+    }
+
+    match status.filesystem_mode {
+        FilesystemIsolationMode::Off => {
+            rules.push("(allow file-read*)".to_string());
+            rules.push("(allow file-write*)".to_string());
+        }
+        FilesystemIsolationMode::WorkspaceOnly => {
+            rules.push(format!("(allow file-read* (subpath \"{cwd_str}\"))"));
+            rules.push(format!("(allow file-write* (subpath \"{cwd_str}\"))"));
+            rules.push(format!(
+                "(allow file-write* (subpath \"{}\"))",
+                sandbox_home.display()
+            ));
+            rules.push(format!(
+                "(allow file-write* (subpath \"{}\"))",
+                sandbox_tmp.display()
+            ));
+        }
+        FilesystemIsolationMode::AllowList => {
+            rules.push(format!("(allow file-read* (subpath \"{cwd_str}\"))"));
+            rules.push(format!(
+                "(allow file-write* (subpath \"{}\"))",
+                sandbox_home.display()
+            ));
+            rules.push(format!(
+                "(allow file-write* (subpath \"{}\"))",
+                sandbox_tmp.display()
+            ));
+            for mount in &status.allowed_mounts {
+                rules.push(format!("(allow file-read* (subpath \"{mount}\"))"));
+                rules.push(format!("(allow file-write* (subpath \"{mount}\"))"));
+            }
+        }
+    }
+
+    if status.network.active {
+        rules.push("(deny network*)".to_string());
+    } else {
+        rules.push("(allow network*)".to_string());
+    }
+
+    rules.join("\n")
+}
+
+fn normalize_mounts(mounts: &[String], cwd: &Path) -> Vec<String> {
+    let cwd = cwd.to_path_buf();
+    mounts
+        .iter()
+        .map(|mount| {
+            let path = PathBuf::from(mount);
+            if path.is_absolute() {
+                path
