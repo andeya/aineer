@@ -284,3 +284,146 @@ const SLASH_COMMAND_SPECS: &[SlashCommandSpec] = &[
     SlashCommandSpec {
         name: "agents",
         aliases: &[],
+        summary: "List configured agents",
+        argument_hint: None,
+        resume_supported: true,
+        category: SlashCommandCategory::Automation,
+    },
+    SlashCommandSpec {
+        name: "skills",
+        aliases: &[],
+        summary: "List available skills",
+        argument_hint: None,
+        resume_supported: true,
+        category: SlashCommandCategory::Automation,
+    },
+];
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SlashCommand {
+    Help,
+    Status,
+    Compact,
+    Branch {
+        action: Option<String>,
+        target: Option<String>,
+    },
+    Bughunter {
+        scope: Option<String>,
+    },
+    Worktree {
+        action: Option<String>,
+        path: Option<String>,
+        branch: Option<String>,
+    },
+    Commit,
+    CommitPushPr {
+        context: Option<String>,
+    },
+    Pr {
+        context: Option<String>,
+    },
+    Issue {
+        context: Option<String>,
+    },
+    Ultraplan {
+        task: Option<String>,
+    },
+    Teleport {
+        target: Option<String>,
+    },
+    DebugToolCall,
+    Model {
+        model: Option<String>,
+    },
+    Permissions {
+        mode: Option<String>,
+    },
+    Clear {
+        confirm: bool,
+    },
+    Cost,
+    Resume {
+        session_path: Option<String>,
+    },
+    Config {
+        section: Option<String>,
+    },
+    Memory,
+    Init,
+    Diff,
+    Version,
+    Export {
+        path: Option<String>,
+    },
+    Session {
+        action: Option<String>,
+        target: Option<String>,
+    },
+    Plugins {
+        action: Option<String>,
+        target: Option<String>,
+    },
+    Agents {
+        args: Option<String>,
+    },
+    Skills {
+        args: Option<String>,
+    },
+    Unknown(String),
+}
+
+impl SlashCommand {
+    #[must_use]
+    pub fn parse(input: &str) -> Option<Self> {
+        let trimmed = input.trim();
+        if !trimmed.starts_with('/') {
+            return None;
+        }
+
+        let mut parts = trimmed.trim_start_matches('/').split_whitespace();
+        let command = parts.next().unwrap_or_default();
+        Some(match command {
+            "help" => Self::Help,
+            "status" => Self::Status,
+            "compact" => Self::Compact,
+            "branch" => Self::Branch {
+                action: parts.next().map(ToOwned::to_owned),
+                target: parts.next().map(ToOwned::to_owned),
+            },
+            "bughunter" => Self::Bughunter {
+                scope: remainder_after_command(trimmed, command),
+            },
+            "worktree" => Self::Worktree {
+                action: parts.next().map(ToOwned::to_owned),
+                path: parts.next().map(ToOwned::to_owned),
+                branch: parts.next().map(ToOwned::to_owned),
+            },
+            "commit" => Self::Commit,
+            "commit-push-pr" => Self::CommitPushPr {
+                context: remainder_after_command(trimmed, command),
+            },
+            "pr" => Self::Pr {
+                context: remainder_after_command(trimmed, command),
+            },
+            "issue" => Self::Issue {
+                context: remainder_after_command(trimmed, command),
+            },
+            "ultraplan" => Self::Ultraplan {
+                task: remainder_after_command(trimmed, command),
+            },
+            "teleport" => Self::Teleport {
+                target: remainder_after_command(trimmed, command),
+            },
+            "debug-tool-call" => Self::DebugToolCall,
+            "model" => Self::Model {
+                model: parts.next().map(ToOwned::to_owned),
+            },
+            "permissions" => Self::Permissions {
+                mode: parts.next().map(ToOwned::to_owned),
+            },
+            "clear" => Self::Clear {
+                confirm: parts.next() == Some("--confirm"),
+            },
+            "cost" => Self::Cost,
+            "resume" => Self::Resume {
