@@ -427,3 +427,145 @@ impl SlashCommand {
             },
             "cost" => Self::Cost,
             "resume" => Self::Resume {
+                session_path: parts.next().map(ToOwned::to_owned),
+            },
+            "config" => Self::Config {
+                section: parts.next().map(ToOwned::to_owned),
+            },
+            "memory" => Self::Memory,
+            "init" => Self::Init,
+            "diff" => Self::Diff,
+            "version" => Self::Version,
+            "export" => Self::Export {
+                path: parts.next().map(ToOwned::to_owned),
+            },
+            "session" => Self::Session {
+                action: parts.next().map(ToOwned::to_owned),
+                target: parts.next().map(ToOwned::to_owned),
+            },
+            "plugin" | "plugins" | "marketplace" => Self::Plugins {
+                action: parts.next().map(ToOwned::to_owned),
+                target: {
+                    let remainder = parts.collect::<Vec<_>>().join(" ");
+                    (!remainder.is_empty()).then_some(remainder)
+                },
+            },
+            "agents" => Self::Agents {
+                args: remainder_after_command(trimmed, command),
+            },
+            "skills" => Self::Skills {
+                args: remainder_after_command(trimmed, command),
+            },
+            other => Self::Unknown(other.to_string()),
+        })
+    }
+}
+
+fn remainder_after_command(input: &str, command: &str) -> Option<String> {
+    input
+        .trim()
+        .strip_prefix(&format!("/{command}"))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+#[must_use]
+pub fn slash_command_specs() -> &'static [SlashCommandSpec] {
+    SLASH_COMMAND_SPECS
+}
+
+#[must_use]
+pub fn resume_supported_slash_commands() -> Vec<&'static SlashCommandSpec> {
+    slash_command_specs()
+        .iter()
+        .filter(|spec| spec.resume_supported)
+        .collect()
+}
+
+#[must_use]
+pub fn render_slash_command_help() -> String {
+    let mut lines = vec![
+        "Slash commands".to_string(),
+        "  Tab completes commands inside the REPL.".to_string(),
+        "  [resume] = also available via codineer --resume SESSION.json".to_string(),
+    ];
+
+    for category in [
+        SlashCommandCategory::Core,
+        SlashCommandCategory::Workspace,
+        SlashCommandCategory::Session,
+        SlashCommandCategory::Git,
+        SlashCommandCategory::Automation,
+    ] {
+        lines.push(String::new());
+        lines.push(category.title().to_string());
+        lines.extend(
+            slash_command_specs()
+                .iter()
+                .filter(|spec| spec.category == category)
+                .map(render_slash_command_entry),
+        );
+    }
+
+    lines.join("\n")
+}
+
+fn render_slash_command_entry(spec: &SlashCommandSpec) -> String {
+    let alias_suffix = if spec.aliases.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " (aliases: {})",
+            spec.aliases
+                .iter()
+                .map(|alias| format!("/{alias}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    let resume = if spec.resume_supported {
+        " [resume]"
+    } else {
+        ""
+    };
+    format!(
+        "  {name:<46} {}{alias_suffix}{resume}",
+        spec.summary,
+        name = render_slash_command_name(spec),
+    )
+}
+
+fn render_slash_command_name(spec: &SlashCommandSpec) -> String {
+    match spec.argument_hint {
+        Some(argument_hint) => format!("/{} {}", spec.name, argument_hint),
+        None => format!("/{}", spec.name),
+    }
+}
+
+fn levenshtein_distance(left: &str, right: &str) -> usize {
+    if left == right {
+        return 0;
+    }
+    if left.is_empty() {
+        return right.chars().count();
+    }
+    if right.is_empty() {
+        return left.chars().count();
+    }
+
+    let right_chars = right.chars().collect::<Vec<_>>();
+    let mut previous = (0..=right_chars.len()).collect::<Vec<_>>();
+    let mut current = vec![0; right_chars.len() + 1];
+
+    for (left_index, left_char) in left.chars().enumerate() {
+        current[0] = left_index + 1;
+        for (right_index, right_char) in right_chars.iter().enumerate() {
+            let cost = usize::from(left_char != *right_char);
+            current[right_index + 1] = (previous[right_index + 1] + 1)
+                .min(current[right_index] + 1)
+                .min(previous[right_index] + cost);
+        }
+        std::mem::swap(&mut previous, &mut current);
+    }
+
