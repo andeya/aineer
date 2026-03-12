@@ -141,3 +141,75 @@ impl GlobalToolRegistry {
             }
         }
 
+        Ok(Some(allowed))
+    }
+
+    #[must_use]
+    pub fn definitions(&self, allowed_tools: Option<&BTreeSet<String>>) -> Vec<ToolDefinition> {
+        let builtin = mvp_tool_specs()
+            .into_iter()
+            .filter(|spec| allowed_tools.is_none_or(|allowed| allowed.contains(spec.name)))
+            .map(|spec| ToolDefinition {
+                name: spec.name.to_string(),
+                description: Some(spec.description.to_string()),
+                input_schema: spec.input_schema,
+            });
+        let plugin = self
+            .plugin_tools
+            .iter()
+            .filter(|tool| {
+                allowed_tools
+                    .is_none_or(|allowed| allowed.contains(tool.definition().name.as_str()))
+            })
+            .map(|tool| ToolDefinition {
+                name: tool.definition().name.clone(),
+                description: tool.definition().description.clone(),
+                input_schema: tool.definition().input_schema.clone(),
+            });
+        builtin.chain(plugin).collect()
+    }
+
+    #[must_use]
+    pub fn permission_specs(
+        &self,
+        allowed_tools: Option<&BTreeSet<String>>,
+    ) -> Vec<(String, PermissionMode)> {
+        let builtin = mvp_tool_specs()
+            .into_iter()
+            .filter(|spec| allowed_tools.is_none_or(|allowed| allowed.contains(spec.name)))
+            .map(|spec| (spec.name.to_string(), spec.required_permission));
+        let plugin = self
+            .plugin_tools
+            .iter()
+            .filter(|tool| {
+                allowed_tools
+                    .is_none_or(|allowed| allowed.contains(tool.definition().name.as_str()))
+            })
+            .map(|tool| {
+                (
+                    tool.definition().name.clone(),
+                    permission_mode_from_plugin(tool.required_permission()),
+                )
+            });
+        builtin.chain(plugin).collect()
+    }
+
+    pub fn execute(&self, name: &str, input: &Value) -> Result<String, String> {
+        if mvp_tool_specs().iter().any(|spec| spec.name == name) {
+            return execute_tool(name, input);
+        }
+        self.plugin_tools
+            .iter()
+            .find(|tool| tool.definition().name == name)
+            .ok_or_else(|| format!("unsupported tool: {name}"))?
+            .execute(input)
+            .map_err(|error| error.to_string())
+    }
+}
+
+fn normalize_tool_name(value: &str) -> String {
+    value.trim().replace('-', "_").to_ascii_lowercase()
+}
+
+fn permission_mode_from_plugin(value: &str) -> PermissionMode {
+    match value {
