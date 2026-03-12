@@ -1130,3 +1130,117 @@ impl PluginManager {
             let plugin = load_plugin_definition(
                 &record.install_path,
                 record.kind,
+                describe_install_source(&record.source),
+                record.kind.marketplace(),
+            )?;
+            if seen_ids.insert(plugin.metadata().id.clone()) {
+                seen_paths.insert(record.install_path.clone());
+                plugins.push(plugin);
+            }
+        }
+
+        if !stale_registry_ids.is_empty() {
+            for plugin_id in stale_registry_ids {
+                registry.plugins.remove(&plugin_id);
+            }
+            self.store_registry(&registry)?;
+        }
+
+        Ok(plugins)
+    }
+
+    fn discover_external_directory_plugins(
+        &self,
+        existing_plugins: &[PluginDefinition],
+    ) -> Result<Vec<PluginDefinition>, PluginError> {
+        let mut plugins = Vec::new();
+
+        for directory in &self.config.external_dirs {
+            for root in discover_plugin_dirs(directory)? {
+                let plugin = load_plugin_definition(
+                    &root,
+                    PluginKind::External,
+                    root.display().to_string(),
+                    EXTERNAL_MARKETPLACE,
+                )?;
+                if existing_plugins
+                    .iter()
+                    .chain(plugins.iter())
+                    .all(|existing| existing.metadata().id != plugin.metadata().id)
+                {
+                    plugins.push(plugin);
+                }
+            }
+        }
+
+        Ok(plugins)
+    }
+
+    fn installed_plugin_registry(&self) -> Result<PluginRegistry, PluginError> {
+        self.sync_bundled_plugins()?;
+        Ok(PluginRegistry::new(
+            self.discover_installed_plugins()?
+                .into_iter()
+                .map(|plugin| {
+                    let enabled = self.is_enabled(plugin.metadata());
+                    RegisteredPlugin::new(plugin, enabled)
+                })
+                .collect(),
+        ))
+    }
+
+    fn sync_bundled_plugins(&self) -> Result<(), PluginError> {
+        let bundled_root = self
+            .config
+            .bundled_root
+            .clone()
+            .unwrap_or_else(Self::bundled_root);
+        let bundled_plugins = discover_plugin_dirs(&bundled_root)?;
+        let mut registry = self.load_registry()?;
+        let mut changed = false;
+        let install_root = self.install_root();
+        let mut active_bundled_ids = BTreeSet::new();
+
+        for source_root in bundled_plugins {
+            let manifest = load_plugin_from_directory(&source_root)?;
+            let plugin_id = plugin_id(&manifest.name, BUNDLED_MARKETPLACE);
+            active_bundled_ids.insert(plugin_id.clone());
+            let install_path = install_root.join(sanitize_plugin_id(&plugin_id));
+            let now = unix_time_ms();
+            let existing_record = registry.plugins.get(&plugin_id);
+            let installed_copy_is_valid =
+                install_path.exists() && load_plugin_from_directory(&install_path).is_ok();
+            let needs_sync = existing_record.is_none_or(|record| {
+                record.kind != PluginKind::Bundled
+                    || record.version != manifest.version
+                    || record.name != manifest.name
+                    || record.description != manifest.description
+                    || record.install_path != install_path
+                    || !record.install_path.exists()
+                    || !installed_copy_is_valid
+            });
+
+            if !needs_sync {
+                continue;
+            }
+
+            if install_path.exists() {
+                fs::remove_dir_all(&install_path)?;
+            }
+            copy_dir_all(&source_root, &install_path)?;
+
+            let installed_at_unix_ms =
+                existing_record.map_or(now, |record| record.installed_at_unix_ms);
+            registry.plugins.insert(
+                plugin_id.clone(),
+                InstalledPluginRecord {
+                    kind: PluginKind::Bundled,
+                    id: plugin_id,
+                    name: manifest.name,
+                    version: manifest.version,
+                    description: manifest.description,
+                    install_path,
+                    source: PluginInstallSource::LocalPath { path: source_root },
+                    installed_at_unix_ms,
+                    updated_at_unix_ms: now,
+                },
