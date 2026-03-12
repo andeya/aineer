@@ -345,3 +345,52 @@ mod tests {
         );
         write_hook_plugin(
             &second_source_root,
+            "second",
+            "plugin pre two",
+            "plugin post two",
+        );
+
+        let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+        manager
+            .install(first_source_root.to_str().expect("utf8 path"))
+            .expect("first plugin install should succeed");
+        manager
+            .install(second_source_root.to_str().expect("utf8 path"))
+            .expect("second plugin install should succeed");
+        let registry = manager.plugin_registry().expect("registry should build");
+
+        let runner = HookRunner::from_registry(&registry).expect("plugin hooks should load");
+
+        assert_eq!(
+            runner.run_pre_tool_use("Read", r#"{"path":"README.md"}"#),
+            HookRunResult::allow(vec![
+                "plugin pre one".to_string(),
+                "plugin pre two".to_string(),
+            ])
+        );
+        assert_eq!(
+            runner.run_post_tool_use("Read", r#"{"path":"README.md"}"#, "ok", false),
+            HookRunResult::allow(vec![
+                "plugin post one".to_string(),
+                "plugin post two".to_string(),
+            ])
+        );
+
+        let _ = fs::remove_dir_all(config_home);
+        let _ = fs::remove_dir_all(first_source_root);
+        let _ = fs::remove_dir_all(second_source_root);
+    }
+
+    #[test]
+    fn pre_tool_use_denies_when_plugin_hook_exits_two() {
+        let runner = HookRunner::new(crate::PluginHooks {
+            pre_tool_use: vec!["printf 'blocked by plugin'; exit 2".to_string()],
+            post_tool_use: Vec::new(),
+        });
+
+        let result = runner.run_pre_tool_use("Bash", r#"{"command":"pwd"}"#);
+
+        assert!(result.is_denied());
+        assert_eq!(result.messages(), &["blocked by plugin".to_string()]);
+    }
+}
