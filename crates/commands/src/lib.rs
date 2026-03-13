@@ -783,3 +783,75 @@ pub fn handle_agents_slash_command(args: Option<&str>, cwd: &Path) -> std::io::R
             Ok(render_agents_report(&agents))
         }
         Some("-h" | "--help" | "help") => Ok(render_agents_usage(None)),
+        Some(args) => Ok(render_agents_usage(Some(args))),
+    }
+}
+
+pub fn handle_skills_slash_command(args: Option<&str>, cwd: &Path) -> std::io::Result<String> {
+    match normalize_optional_args(args) {
+        None | Some("list") => {
+            let roots = discover_skill_roots(cwd);
+            let skills = load_skills_from_roots(&roots)?;
+            Ok(render_skills_report(&skills))
+        }
+        Some("-h" | "--help" | "help") => Ok(render_skills_usage(None)),
+        Some(args) => Ok(render_skills_usage(Some(args))),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitPushPrRequest {
+    pub commit_message: Option<String>,
+    pub pr_title: String,
+    pub pr_body: String,
+    pub branch_name_hint: String,
+}
+
+pub fn handle_branch_slash_command(
+    action: Option<&str>,
+    target: Option<&str>,
+    cwd: &Path,
+) -> io::Result<String> {
+    match normalize_optional_args(action) {
+        None | Some("list") => {
+            let branches = git_stdout(cwd, &["branch", "--list", "--verbose"])?;
+            let trimmed = branches.trim();
+            Ok(if trimmed.is_empty() {
+                "Branch\n  Result           no branches found".to_string()
+            } else {
+                format!("Branch\n  Result           listed\n\n{trimmed}")
+            })
+        }
+        Some("create") => {
+            let Some(target) = target.filter(|value| !value.trim().is_empty()) else {
+                return Ok("Usage: /branch create <name>".to_string());
+            };
+            git_status_ok(cwd, &["switch", "-c", target])?;
+            Ok(format!(
+                "Branch\n  Result           created and switched\n  Branch           {target}"
+            ))
+        }
+        Some("switch") => {
+            let Some(target) = target.filter(|value| !value.trim().is_empty()) else {
+                return Ok("Usage: /branch switch <name>".to_string());
+            };
+            git_status_ok(cwd, &["switch", target])?;
+            Ok(format!(
+                "Branch\n  Result           switched\n  Branch           {target}"
+            ))
+        }
+        Some(other) => Ok(format!(
+            "Unknown /branch action '{other}'. Use /branch list, /branch create <name>, or /branch switch <name>."
+        )),
+    }
+}
+
+pub fn handle_worktree_slash_command(
+    action: Option<&str>,
+    path: Option<&str>,
+    branch: Option<&str>,
+    cwd: &Path,
+) -> io::Result<String> {
+    match normalize_optional_args(action) {
+        None | Some("list") => {
+            let worktrees = git_stdout(cwd, &["worktree", "list"])?;
