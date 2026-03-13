@@ -52,3 +52,30 @@ jobs:
       - name: Determine binary path
         id: bin
         shell: bash
+        run: |
+          if [[ "${{ matrix.target }}" == *windows* ]]; then
+            echo "path=target/${{ matrix.target }}/release/codineer.exe" >> "$GITHUB_OUTPUT"
+            echo "name=codineer.exe" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=target/${{ matrix.target }}/release/codineer" >> "$GITHUB_OUTPUT"
+            echo "name=codineer" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Package (tar.gz)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          staging="codineer-${{ github.ref_name }}-${{ matrix.target }}"
+          mkdir -p "$staging"
+          cp "${{ steps.bin.outputs.path }}" "$staging/"
+          cp LICENSE README.md "$staging/" 2>/dev/null || true
+          tar czf "$staging.tar.gz" "$staging"
+          echo "ASSET=$staging.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Package (zip)
+        if: matrix.archive == 'zip'
+        shell: bash
+        run: |
+          staging="codineer-${{ github.ref_name }}-${{ matrix.target }}"
+          mkdir -p "$staging"
+          cp "${{ steps.bin.outputs.path }}" "$staging/"
