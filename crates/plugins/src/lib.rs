@@ -1244,3 +1244,116 @@ impl PluginManager {
                     installed_at_unix_ms,
                     updated_at_unix_ms: now,
                 },
+            );
+            changed = true;
+        }
+
+        let stale_bundled_ids = registry
+            .plugins
+            .iter()
+            .filter_map(|(plugin_id, record)| {
+                (record.kind == PluginKind::Bundled && !active_bundled_ids.contains(plugin_id))
+                    .then_some(plugin_id.clone())
+            })
+            .collect::<Vec<_>>();
+
+        for plugin_id in stale_bundled_ids {
+            if let Some(record) = registry.plugins.remove(&plugin_id) {
+                if record.install_path.exists() {
+                    fs::remove_dir_all(&record.install_path)?;
+                }
+                changed = true;
+            }
+        }
+
+        if changed {
+            self.store_registry(&registry)?;
+        }
+
+        Ok(())
+    }
+
+    fn is_enabled(&self, metadata: &PluginMetadata) -> bool {
+        self.config
+            .enabled_plugins
+            .get(&metadata.id)
+            .copied()
+            .unwrap_or(match metadata.kind {
+                PluginKind::External => false,
+                PluginKind::Builtin | PluginKind::Bundled => metadata.default_enabled,
+            })
+    }
+
+    fn ensure_known_plugin(&self, plugin_id: &str) -> Result<(), PluginError> {
+        if self.plugin_registry()?.contains(plugin_id) {
+            Ok(())
+        } else {
+            Err(PluginError::NotFound(format!(
+                "plugin `{plugin_id}` is not installed or discoverable"
+            )))
+        }
+    }
+
+    fn load_registry(&self) -> Result<InstalledPluginRegistry, PluginError> {
+        let path = self.registry_path();
+        match fs::read_to_string(&path) {
+            Ok(contents) if contents.trim().is_empty() => Ok(InstalledPluginRegistry::default()),
+            Ok(contents) => Ok(serde_json::from_str(&contents)?),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                Ok(InstalledPluginRegistry::default())
+            }
+            Err(error) => Err(PluginError::Io(error)),
+        }
+    }
+
+    fn store_registry(&self, registry: &InstalledPluginRegistry) -> Result<(), PluginError> {
+        let path = self.registry_path();
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(path, serde_json::to_string_pretty(registry)?)?;
+        Ok(())
+    }
+
+    fn write_enabled_state(
+        &self,
+        plugin_id: &str,
+        enabled: Option<bool>,
+    ) -> Result<(), PluginError> {
+        update_settings_json(&self.settings_path(), |root| {
+            let enabled_plugins = ensure_object(root, "enabledPlugins");
+            match enabled {
+                Some(value) => {
+                    enabled_plugins.insert(plugin_id.to_string(), Value::Bool(value));
+                }
+                None => {
+                    enabled_plugins.remove(plugin_id);
+                }
+            }
+        })
+    }
+}
+
+#[must_use]
+pub fn builtin_plugins() -> Vec<PluginDefinition> {
+    vec![PluginDefinition::Builtin(BuiltinPlugin {
+        metadata: PluginMetadata {
+            id: plugin_id("example-builtin", BUILTIN_MARKETPLACE),
+            name: "example-builtin".to_string(),
+            version: "0.1.0".to_string(),
+            description: "Example built-in plugin scaffold for the Rust plugin system".to_string(),
+            kind: PluginKind::Builtin,
+            source: BUILTIN_MARKETPLACE.to_string(),
+            default_enabled: false,
+            root: None,
+        },
+        hooks: PluginHooks::default(),
+        lifecycle: PluginLifecycle::default(),
+        tools: Vec::new(),
+    })]
+}
+
+fn load_plugin_definition(
+    root: &Path,
+    kind: PluginKind,
+    source: String,
