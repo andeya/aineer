@@ -199,3 +199,204 @@ fn summarize_messages(messages: &[ConversationMessage]) -> String {
     }
 
     let key_files = collect_key_files(messages);
+    if !key_files.is_empty() {
+        lines.push(format!("- Key files referenced: {}.", key_files.join(", ")));
+    }
+
+    if let Some(current_work) = infer_current_work(messages) {
+        lines.push(format!("- Current work: {current_work}"));
+    }
+
+    lines.push("- Key timeline:".to_string());
+    for message in messages {
+        let role = match message.role {
+            MessageRole::System => "system",
+            MessageRole::User => "user",
+            MessageRole::Assistant => "assistant",
+            MessageRole::Tool => "tool",
+        };
+        let content = message
+            .blocks
+            .iter()
+            .map(summarize_block)
+            .collect::<Vec<_>>()
+            .join(" | ");
+        lines.push(format!("  - {role}: {content}"));
+    }
+    lines.push("</summary>".to_string());
+    lines.join("\n")
+}
+
+fn merge_compact_summaries(existing_summary: Option<&str>, new_summary: &str) -> String {
+    let Some(existing_summary) = existing_summary else {
+        return new_summary.to_string();
+    };
+
+    let previous_highlights = extract_summary_highlights(existing_summary);
+    let new_formatted_summary = format_compact_summary(new_summary);
+    let new_highlights = extract_summary_highlights(&new_formatted_summary);
+    let new_timeline = extract_summary_timeline(&new_formatted_summary);
+
+    let mut lines = vec!["<summary>".to_string(), "Conversation summary:".to_string()];
+
+    if !previous_highlights.is_empty() {
+        lines.push("- Previously compacted context:".to_string());
+        lines.extend(
+            previous_highlights
+                .into_iter()
+                .map(|line| format!("  {line}")),
+        );
+    }
+
+    if !new_highlights.is_empty() {
+        lines.push("- Newly compacted context:".to_string());
+        lines.extend(new_highlights.into_iter().map(|line| format!("  {line}")));
+    }
+
+    if !new_timeline.is_empty() {
+        lines.push("- Key timeline:".to_string());
+        lines.extend(new_timeline.into_iter().map(|line| format!("  {line}")));
+    }
+
+    lines.push("</summary>".to_string());
+    lines.join("\n")
+}
+
+fn summarize_block(block: &ContentBlock) -> String {
+    let raw = match block {
+        ContentBlock::Text { text } => text.clone(),
+        ContentBlock::ToolUse { name, input, .. } => format!("tool_use {name}({input})"),
+        ContentBlock::ToolResult {
+            tool_name,
+            output,
+            is_error,
+            ..
+        } => format!(
+            "tool_result {tool_name}: {}{output}",
+            if *is_error { "error " } else { "" }
+        ),
+    };
+    truncate_summary(&raw, 160)
+}
+
+fn collect_recent_role_summaries(
+    messages: &[ConversationMessage],
+    role: MessageRole,
+    limit: usize,
+) -> Vec<String> {
+    messages
+        .iter()
+        .filter(|message| message.role == role)
+        .rev()
+        .filter_map(|message| first_text_block(message))
+        .take(limit)
+        .map(|text| truncate_summary(text, 160))
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect()
+}
+
+fn infer_pending_work(messages: &[ConversationMessage]) -> Vec<String> {
+    messages
+        .iter()
+        .rev()
+        .filter_map(first_text_block)
+        .filter(|text| {
+            let lowered = text.to_ascii_lowercase();
+            lowered.contains("todo")
+                || lowered.contains("next")
+                || lowered.contains("pending")
+                || lowered.contains("follow up")
+                || lowered.contains("remaining")
+        })
+        .take(3)
+        .map(|text| truncate_summary(text, 160))
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect()
+}
+
+fn collect_key_files(messages: &[ConversationMessage]) -> Vec<String> {
+    let mut files = messages
+        .iter()
+        .flat_map(|message| message.blocks.iter())
+        .map(|block| match block {
+            ContentBlock::Text { text } => text.as_str(),
+            ContentBlock::ToolUse { input, .. } => input.as_str(),
+            ContentBlock::ToolResult { output, .. } => output.as_str(),
+        })
+        .flat_map(extract_file_candidates)
+        .collect::<Vec<_>>();
+    files.sort();
+    files.dedup();
+    files.into_iter().take(8).collect()
+}
+
+fn infer_current_work(messages: &[ConversationMessage]) -> Option<String> {
+    messages
+        .iter()
+        .rev()
+        .filter_map(first_text_block)
+        .find(|text| !text.trim().is_empty())
+        .map(|text| truncate_summary(text, 200))
+}
+
+fn first_text_block(message: &ConversationMessage) -> Option<&str> {
+    message.blocks.iter().find_map(|block| match block {
+        ContentBlock::Text { text } if !text.trim().is_empty() => Some(text.as_str()),
+        ContentBlock::ToolUse { .. }
+        | ContentBlock::ToolResult { .. }
+        | ContentBlock::Text { .. } => None,
+    })
+}
+
+fn has_interesting_extension(candidate: &str) -> bool {
+    std::path::Path::new(candidate)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            ["rs", "ts", "tsx", "js", "json", "md"]
+                .iter()
+                .any(|expected| extension.eq_ignore_ascii_case(expected))
+        })
+}
+
+fn extract_file_candidates(content: &str) -> Vec<String> {
+    content
+        .split_whitespace()
+        .filter_map(|token| {
+            let candidate = token.trim_matches(|char: char| {
+                matches!(char, ',' | '.' | ':' | ';' | ')' | '(' | '"' | '\'' | '`')
+            });
+            if candidate.contains('/') && has_interesting_extension(candidate) {
+                Some(candidate.to_string())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn truncate_summary(content: &str, max_chars: usize) -> String {
+    if content.chars().count() <= max_chars {
+        return content.to_string();
+    }
+    let mut truncated = content.chars().take(max_chars).collect::<String>();
+    truncated.push('…');
+    truncated
+}
+
+fn estimate_message_tokens(message: &ConversationMessage) -> usize {
+    message
+        .blocks
+        .iter()
+        .map(|block| match block {
+            ContentBlock::Text { text } => text.len() / 4 + 1,
+            ContentBlock::ToolUse { name, input, .. } => (name.len() + input.len()) / 4 + 1,
+            ContentBlock::ToolResult {
+                tool_name, output, ..
+            } => (tool_name.len() + output.len()) / 4 + 1,
+        })
+        .sum()
