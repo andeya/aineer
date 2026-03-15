@@ -1004,3 +1004,80 @@ mod tests {
         )
         .expect("write user settings");
         fs::write(
+            cwd.join(".codineer.json"),
+            r#"{"model":"project-compat","env":{"B":"2"}}"#,
+        )
+        .expect("write project compat config");
+        fs::write(
+            cwd.join(".codineer").join("settings.json"),
+            r#"{"env":{"C":"3"},"hooks":{"PostToolUse":["project"]},"mcpServers":{"project":{"command":"uvx","args":["project"]}}}"#,
+        )
+        .expect("write project settings");
+        fs::write(
+            cwd.join(".codineer").join("settings.local.json"),
+            r#"{"model":"opus","permissionMode":"acceptEdits"}"#,
+        )
+        .expect("write local settings");
+
+        let loaded = ConfigLoader::new(&cwd, &home)
+            .load()
+            .expect("config should load");
+
+        assert_eq!(CODINEER_SETTINGS_SCHEMA_NAME, "SettingsSchema");
+        assert_eq!(loaded.loaded_entries().len(), 5);
+        assert_eq!(loaded.loaded_entries()[0].source, ConfigSource::User);
+        assert_eq!(
+            loaded.get("model"),
+            Some(&JsonValue::String("opus".to_string()))
+        );
+        assert_eq!(loaded.model(), Some("opus"));
+        assert_eq!(
+            loaded.permission_mode(),
+            Some(ResolvedPermissionMode::WorkspaceWrite)
+        );
+        assert_eq!(
+            loaded
+                .get("env")
+                .and_then(JsonValue::as_object)
+                .expect("env object")
+                .len(),
+            4
+        );
+        assert!(loaded
+            .get("hooks")
+            .and_then(JsonValue::as_object)
+            .expect("hooks object")
+            .contains_key("PreToolUse"));
+        assert!(loaded
+            .get("hooks")
+            .and_then(JsonValue::as_object)
+            .expect("hooks object")
+            .contains_key("PostToolUse"));
+        assert_eq!(loaded.hooks().pre_tool_use(), &["base".to_string()]);
+        assert_eq!(loaded.hooks().post_tool_use(), &["project".to_string()]);
+        assert!(loaded.mcp().get("home").is_some());
+        assert!(loaded.mcp().get("project").is_some());
+
+        fs::remove_dir_all(root).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn parses_sandbox_config() {
+        let root = temp_dir();
+        let cwd = root.join("project");
+        let home = root.join("home").join(".codineer");
+        fs::create_dir_all(cwd.join(".codineer")).expect("project config dir");
+        fs::create_dir_all(&home).expect("home config dir");
+
+        fs::write(
+            cwd.join(".codineer").join("settings.local.json"),
+            r#"{
+              "sandbox": {
+                "enabled": true,
+                "namespaceRestrictions": false,
+                "networkIsolation": true,
+                "filesystemMode": "allow-list",
+                "allowedMounts": ["logs", "tmp/cache"]
+              }
+            }"#,
+        )
