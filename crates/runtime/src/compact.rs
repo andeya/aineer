@@ -400,3 +400,103 @@ fn estimate_message_tokens(message: &ConversationMessage) -> usize {
             } => (tool_name.len() + output.len()) / 4 + 1,
         })
         .sum()
+}
+
+fn extract_tag_block(content: &str, tag: &str) -> Option<String> {
+    let start = format!("<{tag}>");
+    let end = format!("</{tag}>");
+    let start_index = content.find(&start)? + start.len();
+    let end_index = content[start_index..].find(&end)? + start_index;
+    Some(content[start_index..end_index].to_string())
+}
+
+fn strip_tag_block(content: &str, tag: &str) -> String {
+    let start = format!("<{tag}>");
+    let end = format!("</{tag}>");
+    if let (Some(start_index), Some(end_index_rel)) = (content.find(&start), content.find(&end)) {
+        let end_index = end_index_rel + end.len();
+        let mut stripped = String::new();
+        stripped.push_str(&content[..start_index]);
+        stripped.push_str(&content[end_index..]);
+        stripped
+    } else {
+        content.to_string()
+    }
+}
+
+fn collapse_blank_lines(content: &str) -> String {
+    let mut result = String::new();
+    let mut last_blank = false;
+    for line in content.lines() {
+        let is_blank = line.trim().is_empty();
+        if is_blank && last_blank {
+            continue;
+        }
+        result.push_str(line);
+        result.push('\n');
+        last_blank = is_blank;
+    }
+    result
+}
+
+fn extract_existing_compacted_summary(message: &ConversationMessage) -> Option<String> {
+    if message.role != MessageRole::System {
+        return None;
+    }
+
+    let text = first_text_block(message)?;
+    let summary = text.strip_prefix(COMPACT_CONTINUATION_PREAMBLE)?;
+    let summary = summary
+        .split_once(&format!("\n\n{COMPACT_RECENT_MESSAGES_NOTE}"))
+        .map_or(summary, |(value, _)| value);
+    let summary = summary
+        .split_once(&format!("\n{COMPACT_DIRECT_RESUME_INSTRUCTION}"))
+        .map_or(summary, |(value, _)| value);
+    Some(summary.trim().to_string())
+}
+
+fn extract_summary_highlights(summary: &str) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut in_timeline = false;
+
+    for line in format_compact_summary(summary).lines() {
+        let trimmed = line.trim_end();
+        if trimmed.is_empty() || trimmed == "Summary:" || trimmed == "Conversation summary:" {
+            continue;
+        }
+        if trimmed == "- Key timeline:" {
+            in_timeline = true;
+            continue;
+        }
+        if in_timeline {
+            continue;
+        }
+        lines.push(trimmed.to_string());
+    }
+
+    lines
+}
+
+fn extract_summary_timeline(summary: &str) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut in_timeline = false;
+
+    for line in format_compact_summary(summary).lines() {
+        let trimmed = line.trim_end();
+        if trimmed == "- Key timeline:" {
+            in_timeline = true;
+            continue;
+        }
+        if !in_timeline {
+            continue;
+        }
+        if trimmed.is_empty() {
+            break;
+        }
+        lines.push(trimmed.to_string());
+    }
+
+    lines
+}
+
+#[cfg(test)]
