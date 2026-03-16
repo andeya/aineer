@@ -1122,3 +1122,90 @@ mod tests {
             "            'jsonrpc': '2.0',",
             "            'id': request['id'],",
             "            'error': {'code': -32601, 'message': f'unknown method: {method}'},",
+            "        })",
+            "",
+        ]
+        .join("\n");
+        fs::write(&script_path, script).expect("write script");
+        let mut permissions = fs::metadata(&script_path).expect("metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&script_path, permissions).expect("chmod");
+        script_path
+    }
+
+    fn sample_bootstrap(script_path: &Path) -> McpClientBootstrap {
+        let config = ScopedMcpServerConfig {
+            scope: ConfigSource::Local,
+            config: McpServerConfig::Stdio(McpStdioServerConfig {
+                command: "/bin/sh".to_string(),
+                args: vec![script_path.to_string_lossy().into_owned()],
+                env: BTreeMap::from([("MCP_TEST_TOKEN".to_string(), "secret-value".to_string())]),
+            }),
+        };
+        McpClientBootstrap::from_scoped_config("stdio server", &config)
+    }
+
+    fn script_transport(script_path: &Path) -> crate::mcp_client::McpStdioTransport {
+        crate::mcp_client::McpStdioTransport {
+            command: python_command(),
+            args: vec![script_path.to_string_lossy().into_owned()],
+            env: BTreeMap::new(),
+        }
+    }
+
+    fn python_command() -> String {
+        for key in ["MCP_TEST_PYTHON", "PYTHON3", "PYTHON"] {
+            if let Ok(value) = std::env::var(key) {
+                if !value.trim().is_empty() {
+                    return value;
+                }
+            }
+        }
+
+        for candidate in ["python3", "python"] {
+            if Command::new(candidate).arg("--version").output().is_ok() {
+                return candidate.to_string();
+            }
+        }
+
+        panic!("expected a Python interpreter for MCP stdio tests")
+    }
+
+    fn cleanup_script(script_path: &Path) {
+        if let Err(error) = fs::remove_file(script_path) {
+            assert_eq!(error.kind(), std::io::ErrorKind::NotFound, "cleanup script");
+        }
+        if let Err(error) = fs::remove_dir_all(script_path.parent().expect("script parent")) {
+            assert_eq!(error.kind(), std::io::ErrorKind::NotFound, "cleanup dir");
+        }
+    }
+
+    fn manager_server_config(
+        script_path: &Path,
+        label: &str,
+        log_path: &Path,
+    ) -> ScopedMcpServerConfig {
+        ScopedMcpServerConfig {
+            scope: ConfigSource::Local,
+            config: McpServerConfig::Stdio(McpStdioServerConfig {
+                command: python_command(),
+                args: vec![script_path.to_string_lossy().into_owned()],
+                env: BTreeMap::from([
+                    ("MCP_SERVER_LABEL".to_string(), label.to_string()),
+                    (
+                        "MCP_LOG_PATH".to_string(),
+                        log_path.to_string_lossy().into_owned(),
+                    ),
+                ]),
+            }),
+        }
+    }
+
+    #[test]
+    fn spawns_stdio_process_and_round_trips_io() {
+        let runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        runtime.block_on(async {
+            let script_path = write_echo_script();
