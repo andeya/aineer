@@ -1081,3 +1081,80 @@ mod tests {
               }
             }"#,
         )
+        .expect("write local settings");
+
+        let loaded = ConfigLoader::new(&cwd, &home)
+            .load()
+            .expect("config should load");
+
+        assert_eq!(loaded.sandbox().enabled, Some(true));
+        assert_eq!(loaded.sandbox().namespace_restrictions, Some(false));
+        assert_eq!(loaded.sandbox().network_isolation, Some(true));
+        assert_eq!(
+            loaded.sandbox().filesystem_mode,
+            Some(FilesystemIsolationMode::AllowList)
+        );
+        assert_eq!(loaded.sandbox().allowed_mounts, vec!["logs", "tmp/cache"]);
+
+        fs::remove_dir_all(root).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn parses_typed_mcp_and_oauth_config() {
+        let root = temp_dir();
+        let cwd = root.join("project");
+        let home = root.join("home").join(".codineer");
+        fs::create_dir_all(cwd.join(".codineer")).expect("project config dir");
+        fs::create_dir_all(&home).expect("home config dir");
+
+        fs::write(
+            home.join("settings.json"),
+            r#"{
+              "mcpServers": {
+                "stdio-server": {
+                  "command": "uvx",
+                  "args": ["mcp-server"],
+                  "env": {"TOKEN": "secret"}
+                },
+                "remote-server": {
+                  "type": "http",
+                  "url": "https://example.test/mcp",
+                  "headers": {"Authorization": "Bearer token"},
+                  "headersHelper": "helper.sh",
+                  "oauth": {
+                    "clientId": "mcp-client",
+                    "callbackPort": 7777,
+                    "authServerMetadataUrl": "https://issuer.test/.well-known/oauth-authorization-server",
+                    "xaa": true
+                  }
+                }
+              },
+              "oauth": {
+                "clientId": "runtime-client",
+                "authorizeUrl": "https://console.test/oauth/authorize",
+                "tokenUrl": "https://console.test/oauth/token",
+                "callbackPort": 54545,
+                "manualRedirectUrl": "https://console.test/oauth/callback",
+                "scopes": ["org:read", "user:write"]
+              }
+            }"#,
+        )
+        .expect("write user settings");
+        fs::write(
+            cwd.join(".codineer").join("settings.local.json"),
+            r#"{
+              "mcpServers": {
+                "remote-server": {
+                  "type": "ws",
+                  "url": "wss://override.test/mcp",
+                  "headers": {"X-Env": "local"}
+                }
+              }
+            }"#,
+        )
+        .expect("write local settings");
+
+        let loaded = ConfigLoader::new(&cwd, &home)
+            .load()
+            .expect("config should load");
+
