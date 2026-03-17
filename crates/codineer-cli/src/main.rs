@@ -464,3 +464,69 @@ fn filter_tool_specs(
 }
 
 fn discover_mcp_tools(
+    rt: &tokio::runtime::Runtime,
+    mcp: &SharedMcpManager,
+) -> Vec<ToolDefinition> {
+    let Ok(mut guard) = mcp.lock() else {
+        return Vec::new();
+    };
+    rt.block_on(guard.discover_tools())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|managed| ToolDefinition {
+            name: managed.qualified_name,
+            description: managed.tool.description,
+            input_schema: managed.tool.input_schema.unwrap_or(json!({"type": "object"})),
+        })
+        .collect()
+}
+
+fn create_mcp_manager() -> SharedMcpManager {
+    let cwd = env::current_dir().unwrap_or_default();
+    let loader = ConfigLoader::default_for(&cwd);
+    match loader.load() {
+        Ok(config) => Arc::new(Mutex::new(McpServerManager::from_runtime_config(&config))),
+        Err(_) => Arc::new(Mutex::new(McpServerManager::from_servers(
+            &std::collections::BTreeMap::new(),
+        ))),
+    }
+}
+
+fn parse_system_prompt_args(args: &[String]) -> Result<CliAction, String> {
+    let mut cwd = env::current_dir().map_err(|error| error.to_string())?;
+    let mut date = current_date();
+    let mut index = 0;
+
+    while index < args.len() {
+        match args[index].as_str() {
+            "--cwd" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "missing value for --cwd".to_string())?;
+                cwd = PathBuf::from(value);
+                index += 2;
+            }
+            "--date" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "missing value for --date".to_string())?;
+                date.clone_from(value);
+                index += 2;
+            }
+            other => return Err(format!("unknown system-prompt option: {other}")),
+        }
+    }
+
+    Ok(CliAction::PrintSystemPrompt { cwd, date })
+}
+
+fn parse_resume_args(args: &[String]) -> Result<CliAction, String> {
+    let session_path = args
+        .first()
+        .ok_or_else(|| "missing session path for --resume".to_string())
+        .map(PathBuf::from)?;
+    let commands = args[1..].to_vec();
+    if commands
+        .iter()
+        .any(|command| !command.trim_start().starts_with('/'))
+    {
