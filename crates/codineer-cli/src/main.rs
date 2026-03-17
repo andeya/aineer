@@ -397,3 +397,336 @@ fn format_direct_slash_command_error(command: &str, is_unknown: bool) -> String 
         append_slash_command_suggestions(&mut lines, trimmed);
     } else {
         lines.push(
+            "  Try              Start `codineer` to use interactive slash commands".to_string(),
+        );
+        lines.push(
+            "  Tip              Resume-safe commands also work with `codineer --resume SESSION.json ...`"
+                .to_string(),
+        );
+    }
+    lines.join("\n")
+}
+
+fn resolve_model_alias(model: &str) -> String {
+    api::resolve_model_alias(model)
+}
+
+fn normalize_allowed_tools(values: &[String]) -> Result<Option<AllowedToolSet>, String> {
+    current_tool_registry()?.normalize_allowed_tools(values)
+}
+
+fn current_tool_registry() -> Result<GlobalToolRegistry, String> {
+    let cwd = env::current_dir().map_err(|error| error.to_string())?;
+    let loader = ConfigLoader::default_for(&cwd);
+    let runtime_config = loader.load().map_err(|error| error.to_string())?;
+    let plugin_manager = build_plugin_manager(&cwd, &loader, &runtime_config);
+    let plugin_tools = plugin_manager
+        .aggregated_tools()
+        .map_err(|error| error.to_string())?;
+    GlobalToolRegistry::with_plugin_tools(plugin_tools)
+}
+
+fn parse_permission_mode_arg(value: &str) -> Result<PermissionMode, String> {
+    normalize_permission_mode(value)
+        .ok_or_else(|| {
+            format!(
+                "unsupported permission mode '{value}'. Use read-only, workspace-write, or danger-full-access."
+            )
+        })
+        .and_then(permission_mode_from_label)
+}
+
+fn permission_mode_from_label(mode: &str) -> Result<PermissionMode, String> {
+    match mode {
+        "read-only" => Ok(PermissionMode::ReadOnly),
+        "workspace-write" => Ok(PermissionMode::WorkspaceWrite),
+        "danger-full-access" => Ok(PermissionMode::DangerFullAccess),
+        other => Err(format!(
+            "unsupported permission mode '{other}'. Use read-only, workspace-write, or danger-full-access."
+        )),
+    }
+}
+
+fn default_permission_mode() -> PermissionMode {
+    env::var("CODINEER_PERMISSION_MODE")
+        .ok()
+        .as_deref()
+        .and_then(normalize_permission_mode)
+        .and_then(|label| permission_mode_from_label(label).ok())
+        .unwrap_or(PermissionMode::WorkspaceWrite)
+}
+
+fn filter_tool_specs(
+    tool_registry: &GlobalToolRegistry,
+    allowed_tools: Option<&AllowedToolSet>,
+) -> Vec<ToolDefinition> {
+    tool_registry.definitions(allowed_tools)
+}
+
+fn discover_mcp_tools(
+    rt: &tokio::runtime::Runtime,
+    mcp: &SharedMcpManager,
+) -> Vec<ToolDefinition> {
+    let Ok(mut guard) = mcp.lock() else {
+        return Vec::new();
+    };
+    rt.block_on(guard.discover_tools())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|managed| ToolDefinition {
+            name: managed.qualified_name,
+            description: managed.tool.description,
+            input_schema: managed.tool.input_schema.unwrap_or(json!({"type": "object"})),
+        })
+        .collect()
+}
+
+fn create_mcp_manager() -> SharedMcpManager {
+    let cwd = env::current_dir().unwrap_or_default();
+    let loader = ConfigLoader::default_for(&cwd);
+    match loader.load() {
+        Ok(config) => Arc::new(Mutex::new(McpServerManager::from_runtime_config(&config))),
+        Err(_) => Arc::new(Mutex::new(McpServerManager::from_servers(
+            &std::collections::BTreeMap::new(),
+        ))),
+    }
+}
+
+fn parse_system_prompt_args(args: &[String]) -> Result<CliAction, String> {
+    let mut cwd = env::current_dir().map_err(|error| error.to_string())?;
+    let mut date = current_date();
+    let mut index = 0;
+
+    while index < args.len() {
+        match args[index].as_str() {
+            "--cwd" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "missing value for --cwd".to_string())?;
+                cwd = PathBuf::from(value);
+                index += 2;
+            }
+            "--date" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "missing value for --date".to_string())?;
+                date.clone_from(value);
+                index += 2;
+            }
+            other => return Err(format!("unknown system-prompt option: {other}")),
+        }
+    }
+
+    Ok(CliAction::PrintSystemPrompt { cwd, date })
+}
+
+fn parse_resume_args(args: &[String]) -> Result<CliAction, String> {
+    let session_path = args
+        .first()
+        .ok_or_else(|| "missing session path for --resume".to_string())
+        .map(PathBuf::from)?;
+    let commands = args[1..].to_vec();
+    if commands
+        .iter()
+        .any(|command| !command.trim_start().starts_with('/'))
+    {
+        return Err("--resume trailing arguments must be slash commands".to_string());
+    }
+    Ok(CliAction::ResumeSession {
+        session_path,
+        commands,
+    })
+}
+
+fn default_oauth_config() -> OAuthConfig {
+    OAuthConfig {
+        client_id: String::from("9d1c250a-e61b-44d9-88ed-5944d1962f5e"),
+        authorize_url: String::from("https://platform.codineer.dev/oauth/authorize"),
+        token_url: String::from("https://platform.codineer.dev/v1/oauth/token"),
+        callback_port: None,
+        manual_redirect_url: None,
+        scopes: vec![
+            String::from("user:profile"),
+            String::from("user:inference"),
+            String::from("user:sessions:codineer"),
+        ],
+    }
+}
+
+fn run_login() -> Result<(), Box<dyn std::error::Error>> {
+    let cwd = env::current_dir()?;
+    let config = ConfigLoader::default_for(&cwd).load()?;
+    let default_oauth = default_oauth_config();
+    let oauth = config.oauth().unwrap_or(&default_oauth);
+    let callback_port = oauth.callback_port.unwrap_or(DEFAULT_OAUTH_CALLBACK_PORT);
+    let redirect_uri = runtime::loopback_redirect_uri(callback_port);
+    let pkce = generate_pkce_pair()?;
+    let state = generate_state()?;
+    let authorize_url =
+        OAuthAuthorizationRequest::from_config(oauth, redirect_uri.clone(), state.clone(), &pkce)
+            .build_url();
+
+    println!("Starting Codineer OAuth login...");
+    println!("Listening for callback on {redirect_uri}");
+    if let Err(error) = open_browser(&authorize_url) {
+        eprintln!("warning: failed to open browser automatically: {error}");
+        println!("Open this URL manually:\n{authorize_url}");
+    }
+
+    let callback = wait_for_oauth_callback(callback_port)?;
+    if let Some(error) = callback.error {
+        let description = callback
+            .error_description
+            .unwrap_or_else(|| "authorization failed".to_string());
+        return Err(io::Error::other(format!("{error}: {description}")).into());
+    }
+    let code = callback.code.ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidData, "callback did not include code")
+    })?;
+    let returned_state = callback.state.ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidData, "callback did not include state")
+    })?;
+    if returned_state != state {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "oauth state mismatch").into());
+    }
+
+    let client = CodineerApiClient::from_auth(AuthSource::None).with_base_url(api::read_base_url());
+    let exchange_request =
+        OAuthTokenExchangeRequest::from_config(oauth, code, state, pkce.verifier, redirect_uri);
+    let runtime = tokio::runtime::Runtime::new()?;
+    let token_set = runtime.block_on(client.exchange_oauth_code(oauth, &exchange_request))?;
+    save_oauth_credentials(&runtime::OAuthTokenSet {
+        access_token: token_set.access_token,
+        refresh_token: token_set.refresh_token,
+        expires_at: token_set.expires_at,
+        scopes: token_set.scopes,
+    })?;
+    println!("Codineer OAuth login complete.");
+    Ok(())
+}
+
+fn run_logout() -> Result<(), Box<dyn std::error::Error>> {
+    clear_oauth_credentials()?;
+    println!("Codineer OAuth credentials cleared.");
+    Ok(())
+}
+
+fn open_browser(url: &str) -> io::Result<()> {
+    let commands = if cfg!(target_os = "macos") {
+        vec![("open", vec![url])]
+    } else if cfg!(target_os = "windows") {
+        vec![("cmd", vec!["/C", "start", "", url])]
+    } else {
+        vec![("xdg-open", vec![url])]
+    };
+    for (program, args) in commands {
+        match Command::new(program).args(args).spawn() {
+            Ok(_) => return Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        "no supported browser opener command found",
+    ))
+}
+
+fn wait_for_oauth_callback(
+    port: u16,
+) -> Result<runtime::OAuthCallbackParams, Box<dyn std::error::Error>> {
+    let listener = TcpListener::bind(("127.0.0.1", port))?;
+    let (mut stream, _) = listener.accept()?;
+    let mut buffer = [0_u8; 4096];
+    let bytes_read = stream.read(&mut buffer)?;
+    let request = String::from_utf8_lossy(&buffer[..bytes_read]);
+    let request_line = request.lines().next().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidData, "missing callback request line")
+    })?;
+    let target = request_line.split_whitespace().nth(1).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "missing callback request target",
+        )
+    })?;
+    let callback = parse_oauth_callback_request_target(target)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    let body = if callback.error.is_some() {
+        "Codineer OAuth login failed. You can close this window."
+    } else {
+        "Codineer OAuth login succeeded. You can close this window."
+    };
+    let response = format!(
+        "HTTP/1.1 200 OK\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    );
+    stream.write_all(response.as_bytes())?;
+    Ok(callback)
+}
+
+fn print_system_prompt(cwd: PathBuf, date: String) {
+    match load_system_prompt_with_lsp(cwd, date, env::consts::OS, "unknown", None) {
+        Ok(sections) => println!("{}", sections.join("\n\n")),
+        Err(error) => {
+            eprintln!("failed to build system prompt: {error}");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn print_version() {
+    println!("{}", render_version_report());
+}
+
+fn resume_session(session_path: &Path, commands: &[String]) {
+    let session = match Session::load_from_path(session_path) {
+        Ok(session) => session,
+        Err(error) => {
+            eprintln!("failed to restore session: {error}");
+            std::process::exit(1);
+        }
+    };
+
+    if commands.is_empty() {
+        println!(
+            "Restored session from {} ({} messages).",
+            session_path.display(),
+            session.messages.len()
+        );
+        return;
+    }
+
+    let mut session = session;
+    for raw_command in commands {
+        let Some(command) = SlashCommand::parse(raw_command) else {
+            eprintln!("unsupported resumed command: {raw_command}");
+            std::process::exit(2);
+        };
+        match run_resume_command(session_path, &session, &command) {
+            Ok(ResumeCommandOutcome {
+                session: next_session,
+                message,
+            }) => {
+                session = next_session;
+                if let Some(message) = message {
+                    println!("{message}");
+                }
+            }
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(2);
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ResumeCommandOutcome {
+    session: Session,
+    message: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct StatusContext {
+    cwd: PathBuf,
