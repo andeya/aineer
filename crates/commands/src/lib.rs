@@ -926,3 +926,74 @@ pub fn handle_commit_slash_command(message: &str, cwd: &Path) -> io::Result<Stri
         message
     ))
 }
+
+pub fn handle_commit_push_pr_slash_command(
+    request: &CommitPushPrRequest,
+    cwd: &Path,
+) -> io::Result<String> {
+    if !command_exists("gh") {
+        return Err(io::Error::other("gh CLI is required for /commit-push-pr"));
+    }
+
+    let default_branch = detect_default_branch(cwd)?;
+    let mut branch = current_branch(cwd)?;
+    let mut created_branch = false;
+    if branch == default_branch {
+        let hint = if request.branch_name_hint.trim().is_empty() {
+            request.pr_title.as_str()
+        } else {
+            request.branch_name_hint.as_str()
+        };
+        let next_branch = build_branch_name(hint);
+        git_status_ok(cwd, &["switch", "-c", next_branch.as_str()])?;
+        branch = next_branch;
+        created_branch = true;
+    }
+
+    let workspace_has_changes = !git_stdout(cwd, &["status", "--short"])?.trim().is_empty();
+    let commit_report = if workspace_has_changes {
+        let Some(message) = request.commit_message.as_deref() else {
+            return Err(io::Error::other(
+                "commit message is required when workspace changes are present",
+            ));
+        };
+        Some(handle_commit_slash_command(message, cwd)?)
+    } else {
+        None
+    };
+
+    let branch_diff = git_stdout(
+        cwd,
+        &["diff", "--stat", &format!("{default_branch}...HEAD")],
+    )?;
+    if branch_diff.trim().is_empty() {
+        return Ok(
+            "Commit/Push/PR\n  Result           skipped\n  Reason           no branch changes to push or open as a pull request"
+                .to_string(),
+        );
+    }
+
+    git_status_ok(cwd, &["push", "--set-upstream", "origin", branch.as_str()])?;
+
+    let body_path = write_temp_text_file("codineer-pr-body", "md", request.pr_body.trim())?;
+    let body_path_string = body_path.to_string_lossy().into_owned();
+    let create = Command::new("gh")
+        .args([
+            "pr",
+            "create",
+            "--title",
+            request.pr_title.as_str(),
+            "--body-file",
+            body_path_string.as_str(),
+            "--base",
+            default_branch.as_str(),
+        ])
+        .current_dir(cwd)
+        .output()?;
+
+    let (result, url) = if create.status.success() {
+        (
+            "created",
+            parse_pr_url(&String::from_utf8_lossy(&create.stdout))
+                .unwrap_or_else(|| "<unknown>".to_string()),
+        )
