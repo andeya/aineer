@@ -1470,3 +1470,229 @@ fn build_plugin_manifest(
 
     Ok(PluginManifest {
         name: raw.name,
+        version: raw.version,
+        description: raw.description,
+        permissions,
+        default_enabled: raw.default_enabled,
+        hooks: raw.hooks,
+        lifecycle: raw.lifecycle,
+        tools,
+        commands,
+    })
+}
+
+fn validate_required_manifest_field(
+    field: &'static str,
+    value: &str,
+    errors: &mut Vec<PluginManifestValidationError>,
+) {
+    if value.trim().is_empty() {
+        errors.push(PluginManifestValidationError::EmptyField { field });
+    }
+}
+
+fn build_manifest_permissions(
+    permissions: &[String],
+    errors: &mut Vec<PluginManifestValidationError>,
+) -> Vec<PluginPermission> {
+    let mut seen = BTreeSet::new();
+    let mut validated = Vec::new();
+
+    for permission in permissions {
+        let permission = permission.trim();
+        if permission.is_empty() {
+            errors.push(PluginManifestValidationError::EmptyEntryField {
+                kind: "permission",
+                field: "value",
+                name: None,
+            });
+            continue;
+        }
+        if !seen.insert(permission.to_string()) {
+            errors.push(PluginManifestValidationError::DuplicatePermission {
+                permission: permission.to_string(),
+            });
+            continue;
+        }
+        match PluginPermission::parse(permission) {
+            Some(permission) => validated.push(permission),
+            None => errors.push(PluginManifestValidationError::InvalidPermission {
+                permission: permission.to_string(),
+            }),
+        }
+    }
+
+    validated
+}
+
+fn build_manifest_tools(
+    root: &Path,
+    tools: Vec<RawPluginToolManifest>,
+    errors: &mut Vec<PluginManifestValidationError>,
+) -> Vec<PluginToolManifest> {
+    let mut seen = BTreeSet::new();
+    let mut validated = Vec::new();
+
+    for tool in tools {
+        let name = tool.name.trim().to_string();
+        if name.is_empty() {
+            errors.push(PluginManifestValidationError::EmptyEntryField {
+                kind: "tool",
+                field: "name",
+                name: None,
+            });
+            continue;
+        }
+        if !seen.insert(name.clone()) {
+            errors.push(PluginManifestValidationError::DuplicateEntry { kind: "tool", name });
+            continue;
+        }
+        if tool.description.trim().is_empty() {
+            errors.push(PluginManifestValidationError::EmptyEntryField {
+                kind: "tool",
+                field: "description",
+                name: Some(name.clone()),
+            });
+        }
+        if tool.command.trim().is_empty() {
+            errors.push(PluginManifestValidationError::EmptyEntryField {
+                kind: "tool",
+                field: "command",
+                name: Some(name.clone()),
+            });
+        } else {
+            validate_command_entry(root, &tool.command, "tool", errors);
+        }
+        if !tool.input_schema.is_object() {
+            errors.push(PluginManifestValidationError::InvalidToolInputSchema {
+                tool_name: name.clone(),
+            });
+        }
+        let Some(required_permission) =
+            PluginToolPermission::parse(tool.required_permission.trim())
+        else {
+            errors.push(
+                PluginManifestValidationError::InvalidToolRequiredPermission {
+                    tool_name: name.clone(),
+                    permission: tool.required_permission.trim().to_string(),
+                },
+            );
+            continue;
+        };
+
+        validated.push(PluginToolManifest {
+            name,
+            description: tool.description,
+            input_schema: tool.input_schema,
+            command: tool.command,
+            args: tool.args,
+            required_permission,
+        });
+    }
+
+    validated
+}
+
+fn build_manifest_commands(
+    root: &Path,
+    commands: Vec<PluginCommandManifest>,
+    errors: &mut Vec<PluginManifestValidationError>,
+) -> Vec<PluginCommandManifest> {
+    let mut seen = BTreeSet::new();
+    let mut validated = Vec::new();
+
+    for command in commands {
+        let name = command.name.trim().to_string();
+        if name.is_empty() {
+            errors.push(PluginManifestValidationError::EmptyEntryField {
+                kind: "command",
+                field: "name",
+                name: None,
+            });
+            continue;
+        }
+        if !seen.insert(name.clone()) {
+            errors.push(PluginManifestValidationError::DuplicateEntry {
+                kind: "command",
+                name,
+            });
+            continue;
+        }
+        if command.description.trim().is_empty() {
+            errors.push(PluginManifestValidationError::EmptyEntryField {
+                kind: "command",
+                field: "description",
+                name: Some(name.clone()),
+            });
+        }
+        if command.command.trim().is_empty() {
+            errors.push(PluginManifestValidationError::EmptyEntryField {
+                kind: "command",
+                field: "command",
+                name: Some(name.clone()),
+            });
+        } else {
+            validate_command_entry(root, &command.command, "command", errors);
+        }
+        validated.push(command);
+    }
+
+    validated
+}
+
+fn validate_command_entries<'a>(
+    root: &Path,
+    entries: impl Iterator<Item = &'a String>,
+    kind: &'static str,
+    errors: &mut Vec<PluginManifestValidationError>,
+) {
+    for entry in entries {
+        validate_command_entry(root, entry, kind, errors);
+    }
+}
+
+fn validate_command_entry(
+    root: &Path,
+    entry: &str,
+    kind: &'static str,
+    errors: &mut Vec<PluginManifestValidationError>,
+) {
+    if entry.trim().is_empty() {
+        errors.push(PluginManifestValidationError::EmptyEntryField {
+            kind,
+            field: "command",
+            name: None,
+        });
+        return;
+    }
+    if is_literal_command(entry) {
+        return;
+    }
+
+    let path = if Path::new(entry).is_absolute() {
+        PathBuf::from(entry)
+    } else {
+        root.join(entry)
+    };
+    if !path.exists() {
+        errors.push(PluginManifestValidationError::MissingPath { kind, path });
+    }
+}
+
+fn resolve_hooks(root: &Path, hooks: &PluginHooks) -> PluginHooks {
+    PluginHooks {
+        pre_tool_use: hooks
+            .pre_tool_use
+            .iter()
+            .map(|entry| resolve_hook_entry(root, entry))
+            .collect(),
+        post_tool_use: hooks
+            .post_tool_use
+            .iter()
+            .map(|entry| resolve_hook_entry(root, entry))
+            .collect(),
+    }
+}
+
+fn resolve_lifecycle(root: &Path, lifecycle: &PluginLifecycle) -> PluginLifecycle {
+    PluginLifecycle {
