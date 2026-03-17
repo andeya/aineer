@@ -107,3 +107,57 @@ impl Spinner {
                 Clear(ClearType::CurrentLine),
                 SetForegroundColor(theme.spinner_active),
                 Print(format!("{frame} {label}")),
+                ResetColor,
+                RestorePosition
+            )?;
+        } else {
+            queue!(
+                out,
+                SavePosition,
+                MoveToColumn(0),
+                Clear(ClearType::CurrentLine),
+                Print(format!("{frame} {label}")),
+                RestorePosition
+            )?;
+        }
+        out.flush()
+    }
+
+    pub fn finish(
+        &mut self,
+        label: &str,
+        theme: &ColorTheme,
+        out: &mut impl Write,
+    ) -> io::Result<()> {
+        self.frame_index = 0;
+        if color_enabled() {
+            execute!(
+                out,
+                MoveToColumn(0),
+                Clear(ClearType::CurrentLine),
+                SetForegroundColor(theme.spinner_done),
+                Print(format!("✔ {label}\n")),
+                ResetColor
+            )?;
+        } else {
+            execute!(
+                out,
+                MoveToColumn(0),
+                Clear(ClearType::CurrentLine),
+                Print(format!("✔ {label}\n"))
+            )?;
+        }
+        out.flush()
+    }
+
+    pub fn fail(
+        &mut self,
+        label: &str,
+        theme: &ColorTheme,
+        out: &mut impl Write,
+    ) -> io::Result<()> {
+        self.frame_index = 0;
+        if color_enabled() {
+            execute!(
+                out,
+                MoveToColumn(0),
