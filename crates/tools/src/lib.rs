@@ -1782,3 +1782,146 @@ fn write_agent_manifest(manifest: &AgentOutput) -> Result<(), String> {
 fn persist_agent_terminal_state(
     manifest: &AgentOutput,
     status: &str,
+    result: Option<&str>,
+    error: Option<String>,
+) -> Result<(), String> {
+    append_agent_output(
+        &manifest.output_file,
+        &format_agent_terminal_output(status, result, error.as_deref()),
+    )?;
+    let mut next_manifest = manifest.clone();
+    next_manifest.status = status.to_string();
+    next_manifest.completed_at = Some(iso8601_now());
+    next_manifest.error = error;
+    write_agent_manifest(&next_manifest)
+}
+
+fn append_agent_output(path: &str, suffix: &str) -> Result<(), String> {
+    use std::io::Write as _;
+
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(path)
+        .map_err(|error| error.to_string())?;
+    file.write_all(suffix.as_bytes())
+        .map_err(|error| error.to_string())
+}
+
+fn format_agent_terminal_output(status: &str, result: Option<&str>, error: Option<&str>) -> String {
+    let mut sections = vec![format!("\n## Result\n\n- status: {status}\n")];
+    if let Some(result) = result.filter(|value| !value.trim().is_empty()) {
+        sections.push(format!("\n### Final response\n\n{}\n", result.trim()));
+    }
+    if let Some(error) = error.filter(|value| !value.trim().is_empty()) {
+        sections.push(format!("\n### Error\n\n{}\n", error.trim()));
+    }
+    sections.join("")
+}
+
+struct ProviderRuntimeClient {
+    runtime: tokio::runtime::Runtime,
+    client: ProviderClient,
+    model: String,
+    allowed_tools: BTreeSet<String>,
+}
+
+impl ProviderRuntimeClient {
+    fn new(model: &str, allowed_tools: BTreeSet<String>) -> Result<Self, String> {
+        let model = resolve_model_alias(model).clone();
+        let client = ProviderClient::from_model(&model).map_err(|error| error.to_string())?;
+        Ok(Self {
+            runtime: tokio::runtime::Runtime::new().map_err(|error| error.to_string())?,
+            client,
+            model,
+            allowed_tools,
+        })
+    }
+}
+
+impl ApiClient for ProviderRuntimeClient {
+    #[allow(clippy::too_many_lines)]
+    fn stream(&mut self, request: ApiRequest) -> Result<Vec<AssistantEvent>, RuntimeError> {
+        let tools = tool_specs_for_allowed_tools(Some(&self.allowed_tools))
+            .into_iter()
+            .map(|spec| ToolDefinition {
+                name: spec.name.to_string(),
+                description: Some(spec.description.to_string()),
+                input_schema: spec.input_schema,
+            })
+            .collect::<Vec<_>>();
+        let message_request = MessageRequest {
+            model: self.model.clone(),
+            max_tokens: max_tokens_for_model(&self.model),
+            messages: convert_messages(&request.messages),
+            system: (!request.system_prompt.is_empty()).then(|| request.system_prompt.join("\n\n")),
+            tools: (!tools.is_empty()).then_some(tools),
+            tool_choice: (!self.allowed_tools.is_empty()).then_some(ToolChoice::Auto),
+            stream: true,
+        };
+
+        self.runtime.block_on(async {
+            let mut stream = self
+                .client
+                .stream_message(&message_request)
+                .await
+                .map_err(|error| RuntimeError::new(error.to_string()))?;
+            let mut events = Vec::new();
+            let mut pending_tools: BTreeMap<u32, (String, String, String)> = BTreeMap::new();
+            let mut saw_stop = false;
+
+            while let Some(event) = stream
+                .next_event()
+                .await
+                .map_err(|error| RuntimeError::new(error.to_string()))?
+            {
+                match event {
+                    ApiStreamEvent::MessageStart(start) => {
+                        for block in start.message.content {
+                            push_output_block(block, 0, &mut events, &mut pending_tools, true);
+                        }
+                    }
+                    ApiStreamEvent::ContentBlockStart(start) => {
+                        push_output_block(
+                            start.content_block,
+                            start.index,
+                            &mut events,
+                            &mut pending_tools,
+                            true,
+                        );
+                    }
+                    ApiStreamEvent::ContentBlockDelta(delta) => match delta.delta {
+                        ContentBlockDelta::TextDelta { text } => {
+                            if !text.is_empty() {
+                                events.push(AssistantEvent::TextDelta(text));
+                            }
+                        }
+                        ContentBlockDelta::InputJsonDelta { partial_json } => {
+                            if let Some((_, _, input)) = pending_tools.get_mut(&delta.index) {
+                                input.push_str(&partial_json);
+                            }
+                        }
+                        ContentBlockDelta::ThinkingDelta { .. }
+                        | ContentBlockDelta::SignatureDelta { .. } => {}
+                    },
+                    ApiStreamEvent::ContentBlockStop(stop) => {
+                        if let Some((id, name, input)) = pending_tools.remove(&stop.index) {
+                            events.push(AssistantEvent::ToolUse { id, name, input });
+                        }
+                    }
+                    ApiStreamEvent::MessageDelta(delta) => {
+                        events.push(AssistantEvent::Usage(TokenUsage {
+                            input_tokens: delta.usage.input_tokens,
+                            output_tokens: delta.usage.output_tokens,
+                            cache_creation_input_tokens: 0,
+                            cache_read_input_tokens: 0,
+                        }));
+                    }
+                    ApiStreamEvent::MessageStop(_) => {
+                        saw_stop = true;
+                        events.push(AssistantEvent::MessageStop);
+                    }
+                }
+            }
+
+            if !saw_stop
+                && events.iter().any(|event| {
