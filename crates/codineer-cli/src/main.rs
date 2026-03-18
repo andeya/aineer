@@ -995,3 +995,136 @@ fn run_resume_clear(
         ));
     }
     let cleared = Session::new();
+    cleared.save_to_path(session_path)?;
+    Ok(ResumeCommandOutcome {
+        session: cleared,
+        message: Some(format!(
+            "Cleared resumed session file {}.",
+            session_path.display()
+        )),
+    })
+}
+
+fn run_resume_status(
+    session_path: &Path,
+    session: &Session,
+) -> Result<ResumeCommandOutcome, Box<dyn std::error::Error>> {
+    let tracker = UsageTracker::from_session(session);
+    let usage = tracker.cumulative_usage();
+    Ok(ResumeCommandOutcome::keep(
+        session,
+        format_status_report(
+            "restored-session",
+            StatusUsage {
+                message_count: session.messages.len(),
+                turns: tracker.turns(),
+                latest: tracker.current_turn_usage(),
+                cumulative: usage,
+                estimated_tokens: 0,
+            },
+            default_permission_mode().as_str(),
+            &status_context(Some(session_path))?,
+        ),
+    ))
+}
+
+fn run_resume_export(
+    session: &Session,
+    path: Option<&str>,
+) -> Result<ResumeCommandOutcome, Box<dyn std::error::Error>> {
+    let export_path = resolve_export_path(path, session)?;
+    fs::write(&export_path, render_export_text(session))?;
+    Ok(ResumeCommandOutcome::keep(
+        session,
+        format!(
+            "Export\n  Result           wrote transcript\n  File             {}\n  Messages         {}",
+            export_path.display(),
+            session.messages.len(),
+        ),
+    ))
+}
+
+fn run_repl(
+    model: String,
+    allowed_tools: Option<AllowedToolSet>,
+    permission_mode: PermissionMode,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut cli = LiveCli::new(model, true, allowed_tools, permission_mode)?;
+    let mut editor = input::LineEditor::new("> ", slash_command_completion_candidates());
+    println!("{}", cli.startup_banner());
+
+    loop {
+        match editor.read_line()? {
+            input::ReadOutcome::Submit(input) => {
+                let trimmed = input.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                if matches!(trimmed, "/exit" | "/quit") {
+                    cli.persist_session()?;
+                    break;
+                }
+                if let Some(command) = SlashCommand::parse(trimmed) {
+                    if cli.handle_repl_command(command)? {
+                        cli.persist_session()?;
+                    }
+                    continue;
+                }
+                editor.push_history(&input);
+                cli.run_turn(&input)?;
+            }
+            input::ReadOutcome::Cancel => {}
+            input::ReadOutcome::Exit => {
+                cli.persist_session()?;
+                break;
+            }
+        }
+    }
+
+    cli.shutdown_lsp();
+    cli.shutdown_mcp();
+    Ok(())
+}
+
+#[derive(Debug, Clone)]
+struct SessionHandle {
+    id: String,
+    path: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+struct ManagedSessionSummary {
+    id: String,
+    path: PathBuf,
+    modified_epoch_secs: u64,
+    message_count: usize,
+}
+
+struct LiveCli {
+    model: String,
+    allowed_tools: Option<AllowedToolSet>,
+    permission_mode: PermissionMode,
+    system_prompt: Vec<String>,
+    runtime: ConversationRuntime<DefaultRuntimeClient, CliToolExecutor>,
+    session: SessionHandle,
+    mcp_manager: SharedMcpManager,
+    lsp_manager: Option<LspManager>,
+}
+
+impl LiveCli {
+    fn new(
+        model: String,
+        enable_tools: bool,
+        allowed_tools: Option<AllowedToolSet>,
+        permission_mode: PermissionMode,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let system_prompt = build_system_prompt()?;
+        let session = create_managed_session_handle()?;
+        let mcp_manager = create_mcp_manager();
+        let runtime = build_runtime(RuntimeParams {
+            session: Session::new(),
+            model: model.clone(),
+            system_prompt: system_prompt.clone(),
+            enable_tools,
+            emit_output: true,
+            allowed_tools: allowed_tools.clone(),
