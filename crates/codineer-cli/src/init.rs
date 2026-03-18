@@ -51,3 +51,56 @@ impl InitReport {
         for artifact in &self.artifacts {
             lines.push(format!(
                 "  {:<16} {}",
+                artifact.name,
+                artifact.status.label()
+            ));
+        }
+        lines.push("  Next step        Review and tailor the generated guidance".to_string());
+        lines.join("\n")
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum RepoFeature {
+    RustWorkspace,
+    RustRoot,
+    Python,
+    PackageJson,
+    TypeScript,
+    NextJs,
+    React,
+    Vite,
+    NestJs,
+    SrcDir,
+    TestsDir,
+    RustDir,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct RepoDetection {
+    features: std::collections::HashSet<RepoFeature>,
+}
+
+impl RepoDetection {
+    fn has(&self, feature: RepoFeature) -> bool {
+        self.features.contains(&feature)
+    }
+}
+
+pub(crate) fn initialize_repo(cwd: &Path) -> Result<InitReport, Box<dyn std::error::Error>> {
+    let mut artifacts = Vec::new();
+
+    let config_dir = cwd.join(".codineer");
+    artifacts.push(InitArtifact {
+        name: ".codineer/",
+        status: ensure_dir(&config_dir)?,
+    });
+
+    let config_json = cwd.join(".codineer.json");
+    artifacts.push(InitArtifact {
+        name: ".codineer.json",
+        status: write_file_if_missing(&config_json, STARTER_CODINEER_JSON)?,
+    });
+
+    let gitignore = cwd.join(".gitignore");
+    artifacts.push(InitArtifact {
