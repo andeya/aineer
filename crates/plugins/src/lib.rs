@@ -1810,3 +1810,116 @@ fn run_lifecycle_commands(
 
     for command in commands {
         let mut process = if Path::new(command).exists() {
+            if cfg!(windows) {
+                let mut process = Command::new("cmd");
+                process.arg("/C").arg(command);
+                process
+            } else {
+                let mut process = Command::new("sh");
+                process.arg(command);
+                process
+            }
+        } else if cfg!(windows) {
+            let mut process = Command::new("cmd");
+            process.arg("/C").arg(command);
+            process
+        } else {
+            let mut process = Command::new("sh");
+            process.arg("-lc").arg(command);
+            process
+        };
+        if let Some(root) = &metadata.root {
+            process.current_dir(root);
+        }
+        let output = process.output()?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return Err(PluginError::CommandFailed(format!(
+                "plugin `{}` {} failed for `{}`: {}",
+                metadata.id,
+                phase,
+                command,
+                if stderr.is_empty() {
+                    format!("exit status {}", output.status)
+                } else {
+                    stderr
+                }
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn resolve_local_source(source: &str) -> Result<PathBuf, PluginError> {
+    let path = PathBuf::from(source);
+    if path.exists() {
+        Ok(path)
+    } else {
+        Err(PluginError::NotFound(format!(
+            "plugin source `{source}` was not found"
+        )))
+    }
+}
+
+fn parse_install_source(source: &str) -> Result<PluginInstallSource, PluginError> {
+    if source.starts_with("http://")
+        || source.starts_with("https://")
+        || source.starts_with("git@")
+        || Path::new(source)
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("git"))
+    {
+        Ok(PluginInstallSource::GitUrl {
+            url: source.to_string(),
+        })
+    } else {
+        Ok(PluginInstallSource::LocalPath {
+            path: resolve_local_source(source)?,
+        })
+    }
+}
+
+fn materialize_source(
+    source: &PluginInstallSource,
+    temp_root: &Path,
+) -> Result<PathBuf, PluginError> {
+    fs::create_dir_all(temp_root)?;
+    match source {
+        PluginInstallSource::LocalPath { path } => Ok(path.clone()),
+        PluginInstallSource::GitUrl { url } => {
+            let destination = temp_root.join(format!("plugin-{}", unix_time_ms()));
+            let output = Command::new("git")
+                .arg("clone")
+                .arg("--depth")
+                .arg("1")
+                .arg(url)
+                .arg(&destination)
+                .output()?;
+            if !output.status.success() {
+                return Err(PluginError::CommandFailed(format!(
+                    "git clone failed for `{url}`: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                )));
+            }
+            Ok(destination)
+        }
+    }
+}
+
+fn discover_plugin_dirs(root: &Path) -> Result<Vec<PathBuf>, PluginError> {
+    match fs::read_dir(root) {
+        Ok(entries) => {
+            let mut paths = Vec::new();
+            for entry in entries {
+                let path = entry?.path();
+                if path.is_dir() && plugin_manifest_path(&path).is_ok() {
+                    paths.push(path);
+                }
+            }
+            paths.sort();
+            Ok(paths)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(error) => Err(PluginError::Io(error)),
