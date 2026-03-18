@@ -1568,3 +1568,431 @@ where
 
 {}
 ",
+        agent_id, agent_name, input.description, normalized_subagent_type, created_at, input.prompt
+    );
+    std::fs::write(&output_file, output_contents).map_err(|error| error.to_string())?;
+
+    let manifest = AgentOutput {
+        agent_id,
+        name: agent_name,
+        description: input.description,
+        subagent_type: Some(normalized_subagent_type),
+        model: Some(model),
+        status: String::from("running"),
+        output_file: output_file.display().to_string(),
+        manifest_file: manifest_file.display().to_string(),
+        created_at: created_at.clone(),
+        started_at: Some(created_at),
+        completed_at: None,
+        error: None,
+    };
+    write_agent_manifest(&manifest)?;
+
+    let manifest_for_spawn = manifest.clone();
+    let job = AgentJob {
+        manifest: manifest_for_spawn,
+        prompt: input.prompt,
+        system_prompt,
+        allowed_tools,
+    };
+    if let Err(error) = spawn_fn(job) {
+        let error = format!("failed to spawn sub-agent: {error}");
+        persist_agent_terminal_state(&manifest, "failed", None, Some(error.clone()))?;
+        return Err(error);
+    }
+
+    Ok(manifest)
+}
+
+fn spawn_agent_job(job: AgentJob) -> Result<(), String> {
+    let thread_name = format!("codineer-agent-{}", job.manifest.agent_id);
+    std::thread::Builder::new()
+        .name(thread_name)
+        .spawn(move || {
+            let result =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_agent_job(&job)));
+            match result {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    let _ =
+                        persist_agent_terminal_state(&job.manifest, "failed", None, Some(error));
+                }
+                Err(_) => {
+                    let _ = persist_agent_terminal_state(
+                        &job.manifest,
+                        "failed",
+                        None,
+                        Some(String::from("sub-agent thread panicked")),
+                    );
+                }
+            }
+        })
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
+fn run_agent_job(job: &AgentJob) -> Result<(), String> {
+    let mut runtime = build_agent_runtime(job)?.with_max_iterations(DEFAULT_AGENT_MAX_ITERATIONS);
+    let summary = runtime
+        .run_turn(job.prompt.clone(), None)
+        .map_err(|error| error.to_string())?;
+    let final_text = final_assistant_text(&summary);
+    persist_agent_terminal_state(&job.manifest, "completed", Some(final_text.as_str()), None)
+}
+
+fn build_agent_runtime(
+    job: &AgentJob,
+) -> Result<ConversationRuntime<ProviderRuntimeClient, SubagentToolExecutor>, String> {
+    let model = job
+        .manifest
+        .model
+        .clone()
+        .unwrap_or_else(|| DEFAULT_AGENT_MODEL.to_string());
+    let allowed_tools = job.allowed_tools.clone();
+    let api_client = ProviderRuntimeClient::new(&model, allowed_tools.clone())?;
+    let tool_executor = SubagentToolExecutor::new(allowed_tools);
+    Ok(ConversationRuntime::new(
+        Session::new(),
+        api_client,
+        tool_executor,
+        agent_permission_policy(),
+        job.system_prompt.clone(),
+    ))
+}
+
+fn build_agent_system_prompt(subagent_type: &str) -> Result<Vec<String>, String> {
+    let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
+    let mut prompt = load_system_prompt(
+        cwd,
+        DEFAULT_AGENT_SYSTEM_DATE.to_string(),
+        std::env::consts::OS,
+        "unknown",
+    )
+    .map_err(|error| error.to_string())?;
+    prompt.push(format!(
+        "You are a background sub-agent of type `{subagent_type}`. Work only on the delegated task, use only the tools available to you, do not ask the user questions, and finish with a concise result."
+    ));
+    Ok(prompt)
+}
+
+fn resolve_agent_model(model: Option<&str>) -> String {
+    model
+        .map(str::trim)
+        .filter(|model| !model.is_empty())
+        .unwrap_or(DEFAULT_AGENT_MODEL)
+        .to_string()
+}
+
+fn allowed_tools_for_subagent(subagent_type: &str) -> BTreeSet<String> {
+    let tools = match subagent_type {
+        "Explore" => vec![
+            "read_file",
+            "glob_search",
+            "grep_search",
+            "WebFetch",
+            "WebSearch",
+            "ToolSearch",
+            "Skill",
+            "StructuredOutput",
+        ],
+        "Plan" => vec![
+            "read_file",
+            "glob_search",
+            "grep_search",
+            "WebFetch",
+            "WebSearch",
+            "ToolSearch",
+            "Skill",
+            "TodoWrite",
+            "StructuredOutput",
+            "SendUserMessage",
+        ],
+        "Verification" => vec![
+            "bash",
+            "read_file",
+            "glob_search",
+            "grep_search",
+            "WebFetch",
+            "WebSearch",
+            "ToolSearch",
+            "TodoWrite",
+            "StructuredOutput",
+            "SendUserMessage",
+            "PowerShell",
+        ],
+        "codineer-guide" => vec![
+            "read_file",
+            "glob_search",
+            "grep_search",
+            "WebFetch",
+            "WebSearch",
+            "ToolSearch",
+            "Skill",
+            "StructuredOutput",
+            "SendUserMessage",
+        ],
+        "statusline-setup" => vec![
+            "bash",
+            "read_file",
+            "write_file",
+            "edit_file",
+            "glob_search",
+            "grep_search",
+            "ToolSearch",
+        ],
+        _ => vec![
+            "bash",
+            "read_file",
+            "write_file",
+            "edit_file",
+            "glob_search",
+            "grep_search",
+            "WebFetch",
+            "WebSearch",
+            "TodoWrite",
+            "Skill",
+            "ToolSearch",
+            "NotebookEdit",
+            "Sleep",
+            "SendUserMessage",
+            "Config",
+            "StructuredOutput",
+            "REPL",
+            "PowerShell",
+        ],
+    };
+    tools.into_iter().map(str::to_string).collect()
+}
+
+fn agent_permission_policy() -> PermissionPolicy {
+    mvp_tool_specs().into_iter().fold(
+        PermissionPolicy::new(PermissionMode::DangerFullAccess),
+        |policy, spec| policy.with_tool_requirement(spec.name, spec.required_permission),
+    )
+}
+
+fn write_agent_manifest(manifest: &AgentOutput) -> Result<(), String> {
+    std::fs::write(
+        &manifest.manifest_file,
+        serde_json::to_string_pretty(manifest).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())
+}
+
+fn persist_agent_terminal_state(
+    manifest: &AgentOutput,
+    status: &str,
+    result: Option<&str>,
+    error: Option<String>,
+) -> Result<(), String> {
+    append_agent_output(
+        &manifest.output_file,
+        &format_agent_terminal_output(status, result, error.as_deref()),
+    )?;
+    let mut next_manifest = manifest.clone();
+    next_manifest.status = status.to_string();
+    next_manifest.completed_at = Some(iso8601_now());
+    next_manifest.error = error;
+    write_agent_manifest(&next_manifest)
+}
+
+fn append_agent_output(path: &str, suffix: &str) -> Result<(), String> {
+    use std::io::Write as _;
+
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(path)
+        .map_err(|error| error.to_string())?;
+    file.write_all(suffix.as_bytes())
+        .map_err(|error| error.to_string())
+}
+
+fn format_agent_terminal_output(status: &str, result: Option<&str>, error: Option<&str>) -> String {
+    let mut sections = vec![format!("\n## Result\n\n- status: {status}\n")];
+    if let Some(result) = result.filter(|value| !value.trim().is_empty()) {
+        sections.push(format!("\n### Final response\n\n{}\n", result.trim()));
+    }
+    if let Some(error) = error.filter(|value| !value.trim().is_empty()) {
+        sections.push(format!("\n### Error\n\n{}\n", error.trim()));
+    }
+    sections.join("")
+}
+
+struct ProviderRuntimeClient {
+    runtime: tokio::runtime::Runtime,
+    client: ProviderClient,
+    model: String,
+    allowed_tools: BTreeSet<String>,
+}
+
+impl ProviderRuntimeClient {
+    fn new(model: &str, allowed_tools: BTreeSet<String>) -> Result<Self, String> {
+        let model = resolve_model_alias(model).clone();
+        let client = ProviderClient::from_model(&model).map_err(|error| error.to_string())?;
+        Ok(Self {
+            runtime: tokio::runtime::Runtime::new().map_err(|error| error.to_string())?,
+            client,
+            model,
+            allowed_tools,
+        })
+    }
+}
+
+impl ApiClient for ProviderRuntimeClient {
+    #[allow(clippy::too_many_lines)]
+    fn stream(&mut self, request: ApiRequest) -> Result<Vec<AssistantEvent>, RuntimeError> {
+        let tools = tool_specs_for_allowed_tools(Some(&self.allowed_tools))
+            .into_iter()
+            .map(|spec| ToolDefinition {
+                name: spec.name.to_string(),
+                description: Some(spec.description.to_string()),
+                input_schema: spec.input_schema,
+            })
+            .collect::<Vec<_>>();
+        let message_request = MessageRequest {
+            model: self.model.clone(),
+            max_tokens: max_tokens_for_model(&self.model),
+            messages: convert_messages(&request.messages),
+            system: (!request.system_prompt.is_empty()).then(|| request.system_prompt.join("\n\n")),
+            tools: (!tools.is_empty()).then_some(tools),
+            tool_choice: (!self.allowed_tools.is_empty()).then_some(ToolChoice::Auto),
+            stream: true,
+        };
+
+        self.runtime.block_on(async {
+            let mut stream = self
+                .client
+                .stream_message(&message_request)
+                .await
+                .map_err(|error| RuntimeError::new(error.to_string()))?;
+            let mut events = Vec::new();
+            let mut pending_tools: BTreeMap<u32, (String, String, String)> = BTreeMap::new();
+            let mut saw_stop = false;
+
+            while let Some(event) = stream
+                .next_event()
+                .await
+                .map_err(|error| RuntimeError::new(error.to_string()))?
+            {
+                match event {
+                    ApiStreamEvent::MessageStart(start) => {
+                        for block in start.message.content {
+                            push_output_block(block, 0, &mut events, &mut pending_tools, true);
+                        }
+                    }
+                    ApiStreamEvent::ContentBlockStart(start) => {
+                        push_output_block(
+                            start.content_block,
+                            start.index,
+                            &mut events,
+                            &mut pending_tools,
+                            true,
+                        );
+                    }
+                    ApiStreamEvent::ContentBlockDelta(delta) => match delta.delta {
+                        ContentBlockDelta::TextDelta { text } => {
+                            if !text.is_empty() {
+                                events.push(AssistantEvent::TextDelta(text));
+                            }
+                        }
+                        ContentBlockDelta::InputJsonDelta { partial_json } => {
+                            if let Some((_, _, input)) = pending_tools.get_mut(&delta.index) {
+                                input.push_str(&partial_json);
+                            }
+                        }
+                        ContentBlockDelta::ThinkingDelta { .. }
+                        | ContentBlockDelta::SignatureDelta { .. } => {}
+                    },
+                    ApiStreamEvent::ContentBlockStop(stop) => {
+                        if let Some((id, name, input)) = pending_tools.remove(&stop.index) {
+                            events.push(AssistantEvent::ToolUse { id, name, input });
+                        }
+                    }
+                    ApiStreamEvent::MessageDelta(delta) => {
+                        events.push(AssistantEvent::Usage(TokenUsage {
+                            input_tokens: delta.usage.input_tokens,
+                            output_tokens: delta.usage.output_tokens,
+                            cache_creation_input_tokens: 0,
+                            cache_read_input_tokens: 0,
+                        }));
+                    }
+                    ApiStreamEvent::MessageStop(_) => {
+                        saw_stop = true;
+                        events.push(AssistantEvent::MessageStop);
+                    }
+                }
+            }
+
+            if !saw_stop
+                && events.iter().any(|event| {
+                    matches!(event, AssistantEvent::TextDelta(text) if !text.is_empty())
+                        || matches!(event, AssistantEvent::ToolUse { .. })
+                })
+            {
+                events.push(AssistantEvent::MessageStop);
+            }
+
+            if events
+                .iter()
+                .any(|event| matches!(event, AssistantEvent::MessageStop))
+            {
+                return Ok(events);
+            }
+
+            let response = self
+                .client
+                .send_message(&MessageRequest {
+                    stream: false,
+                    ..message_request.clone()
+                })
+                .await
+                .map_err(|error| RuntimeError::new(error.to_string()))?;
+            Ok(response_to_events(response))
+        })
+    }
+}
+
+struct SubagentToolExecutor {
+    allowed_tools: BTreeSet<String>,
+}
+
+impl SubagentToolExecutor {
+    fn new(allowed_tools: BTreeSet<String>) -> Self {
+        Self { allowed_tools }
+    }
+}
+
+impl ToolExecutor for SubagentToolExecutor {
+    fn execute(&mut self, tool_name: &str, input: &str) -> Result<String, ToolError> {
+        if !self.allowed_tools.contains(tool_name) {
+            return Err(ToolError::new(format!(
+                "tool `{tool_name}` is not enabled for this sub-agent"
+            )));
+        }
+        let value = serde_json::from_str(input)
+            .map_err(|error| ToolError::new(format!("invalid tool input JSON: {error}")))?;
+        execute_tool(tool_name, &value).map_err(ToolError::new)
+    }
+}
+
+fn tool_specs_for_allowed_tools(allowed_tools: Option<&BTreeSet<String>>) -> Vec<ToolSpec> {
+    mvp_tool_specs()
+        .into_iter()
+        .filter(|spec| allowed_tools.is_none_or(|allowed| allowed.contains(spec.name)))
+        .collect()
+}
+
+fn convert_messages(messages: &[ConversationMessage]) -> Vec<InputMessage> {
+    messages
+        .iter()
+        .filter_map(|message| {
+            let role = match message.role {
+                MessageRole::System | MessageRole::User | MessageRole::Tool => "user",
+                MessageRole::Assistant => "assistant",
+            };
+            let content = message
+                .blocks
+                .iter()
+                .map(|block| match block {
+                    ContentBlock::Text { text } => InputContentBlock::Text { text: text.clone() },
+                    ContentBlock::ToolUse { id, name, input } => InputContentBlock::ToolUse {
