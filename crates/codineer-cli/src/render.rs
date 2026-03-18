@@ -161,3 +161,57 @@ impl Spinner {
             execute!(
                 out,
                 MoveToColumn(0),
+                Clear(ClearType::CurrentLine),
+                SetForegroundColor(theme.spinner_failed),
+                Print(format!("✘ {label}\n")),
+                ResetColor
+            )?;
+        } else {
+            execute!(
+                out,
+                MoveToColumn(0),
+                Clear(ClearType::CurrentLine),
+                Print(format!("✘ {label}\n"))
+            )?;
+        }
+        out.flush()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ListKind {
+    Unordered,
+    Ordered { next_index: u64 },
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct TableState {
+    headers: Vec<String>,
+    rows: Vec<Vec<String>>,
+    current_row: Vec<String>,
+    current_cell: String,
+    in_head: bool,
+}
+
+impl TableState {
+    fn push_cell(&mut self) {
+        let cell = self.current_cell.trim().to_string();
+        self.current_row.push(cell);
+        self.current_cell.clear();
+    }
+
+    fn finish_row(&mut self) {
+        if self.current_row.is_empty() {
+            return;
+        }
+        let row = std::mem::take(&mut self.current_row);
+        if self.in_head {
+            self.headers = row;
+        } else {
+            self.rows.push(row);
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct RenderState {
