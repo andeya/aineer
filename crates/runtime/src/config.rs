@@ -1158,3 +1158,158 @@ mod tests {
             .load()
             .expect("config should load");
 
+        let stdio_server = loaded
+            .mcp()
+            .get("stdio-server")
+            .expect("stdio server should exist");
+        assert_eq!(stdio_server.scope, ConfigSource::User);
+        assert_eq!(stdio_server.transport(), McpTransport::Stdio);
+
+        let remote_server = loaded
+            .mcp()
+            .get("remote-server")
+            .expect("remote server should exist");
+        assert_eq!(remote_server.scope, ConfigSource::Local);
+        assert_eq!(remote_server.transport(), McpTransport::Ws);
+        match &remote_server.config {
+            McpServerConfig::Ws(config) => {
+                assert_eq!(config.url, "wss://override.test/mcp");
+                assert_eq!(
+                    config.headers.get("X-Env").map(String::as_str),
+                    Some("local")
+                );
+            }
+            other => panic!("expected ws config, got {other:?}"),
+        }
+
+        let oauth = loaded.oauth().expect("oauth config should exist");
+        assert_eq!(oauth.client_id, "runtime-client");
+        assert_eq!(oauth.callback_port, Some(54_545));
+        assert_eq!(oauth.scopes, vec!["org:read", "user:write"]);
+
+        fs::remove_dir_all(root).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn parses_plugin_config_from_enabled_plugins() {
+        let root = temp_dir();
+        let cwd = root.join("project");
+        let home = root.join("home").join(".codineer");
+        fs::create_dir_all(cwd.join(".codineer")).expect("project config dir");
+        fs::create_dir_all(&home).expect("home config dir");
+
+        fs::write(
+            home.join("settings.json"),
+            r#"{
+              "enabledPlugins": {
+                "tool-guard@builtin": true,
+                "sample-plugin@external": false
+              }
+            }"#,
+        )
+        .expect("write user settings");
+
+        let loaded = ConfigLoader::new(&cwd, &home)
+            .load()
+            .expect("config should load");
+
+        assert_eq!(
+            loaded.plugins().enabled_plugins().get("tool-guard@builtin"),
+            Some(&true)
+        );
+        assert_eq!(
+            loaded
+                .plugins()
+                .enabled_plugins()
+                .get("sample-plugin@external"),
+            Some(&false)
+        );
+
+        fs::remove_dir_all(root).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn parses_plugin_config() {
+        let root = temp_dir();
+        let cwd = root.join("project");
+        let home = root.join("home").join(".codineer");
+        fs::create_dir_all(cwd.join(".codineer")).expect("project config dir");
+        fs::create_dir_all(&home).expect("home config dir");
+
+        fs::write(
+            home.join("settings.json"),
+            r#"{
+              "enabledPlugins": {
+                "core-helpers@builtin": true
+              },
+              "plugins": {
+                "externalDirectories": ["./external-plugins"],
+                "installRoot": "plugin-cache/installed",
+                "registryPath": "plugin-cache/installed.json",
+                "bundledRoot": "./bundled-plugins"
+              }
+            }"#,
+        )
+        .expect("write plugin settings");
+
+        let loaded = ConfigLoader::new(&cwd, &home)
+            .load()
+            .expect("config should load");
+
+        assert_eq!(
+            loaded
+                .plugins()
+                .enabled_plugins()
+                .get("core-helpers@builtin"),
+            Some(&true)
+        );
+        assert_eq!(
+            loaded.plugins().external_directories(),
+            &["./external-plugins".to_string()]
+        );
+        assert_eq!(
+            loaded.plugins().install_root(),
+            Some("plugin-cache/installed")
+        );
+        assert_eq!(
+            loaded.plugins().registry_path(),
+            Some("plugin-cache/installed.json")
+        );
+        assert_eq!(loaded.plugins().bundled_root(), Some("./bundled-plugins"));
+
+        fs::remove_dir_all(root).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn rejects_invalid_mcp_server_shapes() {
+        let root = temp_dir();
+        let cwd = root.join("project");
+        let home = root.join("home").join(".codineer");
+        fs::create_dir_all(&home).expect("home config dir");
+        fs::create_dir_all(&cwd).expect("project dir");
+        fs::write(
+            home.join("settings.json"),
+            r#"{"mcpServers":{"broken":{"type":"http","url":123}}}"#,
+        )
+        .expect("write broken settings");
+
+        let error = ConfigLoader::new(&cwd, &home)
+            .load()
+            .expect_err("config should fail");
+        assert!(error
+            .to_string()
+            .contains("mcpServers.broken: missing string field url"));
+
+        fs::remove_dir_all(root).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn parses_sse_and_sdk_and_managed_proxy_mcp_types() {
+        let root = temp_dir();
+        let cwd = root.join("project");
+        let home = root.join("home").join(".codineer");
+        fs::create_dir_all(&home).expect("home dir");
+        fs::create_dir_all(&cwd).expect("project dir");
+        fs::write(
+            home.join("settings.json"),
+            r#"{
