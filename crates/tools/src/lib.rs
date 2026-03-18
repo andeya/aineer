@@ -1711,3 +1711,74 @@ fn allowed_tools_for_subagent(subagent_type: &str) -> BTreeSet<String> {
             "bash",
             "read_file",
             "glob_search",
+            "grep_search",
+            "WebFetch",
+            "WebSearch",
+            "ToolSearch",
+            "TodoWrite",
+            "StructuredOutput",
+            "SendUserMessage",
+            "PowerShell",
+        ],
+        "codineer-guide" => vec![
+            "read_file",
+            "glob_search",
+            "grep_search",
+            "WebFetch",
+            "WebSearch",
+            "ToolSearch",
+            "Skill",
+            "StructuredOutput",
+            "SendUserMessage",
+        ],
+        "statusline-setup" => vec![
+            "bash",
+            "read_file",
+            "write_file",
+            "edit_file",
+            "glob_search",
+            "grep_search",
+            "ToolSearch",
+        ],
+        _ => vec![
+            "bash",
+            "read_file",
+            "write_file",
+            "edit_file",
+            "glob_search",
+            "grep_search",
+            "WebFetch",
+            "WebSearch",
+            "TodoWrite",
+            "Skill",
+            "ToolSearch",
+            "NotebookEdit",
+            "Sleep",
+            "SendUserMessage",
+            "Config",
+            "StructuredOutput",
+            "REPL",
+            "PowerShell",
+        ],
+    };
+    tools.into_iter().map(str::to_string).collect()
+}
+
+fn agent_permission_policy() -> PermissionPolicy {
+    mvp_tool_specs().into_iter().fold(
+        PermissionPolicy::new(PermissionMode::DangerFullAccess),
+        |policy, spec| policy.with_tool_requirement(spec.name, spec.required_permission),
+    )
+}
+
+fn write_agent_manifest(manifest: &AgentOutput) -> Result<(), String> {
+    std::fs::write(
+        &manifest.manifest_file,
+        serde_json::to_string_pretty(manifest).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())
+}
+
+fn persist_agent_terminal_state(
+    manifest: &AgentOutput,
+    status: &str,
