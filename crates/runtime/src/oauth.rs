@@ -489,3 +489,85 @@ fn percent_decode(value: &str) -> Result<String, String> {
             }
             byte => {
                 decoded.push(byte);
+                index += 1;
+            }
+        }
+    }
+    String::from_utf8(decoded).map_err(|error| error.to_string())
+}
+
+fn decode_hex(byte: u8) -> Result<u8, String> {
+    match byte {
+        b'0'..=b'9' => Ok(byte - b'0'),
+        b'a'..=b'f' => Ok(byte - b'a' + 10),
+        b'A'..=b'F' => Ok(byte - b'A' + 10),
+        _ => Err(format!("invalid percent-encoding byte: {byte}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::{
+        clear_from_keyring, clear_oauth_credentials, code_challenge_s256, credentials_path,
+        generate_pkce_pair, generate_state, load_from_keyring, load_oauth_credentials,
+        loopback_redirect_uri, parse_oauth_callback_query, parse_oauth_callback_request_target,
+        save_oauth_credentials, OAuthAuthorizationRequest, OAuthConfig, OAuthRefreshRequest,
+        OAuthTokenExchangeRequest, OAuthTokenSet,
+    };
+
+    fn sample_config() -> OAuthConfig {
+        OAuthConfig {
+            client_id: "runtime-client".to_string(),
+            authorize_url: "https://console.test/oauth/authorize".to_string(),
+            token_url: "https://console.test/oauth/token".to_string(),
+            callback_port: Some(4545),
+            manual_redirect_url: Some("https://console.test/oauth/callback".to_string()),
+            scopes: vec!["org:read".to_string(), "user:write".to_string()],
+        }
+    }
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        crate::test_env_lock()
+    }
+
+    fn temp_config_home() -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "runtime-oauth-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ))
+    }
+
+    #[test]
+    fn s256_challenge_matches_expected_vector() {
+        assert_eq!(
+            code_challenge_s256("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"),
+            "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+        );
+    }
+
+    #[test]
+    fn generates_pkce_pair_and_state() {
+        let pair = generate_pkce_pair().expect("pkce pair");
+        let state = generate_state().expect("state");
+        assert!(!pair.verifier.is_empty());
+        assert!(!pair.challenge.is_empty());
+        assert!(!state.is_empty());
+    }
+
+    #[test]
+    fn builds_authorize_url_and_form_requests() {
+        let config = sample_config();
+        let pair = generate_pkce_pair().expect("pkce");
+        let url = OAuthAuthorizationRequest::from_config(
+            &config,
+            loopback_redirect_uri(4545),
+            "state-123",
+            &pair,
+        )
+        .with_extra_param("login_hint", "user@example.com")
