@@ -408,3 +408,85 @@ fn normalize_mounts(mounts: &[String], cwd: &Path) -> Vec<String> {
             let path = PathBuf::from(mount);
             if path.is_absolute() {
                 path
+            } else {
+                cwd.join(path)
+            }
+        })
+        .map(|path| path.display().to_string())
+        .collect()
+}
+
+fn command_exists(command: &str) -> bool {
+    env::var_os("PATH")
+        .is_some_and(|paths| env::split_paths(&paths).any(|path| path.join(command).exists()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        build_sandbox_command, detect_container_environment_from, generate_seatbelt_profile,
+        FilesystemIsolationMode, SandboxConfig, SandboxDetectionInputs,
+    };
+    use std::path::Path;
+
+    #[test]
+    fn detects_container_markers_from_multiple_sources() {
+        let detected = detect_container_environment_from(SandboxDetectionInputs {
+            env_pairs: vec![("container".to_string(), "docker".to_string())],
+            dockerenv_exists: true,
+            containerenv_exists: false,
+            proc_1_cgroup: Some("12:memory:/docker/abc"),
+        });
+
+        assert!(detected.in_container);
+        assert!(detected
+            .markers
+            .iter()
+            .any(|marker| marker == "/.dockerenv"));
+        assert!(detected
+            .markers
+            .iter()
+            .any(|marker| marker == "env:container=docker"));
+        assert!(detected
+            .markers
+            .iter()
+            .any(|marker| marker == "/proc/1/cgroup:docker"));
+    }
+
+    #[test]
+    fn resolves_request_with_overrides() {
+        let config = SandboxConfig {
+            enabled: Some(true),
+            namespace_restrictions: Some(true),
+            network_isolation: Some(false),
+            filesystem_mode: Some(FilesystemIsolationMode::WorkspaceOnly),
+            allowed_mounts: vec!["logs".to_string()],
+        };
+
+        let request = config.resolve_request(
+            Some(true),
+            Some(false),
+            Some(true),
+            Some(FilesystemIsolationMode::AllowList),
+            Some(vec!["tmp".to_string()]),
+        );
+
+        assert!(request.enabled);
+        assert!(!request.namespace_restrictions);
+        assert!(request.network_isolation);
+        assert_eq!(request.filesystem_mode, FilesystemIsolationMode::AllowList);
+        assert_eq!(request.allowed_mounts, vec!["tmp"]);
+    }
+
+    #[test]
+    fn builds_sandbox_command_for_current_platform() {
+        let config = SandboxConfig::default();
+        let status = super::resolve_sandbox_status_for_request(
+            &config.resolve_request(
+                Some(true),
+                Some(true),
+                Some(true),
+                Some(FilesystemIsolationMode::WorkspaceOnly),
+                None,
+            ),
+            Path::new("/workspace"),
