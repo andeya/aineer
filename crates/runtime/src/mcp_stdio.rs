@@ -1209,3 +1209,176 @@ mod tests {
             .expect("runtime");
         runtime.block_on(async {
             let script_path = write_echo_script();
+            let bootstrap = sample_bootstrap(&script_path);
+            let mut process = spawn_mcp_stdio_process(&bootstrap).expect("spawn stdio process");
+
+            let ready = process.read_line().await.expect("read ready");
+            assert_eq!(ready, "READY:secret-value\n");
+
+            process
+                .write_line("ping from client")
+                .await
+                .expect("write line");
+
+            let echoed = process.read_line().await.expect("read echo");
+            assert_eq!(echoed, "ECHO:ping from client\n");
+
+            let status = process.wait().await.expect("wait for exit");
+            assert!(status.success());
+
+            cleanup_script(&script_path);
+        });
+    }
+
+    #[test]
+    fn rejects_non_stdio_bootstrap() {
+        let config = ScopedMcpServerConfig {
+            scope: ConfigSource::Local,
+            config: McpServerConfig::Sdk(crate::config::McpSdkServerConfig {
+                name: "sdk-server".to_string(),
+            }),
+        };
+        let bootstrap = McpClientBootstrap::from_scoped_config("sdk server", &config);
+        let error = spawn_mcp_stdio_process(&bootstrap).expect_err("non-stdio should fail");
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn round_trips_initialize_request_and_response_over_stdio_frames() {
+        let runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        runtime.block_on(async {
+            let script_path = write_jsonrpc_script();
+            let transport = script_transport(&script_path);
+            let mut process = McpStdioProcess::spawn(&transport).expect("spawn transport directly");
+
+            let response = process
+                .initialize(
+                    JsonRpcId::Number(1),
+                    McpInitializeParams {
+                        protocol_version: "2025-03-26".to_string(),
+                        capabilities: json!({"roots": {}}),
+                        client_info: McpInitializeClientInfo {
+                            name: "runtime-tests".to_string(),
+                            version: "0.1.0".to_string(),
+                        },
+                    },
+                )
+                .await
+                .expect("initialize roundtrip");
+
+            assert_eq!(response.id, JsonRpcId::Number(1));
+            assert_eq!(response.error, None);
+            assert_eq!(
+                response.result,
+                Some(McpInitializeResult {
+                    protocol_version: "2025-03-26".to_string(),
+                    capabilities: json!({"tools": {}}),
+                    server_info: McpInitializeServerInfo {
+                        name: "fake-mcp".to_string(),
+                        version: "0.1.0".to_string(),
+                    },
+                })
+            );
+
+            let status = process.wait().await.expect("wait for exit");
+            assert!(status.success());
+
+            cleanup_script(&script_path);
+        });
+    }
+
+    #[test]
+    fn write_jsonrpc_request_emits_content_length_frame() {
+        let runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        runtime.block_on(async {
+            let script_path = write_jsonrpc_script();
+            let transport = script_transport(&script_path);
+            let mut process = McpStdioProcess::spawn(&transport).expect("spawn transport directly");
+            let request = JsonRpcRequest::new(
+                JsonRpcId::Number(7),
+                "initialize",
+                Some(json!({
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {"name": "runtime-tests", "version": "0.1.0"}
+                })),
+            );
+
+            process.send_request(&request).await.expect("send request");
+            let response: JsonRpcResponse<serde_json::Value> =
+                process.read_response().await.expect("read response");
+
+            assert_eq!(response.id, JsonRpcId::Number(7));
+            assert_eq!(response.jsonrpc, "2.0");
+
+            let status = process.wait().await.expect("wait for exit");
+            assert!(status.success());
+
+            cleanup_script(&script_path);
+        });
+    }
+
+    #[test]
+    fn direct_spawn_uses_transport_env() {
+        let runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        runtime.block_on(async {
+            let script_path = write_echo_script();
+            let transport = crate::mcp_client::McpStdioTransport {
+                command: "/bin/sh".to_string(),
+                args: vec![script_path.to_string_lossy().into_owned()],
+                env: BTreeMap::from([("MCP_TEST_TOKEN".to_string(), "direct-secret".to_string())]),
+            };
+            let mut process = McpStdioProcess::spawn(&transport).expect("spawn transport directly");
+            let ready = process.read_available().await.expect("read ready");
+            assert_eq!(String::from_utf8_lossy(&ready), "READY:direct-secret\n");
+            process.terminate().await.expect("terminate child");
+            let _ = process.wait().await.expect("wait after kill");
+
+            cleanup_script(&script_path);
+        });
+    }
+
+    #[test]
+    fn lists_tools_calls_tool_and_reads_resources_over_jsonrpc() {
+        let runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        runtime.block_on(async {
+            let script_path = write_mcp_server_script();
+            let transport = script_transport(&script_path);
+            let mut process = McpStdioProcess::spawn(&transport).expect("spawn fake mcp server");
+
+            let tools = process
+                .list_tools(JsonRpcId::Number(2), None)
+                .await
+                .expect("list tools");
+            assert_eq!(tools.error, None);
+            assert_eq!(tools.id, JsonRpcId::Number(2));
+            assert_eq!(
+                tools.result,
+                Some(McpListToolsResult {
+                    tools: vec![McpTool {
+                        name: "echo".to_string(),
+                        description: Some("Echoes text".to_string()),
+                        input_schema: Some(json!({
+                            "type": "object",
+                            "properties": {"text": {"type": "string"}},
+                            "required": ["text"]
+                        })),
+                        annotations: None,
+                        meta: None,
+                    }],
+                    next_cursor: None,
+                })
+            );
+
