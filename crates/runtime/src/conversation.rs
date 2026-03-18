@@ -536,3 +536,93 @@ mod tests {
             }
         }
 
+        struct SingleCallApiClient;
+        impl ApiClient for SingleCallApiClient {
+            fn stream(&mut self, request: ApiRequest) -> Result<Vec<AssistantEvent>, RuntimeError> {
+                if request
+                    .messages
+                    .iter()
+                    .any(|message| message.role == MessageRole::Tool)
+                {
+                    return Ok(vec![
+                        AssistantEvent::TextDelta("I could not use the tool.".to_string()),
+                        AssistantEvent::MessageStop,
+                    ]);
+                }
+                Ok(vec![
+                    AssistantEvent::ToolUse {
+                        id: "tool-1".to_string(),
+                        name: "blocked".to_string(),
+                        input: "secret".to_string(),
+                    },
+                    AssistantEvent::MessageStop,
+                ])
+            }
+        }
+
+        let mut runtime = ConversationRuntime::new(
+            Session::new(),
+            SingleCallApiClient,
+            StaticToolExecutor::new(),
+            PermissionPolicy::new(PermissionMode::WorkspaceWrite),
+            vec!["system".to_string()],
+        );
+
+        let summary = runtime
+            .run_turn("use the tool", Some(&mut RejectPrompter))
+            .expect("conversation should continue after denied tool");
+
+        assert_eq!(summary.tool_results.len(), 1);
+        assert!(matches!(
+            &summary.tool_results[0].blocks[0],
+            ContentBlock::ToolResult { is_error: true, output, .. } if output == "not now"
+        ));
+    }
+
+    #[test]
+    fn denies_tool_use_when_pre_tool_hook_blocks() {
+        struct SingleCallApiClient;
+        impl ApiClient for SingleCallApiClient {
+            fn stream(&mut self, request: ApiRequest) -> Result<Vec<AssistantEvent>, RuntimeError> {
+                if request
+                    .messages
+                    .iter()
+                    .any(|message| message.role == MessageRole::Tool)
+                {
+                    return Ok(vec![
+                        AssistantEvent::TextDelta("blocked".to_string()),
+                        AssistantEvent::MessageStop,
+                    ]);
+                }
+                Ok(vec![
+                    AssistantEvent::ToolUse {
+                        id: "tool-1".to_string(),
+                        name: "blocked".to_string(),
+                        input: r#"{"path":"secret.txt"}"#.to_string(),
+                    },
+                    AssistantEvent::MessageStop,
+                ])
+            }
+        }
+
+        let deny_config = RuntimeFeatureConfig::default().with_hooks(RuntimeHookConfig::new(
+            vec![shell_snippet("printf 'blocked by hook'; exit 2")],
+            Vec::new(),
+        ));
+        let mut runtime = ConversationRuntime::new_with_features(
+            Session::new(),
+            SingleCallApiClient,
+            StaticToolExecutor::new().register("blocked", |_input| {
+                panic!("tool should not execute when hook denies")
+            }),
+            PermissionPolicy::new(PermissionMode::DangerFullAccess),
+            vec!["system".to_string()],
+            &deny_config,
+        );
+
+        let summary = runtime
+            .run_turn("use the tool", None)
+            .expect("conversation should continue after hook denial");
+
+        assert_eq!(summary.tool_results.len(), 1);
+        let ContentBlock::ToolResult {
