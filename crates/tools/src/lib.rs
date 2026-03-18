@@ -1354,3 +1354,360 @@ fn decode_duckduckgo_redirect(url: &str) -> Option<String> {
         }
     }
     Some(joined)
+}
+
+fn html_entity_decode_url(url: &str) -> String {
+    decode_html_entities(url)
+}
+
+fn host_matches_list(url: &str, domains: &[String]) -> bool {
+    let Ok(parsed) = reqwest::Url::parse(url) else {
+        return false;
+    };
+    let Some(host) = parsed.host_str() else {
+        return false;
+    };
+    let host = host.to_ascii_lowercase();
+    domains.iter().any(|domain| {
+        let normalized = normalize_domain_filter(domain);
+        !normalized.is_empty() && (host == normalized || host.ends_with(&format!(".{normalized}")))
+    })
+}
+
+fn normalize_domain_filter(domain: &str) -> String {
+    let trimmed = domain.trim();
+    let candidate = reqwest::Url::parse(trimmed)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_string))
+        .unwrap_or_else(|| trimmed.to_string());
+    candidate
+        .trim()
+        .trim_start_matches('.')
+        .trim_end_matches('/')
+        .to_ascii_lowercase()
+}
+
+fn dedupe_hits(hits: &mut Vec<SearchHit>) {
+    let mut seen = BTreeSet::new();
+    hits.retain(|hit| seen.insert(hit.url.clone()));
+}
+
+fn execute_todo_write(input: TodoWriteInput) -> Result<TodoWriteOutput, String> {
+    validate_todos(&input.todos)?;
+    let store_path = todo_store_path()?;
+    let old_todos = if store_path.exists() {
+        serde_json::from_str::<Vec<TodoItem>>(
+            &std::fs::read_to_string(&store_path).map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())?
+    } else {
+        Vec::new()
+    };
+
+    let all_done = input
+        .todos
+        .iter()
+        .all(|todo| matches!(todo.status, TodoStatus::Completed));
+    let persisted = if all_done {
+        Vec::new()
+    } else {
+        input.todos.clone()
+    };
+
+    if let Some(parent) = store_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    std::fs::write(
+        &store_path,
+        serde_json::to_string_pretty(&persisted).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())?;
+
+    let verification_nudge_needed = (all_done
+        && input.todos.len() >= 3
+        && !input
+            .todos
+            .iter()
+            .any(|todo| todo.content.to_lowercase().contains("verif")))
+    .then_some(true);
+
+    Ok(TodoWriteOutput {
+        old_todos,
+        new_todos: input.todos,
+        verification_nudge_needed,
+    })
+}
+
+fn execute_skill(input: SkillInput) -> Result<SkillOutput, String> {
+    let skill_path = resolve_skill_path(&input.skill)?;
+    let prompt = std::fs::read_to_string(&skill_path).map_err(|error| error.to_string())?;
+    let description = parse_skill_description(&prompt);
+
+    Ok(SkillOutput {
+        skill: input.skill,
+        path: skill_path.display().to_string(),
+        args: input.args,
+        description,
+        prompt,
+    })
+}
+
+fn validate_todos(todos: &[TodoItem]) -> Result<(), String> {
+    if todos.is_empty() {
+        return Err(String::from("todos must not be empty"));
+    }
+    // Allow multiple in_progress items for parallel workflows
+    if todos.iter().any(|todo| todo.content.trim().is_empty()) {
+        return Err(String::from("todo content must not be empty"));
+    }
+    if todos.iter().any(|todo| todo.active_form.trim().is_empty()) {
+        return Err(String::from("todo activeForm must not be empty"));
+    }
+    Ok(())
+}
+
+fn todo_store_path() -> Result<std::path::PathBuf, String> {
+    if let Ok(path) = std::env::var("CODINEER_TODO_STORE") {
+        return Ok(std::path::PathBuf::from(path));
+    }
+    let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
+    Ok(cwd.join(".codineer-todos.json"))
+}
+
+fn resolve_skill_path(skill: &str) -> Result<std::path::PathBuf, String> {
+    let requested = skill.trim().trim_start_matches('/').trim_start_matches('$');
+    if requested.is_empty() {
+        return Err(String::from("skill must not be empty"));
+    }
+
+    let mut candidates = Vec::new();
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.join(".codineer").join("skills"));
+    }
+    if let Ok(codineer_home) = std::env::var("CODINEER_CONFIG_HOME") {
+        candidates.push(std::path::PathBuf::from(codineer_home).join("skills"));
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        let home = std::path::PathBuf::from(home);
+        candidates.push(home.join(".codineer").join("skills"));
+        candidates.push(home.join(".agents").join("skills"));
+    }
+
+    for root in candidates {
+        let direct = root.join(requested).join("SKILL.md");
+        if direct.exists() {
+            return Ok(direct);
+        }
+
+        if let Ok(entries) = std::fs::read_dir(&root) {
+            for entry in entries.flatten() {
+                let path = entry.path().join("SKILL.md");
+                if !path.exists() {
+                    continue;
+                }
+                if entry
+                    .file_name()
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(requested)
+                {
+                    return Ok(path);
+                }
+            }
+        }
+    }
+
+    Err(format!("unknown skill: {requested}"))
+}
+
+const DEFAULT_AGENT_MODEL: &str = "claude-opus-4-6";
+const DEFAULT_AGENT_SYSTEM_DATE: &str = "2026-03-31";
+const DEFAULT_AGENT_MAX_ITERATIONS: usize = 32;
+
+fn execute_agent(input: AgentInput) -> Result<AgentOutput, String> {
+    execute_agent_with_spawn(input, spawn_agent_job)
+}
+
+fn execute_agent_with_spawn<F>(input: AgentInput, spawn_fn: F) -> Result<AgentOutput, String>
+where
+    F: FnOnce(AgentJob) -> Result<(), String>,
+{
+    if input.description.trim().is_empty() {
+        return Err(String::from("description must not be empty"));
+    }
+    if input.prompt.trim().is_empty() {
+        return Err(String::from("prompt must not be empty"));
+    }
+
+    let agent_id = make_agent_id();
+    let output_dir = agent_store_dir()?;
+    std::fs::create_dir_all(&output_dir).map_err(|error| error.to_string())?;
+    let output_file = output_dir.join(format!("{agent_id}.md"));
+    let manifest_file = output_dir.join(format!("{agent_id}.json"));
+    let normalized_subagent_type = normalize_subagent_type(input.subagent_type.as_deref());
+    let model = resolve_agent_model(input.model.as_deref());
+    let agent_name = input
+        .name
+        .as_deref()
+        .map(slugify_agent_name)
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| slugify_agent_name(&input.description));
+    let created_at = iso8601_now();
+    let system_prompt = build_agent_system_prompt(&normalized_subagent_type)?;
+    let allowed_tools = allowed_tools_for_subagent(&normalized_subagent_type);
+
+    let output_contents = format!(
+        "# Agent Task
+
+- id: {}
+- name: {}
+- description: {}
+- subagent_type: {}
+- created_at: {}
+
+## Prompt
+
+{}
+",
+        agent_id, agent_name, input.description, normalized_subagent_type, created_at, input.prompt
+    );
+    std::fs::write(&output_file, output_contents).map_err(|error| error.to_string())?;
+
+    let manifest = AgentOutput {
+        agent_id,
+        name: agent_name,
+        description: input.description,
+        subagent_type: Some(normalized_subagent_type),
+        model: Some(model),
+        status: String::from("running"),
+        output_file: output_file.display().to_string(),
+        manifest_file: manifest_file.display().to_string(),
+        created_at: created_at.clone(),
+        started_at: Some(created_at),
+        completed_at: None,
+        error: None,
+    };
+    write_agent_manifest(&manifest)?;
+
+    let manifest_for_spawn = manifest.clone();
+    let job = AgentJob {
+        manifest: manifest_for_spawn,
+        prompt: input.prompt,
+        system_prompt,
+        allowed_tools,
+    };
+    if let Err(error) = spawn_fn(job) {
+        let error = format!("failed to spawn sub-agent: {error}");
+        persist_agent_terminal_state(&manifest, "failed", None, Some(error.clone()))?;
+        return Err(error);
+    }
+
+    Ok(manifest)
+}
+
+fn spawn_agent_job(job: AgentJob) -> Result<(), String> {
+    let thread_name = format!("codineer-agent-{}", job.manifest.agent_id);
+    std::thread::Builder::new()
+        .name(thread_name)
+        .spawn(move || {
+            let result =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_agent_job(&job)));
+            match result {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    let _ =
+                        persist_agent_terminal_state(&job.manifest, "failed", None, Some(error));
+                }
+                Err(_) => {
+                    let _ = persist_agent_terminal_state(
+                        &job.manifest,
+                        "failed",
+                        None,
+                        Some(String::from("sub-agent thread panicked")),
+                    );
+                }
+            }
+        })
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
+fn run_agent_job(job: &AgentJob) -> Result<(), String> {
+    let mut runtime = build_agent_runtime(job)?.with_max_iterations(DEFAULT_AGENT_MAX_ITERATIONS);
+    let summary = runtime
+        .run_turn(job.prompt.clone(), None)
+        .map_err(|error| error.to_string())?;
+    let final_text = final_assistant_text(&summary);
+    persist_agent_terminal_state(&job.manifest, "completed", Some(final_text.as_str()), None)
+}
+
+fn build_agent_runtime(
+    job: &AgentJob,
+) -> Result<ConversationRuntime<ProviderRuntimeClient, SubagentToolExecutor>, String> {
+    let model = job
+        .manifest
+        .model
+        .clone()
+        .unwrap_or_else(|| DEFAULT_AGENT_MODEL.to_string());
+    let allowed_tools = job.allowed_tools.clone();
+    let api_client = ProviderRuntimeClient::new(&model, allowed_tools.clone())?;
+    let tool_executor = SubagentToolExecutor::new(allowed_tools);
+    Ok(ConversationRuntime::new(
+        Session::new(),
+        api_client,
+        tool_executor,
+        agent_permission_policy(),
+        job.system_prompt.clone(),
+    ))
+}
+
+fn build_agent_system_prompt(subagent_type: &str) -> Result<Vec<String>, String> {
+    let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
+    let mut prompt = load_system_prompt(
+        cwd,
+        DEFAULT_AGENT_SYSTEM_DATE.to_string(),
+        std::env::consts::OS,
+        "unknown",
+    )
+    .map_err(|error| error.to_string())?;
+    prompt.push(format!(
+        "You are a background sub-agent of type `{subagent_type}`. Work only on the delegated task, use only the tools available to you, do not ask the user questions, and finish with a concise result."
+    ));
+    Ok(prompt)
+}
+
+fn resolve_agent_model(model: Option<&str>) -> String {
+    model
+        .map(str::trim)
+        .filter(|model| !model.is_empty())
+        .unwrap_or(DEFAULT_AGENT_MODEL)
+        .to_string()
+}
+
+fn allowed_tools_for_subagent(subagent_type: &str) -> BTreeSet<String> {
+    let tools = match subagent_type {
+        "Explore" => vec![
+            "read_file",
+            "glob_search",
+            "grep_search",
+            "WebFetch",
+            "WebSearch",
+            "ToolSearch",
+            "Skill",
+            "StructuredOutput",
+        ],
+        "Plan" => vec![
+            "read_file",
+            "glob_search",
+            "grep_search",
+            "WebFetch",
+            "WebSearch",
+            "ToolSearch",
+            "Skill",
+            "TodoWrite",
+            "StructuredOutput",
+            "SendUserMessage",
+        ],
+        "Verification" => vec![
+            "bash",
+            "read_file",
+            "glob_search",
