@@ -1354,3 +1354,74 @@ fn load_skills_from_roots(roots: &[SkillRoot]) -> std::io::Result<Vec<SkillSumma
             let entry = entry?;
             if !entry.path().is_dir() {
                 continue;
+            }
+            let skill_path = entry.path().join("SKILL.md");
+            if !skill_path.is_file() {
+                continue;
+            }
+            let contents = fs::read_to_string(skill_path)?;
+            let (name, description) = parse_skill_frontmatter(&contents);
+            root_skills.push(SkillSummary {
+                name: name
+                    .unwrap_or_else(|| entry.file_name().to_string_lossy().to_string()),
+                description,
+                source: root.source,
+                shadowed_by: None,
+            });
+        }
+        root_skills.sort_by(|left, right| left.name.cmp(&right.name));
+
+        for mut skill in root_skills {
+            let key = skill.name.to_ascii_lowercase();
+            if let Some(existing) = active_sources.get(&key) {
+                skill.shadowed_by = Some(*existing);
+            } else {
+                active_sources.insert(key, skill.source);
+            }
+            skills.push(skill);
+        }
+    }
+
+    Ok(skills)
+}
+
+fn parse_toml_string(contents: &str, key: &str) -> Option<String> {
+    let prefix = format!("{key} =");
+    for line in contents.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') {
+            continue;
+        }
+        let Some(value) = trimmed.strip_prefix(&prefix) else {
+            continue;
+        };
+        let value = value.trim();
+        let Some(value) = value
+            .strip_prefix('"')
+            .and_then(|value| value.strip_suffix('"'))
+        else {
+            continue;
+        };
+        if !value.is_empty() {
+            return Some(value.to_string());
+        }
+    }
+    None
+}
+
+fn parse_skill_frontmatter(contents: &str) -> (Option<String>, Option<String>) {
+    let mut lines = contents.lines();
+    if lines.next().map(str::trim) != Some("---") {
+        return (None, None);
+    }
+
+    let mut name = None;
+    let mut description = None;
+    for line in lines {
+        let trimmed = line.trim();
+        if trimmed == "---" {
+            break;
+        }
+        if let Some(value) = trimmed.strip_prefix("name:") {
+            let value = unquote_frontmatter_value(value.trim());
+            if !value.is_empty() {
