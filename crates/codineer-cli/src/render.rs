@@ -215,3 +215,57 @@ impl TableState {
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 struct RenderState {
+    emphasis: usize,
+    strong: usize,
+    heading_level: Option<u8>,
+    quote: usize,
+    list_stack: Vec<ListKind>,
+    link_stack: Vec<LinkState>,
+    table: Option<TableState>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LinkState {
+    destination: String,
+    text: String,
+}
+
+impl RenderState {
+    fn style_text(&self, text: &str, theme: &ColorTheme) -> String {
+        if !color_enabled() {
+            return text.to_string();
+        }
+
+        let mut style = text.stylize();
+
+        if matches!(self.heading_level, Some(1 | 2)) || self.strong > 0 {
+            style = style.bold();
+        }
+        if self.emphasis > 0 {
+            style = style.italic();
+        }
+
+        if let Some(level) = self.heading_level {
+            style = match level {
+                1 => style.with(theme.heading),
+                2 => style.white(),
+                3 => style.with(Color::Blue),
+                _ => style.with(Color::Grey),
+            };
+        } else if self.strong > 0 {
+            style = style.with(theme.strong);
+        } else if self.emphasis > 0 {
+            style = style.with(theme.emphasis);
+        }
+
+        if self.quote > 0 {
+            style = style.with(theme.quote);
+        }
+
+        format!("{style}")
+    }
+
+    fn append_raw(&mut self, output: &mut String, text: &str) {
+        if let Some(link) = self.link_stack.last_mut() {
+            link.text.push_str(text);
+        } else if let Some(table) = self.table.as_mut() {
