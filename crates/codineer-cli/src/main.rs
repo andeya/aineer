@@ -1328,3 +1328,136 @@ impl LiveCli {
                 self.handle_session_command(action.as_deref(), target.as_deref())?
             }
             SlashCommand::Plugins { action, target } => {
+                self.handle_plugins_command(action.as_deref(), target.as_deref())?
+            }
+            SlashCommand::Branch { .. }
+            | SlashCommand::Worktree { .. }
+            | SlashCommand::CommitPushPr { .. } => {
+                let (name, desc) = match &command {
+                    SlashCommand::Branch { .. } => ("branch", "git branch commands"),
+                    SlashCommand::Worktree { .. } => ("worktree", "git worktree commands"),
+                    _ => ("commit-push-pr", "commit + push + PR automation"),
+                };
+                eprintln!("{}", render_mode_unavailable(name, desc));
+                false
+            }
+            SlashCommand::Unknown(name) => {
+                eprintln!("{}", render_unknown_repl_command(&name));
+                false
+            }
+        })
+    }
+
+    fn persist_session(&self) -> Result<(), Box<dyn std::error::Error>> {
+        self.runtime.session().save_to_path(&self.session.path)?;
+        Ok(())
+    }
+
+    fn collect_lsp_diagnostics(&self) -> Option<LspContextEnrichment> {
+        let manager = self.lsp_manager.as_ref()?;
+        let rt = tokio::runtime::Runtime::new().ok()?;
+        let diagnostics = rt.block_on(manager.collect_workspace_diagnostics()).ok()?;
+        let enrichment = LspContextEnrichment {
+            file_path: env::current_dir().unwrap_or_default(),
+            diagnostics,
+            definitions: Vec::new(),
+            references: Vec::new(),
+        };
+        if enrichment.is_empty() {
+            None
+        } else {
+            Some(enrichment)
+        }
+    }
+
+    fn shutdown_mcp(&self) {
+        if let Ok(rt) = tokio::runtime::Runtime::new() {
+            if let Ok(mut guard) = self.mcp_manager.lock() {
+                let _ = rt.block_on(guard.shutdown());
+            }
+        }
+    }
+
+    fn shutdown_lsp(&self) {
+        if let Some(manager) = &self.lsp_manager {
+            if let Ok(rt) = tokio::runtime::Runtime::new() {
+                let _ = rt.block_on(manager.shutdown());
+            }
+        }
+    }
+
+    fn print_status(&self) {
+        let cumulative = self.runtime.usage().cumulative_usage();
+        let latest = self.runtime.usage().current_turn_usage();
+        println!(
+            "{}",
+            format_status_report(
+                &self.model,
+                StatusUsage {
+                    message_count: self.runtime.session().messages.len(),
+                    turns: self.runtime.usage().turns(),
+                    latest,
+                    cumulative,
+                    estimated_tokens: self.runtime.estimated_tokens(),
+                },
+                self.permission_mode.as_str(),
+                &status_context(Some(&self.session.path)).unwrap_or_default(),
+            )
+        );
+    }
+
+    fn set_model(&mut self, model: Option<String>) -> Result<bool, Box<dyn std::error::Error>> {
+        let Some(model) = model else {
+            println!(
+                "{}",
+                format_model_report(
+                    &self.model,
+                    self.runtime.session().messages.len(),
+                    self.runtime.usage().turns(),
+                )
+            );
+            return Ok(false);
+        };
+
+        let model = resolve_model_alias(&model);
+
+        if model == self.model {
+            println!(
+                "{}",
+                format_model_report(
+                    &self.model,
+                    self.runtime.session().messages.len(),
+                    self.runtime.usage().turns(),
+                )
+            );
+            return Ok(false);
+        }
+
+        let previous = self.model.clone();
+        let session = self.runtime.session().clone();
+        let message_count = session.messages.len();
+        self.runtime = build_runtime(RuntimeParams {
+            session,
+            model: model.clone(),
+            system_prompt: self.system_prompt.clone(),
+            enable_tools: true,
+            emit_output: true,
+            allowed_tools: self.allowed_tools.clone(),
+            permission_mode: self.permission_mode,
+            progress_reporter: None,
+            mcp_manager: Arc::clone(&self.mcp_manager),
+        })?;
+        self.model.clone_from(&model);
+        println!(
+            "{}",
+            format_model_switch_report(&previous, &model, message_count)
+        );
+        Ok(true)
+    }
+
+    fn set_permissions(
+        &mut self,
+        mode: Option<String>,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
+        let Some(mode) = mode else {
+            println!(
