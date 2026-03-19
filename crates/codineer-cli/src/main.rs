@@ -1062,3 +1062,202 @@ fn run_repl(
                 }
                 if matches!(trimmed, "/exit" | "/quit") {
                     cli.persist_session()?;
+                    break;
+                }
+                if let Some(command) = SlashCommand::parse(trimmed) {
+                    if cli.handle_repl_command(command)? {
+                        cli.persist_session()?;
+                    }
+                    continue;
+                }
+                editor.push_history(&input);
+                cli.run_turn(&input)?;
+            }
+            input::ReadOutcome::Cancel => {}
+            input::ReadOutcome::Exit => {
+                cli.persist_session()?;
+                break;
+            }
+        }
+    }
+
+    cli.shutdown_lsp();
+    cli.shutdown_mcp();
+    Ok(())
+}
+
+#[derive(Debug, Clone)]
+struct SessionHandle {
+    id: String,
+    path: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+struct ManagedSessionSummary {
+    id: String,
+    path: PathBuf,
+    modified_epoch_secs: u64,
+    message_count: usize,
+}
+
+struct LiveCli {
+    model: String,
+    allowed_tools: Option<AllowedToolSet>,
+    permission_mode: PermissionMode,
+    system_prompt: Vec<String>,
+    runtime: ConversationRuntime<DefaultRuntimeClient, CliToolExecutor>,
+    session: SessionHandle,
+    mcp_manager: SharedMcpManager,
+    lsp_manager: Option<LspManager>,
+}
+
+impl LiveCli {
+    fn new(
+        model: String,
+        enable_tools: bool,
+        allowed_tools: Option<AllowedToolSet>,
+        permission_mode: PermissionMode,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let system_prompt = build_system_prompt()?;
+        let session = create_managed_session_handle()?;
+        let mcp_manager = create_mcp_manager();
+        let runtime = build_runtime(RuntimeParams {
+            session: Session::new(),
+            model: model.clone(),
+            system_prompt: system_prompt.clone(),
+            enable_tools,
+            emit_output: true,
+            allowed_tools: allowed_tools.clone(),
+            permission_mode,
+            progress_reporter: None,
+            mcp_manager: Arc::clone(&mcp_manager),
+        })?;
+        let cli = Self {
+            model,
+            allowed_tools,
+            permission_mode,
+            system_prompt,
+            runtime,
+            session,
+            mcp_manager,
+            lsp_manager: None,
+        };
+        cli.persist_session()?;
+        Ok(cli)
+    }
+
+    fn startup_banner(&self) -> String {
+        let color = io::stdout().is_terminal();
+        let cwd = env::current_dir().ok();
+        let cwd_display = cwd.as_ref().map_or_else(
+            || "<unknown>".to_string(),
+            |path| path.display().to_string(),
+        );
+        let workspace_name = cwd
+            .as_ref()
+            .and_then(|path| path.file_name())
+            .and_then(|name| name.to_str())
+            .unwrap_or("workspace");
+        let git_branch = status_context(Some(&self.session.path))
+            .ok()
+            .and_then(|context| context.git_branch);
+        let workspace_summary = git_branch.as_deref().map_or_else(
+            || workspace_name.to_string(),
+            |branch| format!("{workspace_name} · {branch}"),
+        );
+        let has_codineer_md = cwd
+            .as_ref()
+            .is_some_and(|path| path.join("CODINEER.md").is_file());
+        let mut lines = if color {
+            vec![
+                "\x1b[38;5;33m ⬡\x1b[0m \x1b[1;38;5;45mCodineer\x1b[0m \x1b[2m· ready\x1b[0m".to_string(),
+                format!(
+                    "   \x1b[2m{}\x1b[0m",
+                    "Your local AI coding agent"
+                ),
+            ]
+        } else {
+            vec![
+                "⬡ Codineer · ready".to_string(),
+                "  Your local AI coding agent".to_string(),
+            ]
+        };
+        lines.extend([
+            String::new(),
+            format!("  Workspace        {workspace_summary}"),
+            format!("  Directory        {cwd_display}"),
+            format!("  Model            {}", self.model),
+            format!("  Permissions      {}", self.permission_mode.as_str()),
+            format!("  Session          {}", self.session.id),
+            format!(
+                "  Quick start      {}",
+                if has_codineer_md {
+                    "/help · /status · ask for a task"
+                } else {
+                    "/init · /help · /status"
+                }
+            ),
+            "  Editor           Tab completes slash commands · /vim toggles modal editing"
+                .to_string(),
+            "  Multiline        Shift+Enter or Ctrl+J inserts a newline".to_string(),
+        ]);
+        if !has_codineer_md {
+            lines.push(
+                "  First run        /init scaffolds CODINEER.md, .codineer.json, and local session files"
+                    .to_string(),
+            );
+        }
+        lines.join("\n")
+    }
+
+    fn run_turn(&mut self, input: &str) -> Result<(), Box<dyn std::error::Error>> {
+        if let Some(enrichment) = self.collect_lsp_diagnostics() {
+            if let Ok(refreshed) = build_system_prompt_with_lsp(Some(&enrichment)) {
+                self.system_prompt = refreshed;
+                self.runtime.update_system_prompt(self.system_prompt.clone());
+            }
+        }
+
+        let mut spinner = Spinner::new();
+        let mut stdout = io::stdout();
+        spinner.tick(
+            "🦀 Thinking...",
+            TerminalRenderer::new().color_theme(),
+            &mut stdout,
+        )?;
+        let mut permission_prompter = CliPermissionPrompter::new(self.permission_mode);
+        let result = self.runtime.run_turn(input, Some(&mut permission_prompter));
+        match result {
+            Ok(_) => {
+                spinner.finish(
+                    "✨ Done",
+                    TerminalRenderer::new().color_theme(),
+                    &mut stdout,
+                )?;
+                println!();
+                self.persist_session()?;
+                Ok(())
+            }
+            Err(error) => {
+                spinner.fail(
+                    "❌ Request failed",
+                    TerminalRenderer::new().color_theme(),
+                    &mut stdout,
+                )?;
+                Err(Box::new(error))
+            }
+        }
+    }
+
+    fn run_turn_with_output(
+        &mut self,
+        input: &str,
+        output_format: CliOutputFormat,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        match output_format {
+            CliOutputFormat::Text => self.run_turn(input),
+            CliOutputFormat::Json => self.run_prompt_json(input),
+        }
+    }
+
+    fn run_prompt_json(&mut self, input: &str) -> Result<(), Box<dyn std::error::Error>> {
