@@ -2149,3 +2149,116 @@ mod tests {
                 if default_enabled { "true" } else { "false" }
             )
             .as_str(),
+        );
+    }
+
+    fn load_enabled_plugins(path: &Path) -> BTreeMap<String, bool> {
+        let contents = fs::read_to_string(path).expect("settings should exist");
+        let root: Value = serde_json::from_str(&contents).expect("settings json");
+        root.get("enabledPlugins")
+            .and_then(Value::as_object)
+            .map(|enabled_plugins| {
+                enabled_plugins
+                    .iter()
+                    .map(|(plugin_id, value)| {
+                        (
+                            plugin_id.clone(),
+                            value.as_bool().expect("plugin state should be a bool"),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn load_plugin_from_directory_validates_required_fields() {
+        let root = temp_dir("manifest-required");
+        write_file(
+            root.join(MANIFEST_FILE_NAME).as_path(),
+            r#"{"name":"","version":"1.0.0","description":"desc"}"#,
+        );
+
+        let error = load_plugin_from_directory(&root).expect_err("empty name should fail");
+        assert!(error.to_string().contains("name cannot be empty"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn load_plugin_from_directory_reads_root_manifest_and_validates_entries() {
+        let root = temp_dir("manifest-root");
+        write_loader_plugin(&root);
+
+        let manifest = load_plugin_from_directory(&root).expect("manifest should load");
+        assert_eq!(manifest.name, "loader-demo");
+        assert_eq!(manifest.version, "1.2.3");
+        assert_eq!(
+            manifest
+                .permissions
+                .iter()
+                .map(|permission| permission.as_str())
+                .collect::<Vec<_>>(),
+            vec!["read", "write"]
+        );
+        assert_eq!(manifest.hooks.pre_tool_use, vec!["./hooks/pre.sh"]);
+        assert_eq!(manifest.tools.len(), 1);
+        assert_eq!(manifest.tools[0].name, "echo_tool");
+        assert_eq!(
+            manifest.tools[0].required_permission,
+            PluginToolPermission::WorkspaceWrite
+        );
+        assert_eq!(manifest.commands.len(), 1);
+        assert_eq!(manifest.commands[0].name, "sync");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn load_plugin_from_directory_supports_packaged_manifest_path() {
+        let root = temp_dir("manifest-packaged");
+        write_external_plugin(&root, "packaged-demo", "1.0.0");
+
+        let manifest = load_plugin_from_directory(&root).expect("packaged manifest should load");
+        assert_eq!(manifest.name, "packaged-demo");
+        assert!(manifest.tools.is_empty());
+        assert!(manifest.commands.is_empty());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn load_plugin_from_directory_defaults_optional_fields() {
+        let root = temp_dir("manifest-defaults");
+        write_file(
+            root.join(MANIFEST_FILE_NAME).as_path(),
+            r#"{
+  "name": "minimal",
+  "version": "0.1.0",
+  "description": "Minimal manifest"
+}"#,
+        );
+
+        let manifest = load_plugin_from_directory(&root).expect("minimal manifest should load");
+        assert!(manifest.permissions.is_empty());
+        assert!(manifest.hooks.is_empty());
+        assert!(manifest.tools.is_empty());
+        assert!(manifest.commands.is_empty());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn load_plugin_from_directory_rejects_duplicate_permissions_and_commands() {
+        let root = temp_dir("manifest-duplicates");
+        write_file(
+            root.join("commands").join("sync.sh").as_path(),
+            "#!/bin/sh\nprintf 'sync'\n",
+        );
+        write_file(
+            root.join(MANIFEST_FILE_NAME).as_path(),
+            r#"{
+  "name": "duplicate-manifest",
+  "version": "1.0.0",
+  "description": "Duplicate validation",
+  "permissions": ["read", "read"],
