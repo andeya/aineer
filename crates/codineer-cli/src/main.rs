@@ -1727,3 +1727,69 @@ impl LiveCli {
             allowed_tools: self.allowed_tools.clone(),
             permission_mode: self.permission_mode,
             progress_reporter: progress,
+            mcp_manager: Arc::clone(&self.mcp_manager),
+        })?;
+        let mut permission_prompter = CliPermissionPrompter::new(self.permission_mode);
+        let summary = runtime.run_turn(prompt, Some(&mut permission_prompter))?;
+        Ok(final_assistant_text(&summary).trim().to_string())
+    }
+
+    fn run_internal_prompt_text(
+        &self,
+        prompt: &str,
+        enable_tools: bool,
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        self.run_internal_prompt_text_with_progress(prompt, enable_tools, None)
+    }
+
+    fn run_bughunter(&self, scope: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+        let scope = scope.unwrap_or("the current repository");
+        let prompt = format!(
+            "You are /bughunter. Inspect {scope} and identify the most likely bugs or correctness issues. Prioritize concrete findings with file paths, severity, and suggested fixes. Use tools if needed."
+        );
+        println!("{}", self.run_internal_prompt_text(&prompt, true)?);
+        Ok(())
+    }
+
+    fn run_ultraplan(&self, task: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+        let task = task.unwrap_or("the current repo work");
+        let prompt = format!(
+            "You are /ultraplan. Produce a deep multi-step execution plan for {task}. Include goals, risks, implementation sequence, verification steps, and rollback considerations. Use tools if needed."
+        );
+        let mut progress = InternalPromptProgressRun::start_ultraplan(task);
+        match self.run_internal_prompt_text_with_progress(&prompt, true, Some(progress.reporter()))
+        {
+            Ok(plan) => {
+                progress.finish_success();
+                println!("{plan}");
+                Ok(())
+            }
+            Err(error) => {
+                progress.finish_failure(&error.to_string());
+                Err(error)
+            }
+        }
+    }
+
+    fn run_teleport(target: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+        let Some(target) = target.map(str::trim).filter(|value| !value.is_empty()) else {
+            println!("Usage: /teleport <symbol-or-path>");
+            return Ok(());
+        };
+
+        println!("{}", render_teleport_report(target)?);
+        Ok(())
+    }
+
+    fn run_debug_tool_call(&self) -> Result<(), Box<dyn std::error::Error>> {
+        println!("{}", render_last_tool_debug_report(self.runtime.session())?);
+        Ok(())
+    }
+
+    fn run_commit(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let status = git_output(&["status", "--short"])?;
+        if status.trim().is_empty() {
+            println!("Commit\n  Result           skipped\n  Reason           no workspace changes");
+            return Ok(());
+        }
+
