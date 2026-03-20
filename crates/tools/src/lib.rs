@@ -2496,3 +2496,145 @@ fn resolve_attachment(path: &str) -> Result<ResolvedAttachment, String> {
         size: metadata.len(),
         is_image: is_image_path(&resolved),
     })
+}
+
+fn is_image_path(path: &Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
+        Some("png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "svg")
+    )
+}
+
+fn execute_config(input: ConfigInput) -> Result<ConfigOutput, String> {
+    let setting = input.setting.trim();
+    if setting.is_empty() {
+        return Err(String::from("setting must not be empty"));
+    }
+    let Some(spec) = supported_config_setting(setting) else {
+        return Ok(ConfigOutput {
+            success: false,
+            operation: None,
+            setting: None,
+            value: None,
+            previous_value: None,
+            new_value: None,
+            error: Some(format!("Unknown setting: \"{setting}\"")),
+        });
+    };
+
+    let path = config_file_for_scope(spec.scope)?;
+    let mut document = read_json_object(&path)?;
+
+    if let Some(value) = input.value {
+        let normalized = normalize_config_value(spec, value)?;
+        let previous_value = get_nested_value(&document, spec.path).cloned();
+        set_nested_value(&mut document, spec.path, normalized.clone());
+        write_json_object(&path, &document)?;
+        Ok(ConfigOutput {
+            success: true,
+            operation: Some(String::from("set")),
+            setting: Some(setting.to_string()),
+            value: Some(normalized.clone()),
+            previous_value,
+            new_value: Some(normalized),
+            error: None,
+        })
+    } else {
+        Ok(ConfigOutput {
+            success: true,
+            operation: Some(String::from("get")),
+            setting: Some(setting.to_string()),
+            value: get_nested_value(&document, spec.path).cloned(),
+            previous_value: None,
+            new_value: None,
+            error: None,
+        })
+    }
+}
+
+fn execute_structured_output(input: StructuredOutputInput) -> StructuredOutputResult {
+    StructuredOutputResult {
+        data: String::from("Structured output provided successfully"),
+        structured_output: input.0,
+    }
+}
+
+fn execute_repl(input: ReplInput) -> Result<ReplOutput, String> {
+    if input.code.trim().is_empty() {
+        return Err(String::from("code must not be empty"));
+    }
+    let _ = input.timeout_ms;
+    let runtime = resolve_repl_runtime(&input.language)?;
+    let started = Instant::now();
+    let output = Command::new(runtime.program)
+        .args(runtime.args)
+        .arg(&input.code)
+        .output()
+        .map_err(|error| error.to_string())?;
+
+    Ok(ReplOutput {
+        language: input.language,
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        exit_code: output.status.code().unwrap_or(1),
+        duration_ms: started.elapsed().as_millis(),
+    })
+}
+
+struct ReplRuntime {
+    program: &'static str,
+    args: &'static [&'static str],
+}
+
+fn resolve_repl_runtime(language: &str) -> Result<ReplRuntime, String> {
+    match language.trim().to_ascii_lowercase().as_str() {
+        "python" | "py" => Ok(ReplRuntime {
+            program: detect_first_command(&["python3", "python"])
+                .ok_or_else(|| String::from("python runtime not found"))?,
+            args: &["-c"],
+        }),
+        "javascript" | "js" | "node" => Ok(ReplRuntime {
+            program: detect_first_command(&["node"])
+                .ok_or_else(|| String::from("node runtime not found"))?,
+            args: &["-e"],
+        }),
+        "sh" | "shell" | "bash" => Ok(ReplRuntime {
+            program: detect_first_command(&["bash", "sh"])
+                .ok_or_else(|| String::from("shell runtime not found"))?,
+            args: &["-lc"],
+        }),
+        other => Err(format!("unsupported REPL language: {other}")),
+    }
+}
+
+fn detect_first_command(commands: &[&'static str]) -> Option<&'static str> {
+    commands
+        .iter()
+        .copied()
+        .find(|command| command_exists(command))
+}
+
+#[derive(Clone, Copy)]
+enum ConfigScope {
+    Global,
+    Settings,
+}
+
+#[derive(Clone, Copy)]
+struct ConfigSettingSpec {
+    scope: ConfigScope,
+    kind: ConfigKind,
+    path: &'static [&'static str],
+    options: Option<&'static [&'static str]>,
+}
+
+#[derive(Clone, Copy)]
+enum ConfigKind {
+    Boolean,
+    String,
+}
+
+fn supported_config_setting(setting: &str) -> Option<ConfigSettingSpec> {
