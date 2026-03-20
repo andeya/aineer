@@ -324,3 +324,57 @@ impl TerminalRenderer {
 
         for event in Parser::new_ext(markdown, Options::all()) {
             self.render_event(
+                event,
+                &mut state,
+                &mut output,
+                &mut code_buffer,
+                &mut code_language,
+                &mut in_code_block,
+            );
+        }
+
+        output.trim_end().to_string()
+    }
+
+    #[must_use]
+    pub fn markdown_to_ansi(&self, markdown: &str) -> String {
+        self.render_markdown(markdown)
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn render_event(
+        &self,
+        event: Event<'_>,
+        state: &mut RenderState,
+        output: &mut String,
+        code_buffer: &mut String,
+        code_language: &mut String,
+        in_code_block: &mut bool,
+    ) {
+        match event {
+            Event::Start(Tag::Heading { level, .. }) => {
+                Self::start_heading(state, level as u8, output);
+            }
+            Event::End(TagEnd::Paragraph) => output.push_str("\n\n"),
+            Event::Start(Tag::BlockQuote(..)) => self.start_quote(state, output),
+            Event::End(TagEnd::BlockQuote(..)) => {
+                state.quote = state.quote.saturating_sub(1);
+                output.push('\n');
+            }
+            Event::End(TagEnd::Heading(..)) => {
+                state.heading_level = None;
+                output.push_str("\n\n");
+            }
+            Event::End(TagEnd::Item) | Event::SoftBreak | Event::HardBreak => {
+                state.append_raw(output, "\n");
+            }
+            Event::Start(Tag::List(first_item)) => {
+                let kind = match first_item {
+                    Some(index) => ListKind::Ordered { next_index: index },
+                    None => ListKind::Unordered,
+                };
+                state.list_stack.push(kind);
+            }
+            Event::End(TagEnd::List(..)) => {
+                state.list_stack.pop();
+                output.push('\n');
