@@ -210,3 +210,56 @@ pub(crate) fn render_init_codineer_md(cwd: &Path) -> String {
         lines.push(String::new());
     }
 
+    let framework_lines = framework_notes(&detection);
+    if !framework_lines.is_empty() {
+        lines.push("## Framework notes".to_string());
+        lines.extend(framework_lines);
+        lines.push(String::new());
+    }
+
+    lines.push("## Working agreement".to_string());
+    lines.push("- Prefer small, reviewable changes and keep generated bootstrap files aligned with actual repo workflows.".to_string());
+    lines.push("- Keep shared defaults in `.codineer.json`; reserve `.codineer/settings.local.json` for machine-local overrides.".to_string());
+    lines.push("- Do not overwrite existing `CODINEER.md` content automatically; update it intentionally when repo workflows change.".to_string());
+    lines.push(String::new());
+
+    lines.join("\n")
+}
+
+fn detect_repo(cwd: &Path) -> RepoDetection {
+    let package_json_contents = fs::read_to_string(cwd.join("package.json"))
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    let mut features = std::collections::HashSet::new();
+    let mut add_if = |cond: bool, feat: RepoFeature| {
+        if cond {
+            features.insert(feat);
+        }
+    };
+
+    add_if(
+        cwd.join("rust").join("Cargo.toml").is_file(),
+        RepoFeature::RustWorkspace,
+    );
+    add_if(cwd.join("Cargo.toml").is_file(), RepoFeature::RustRoot);
+    add_if(
+        cwd.join("pyproject.toml").is_file()
+            || cwd.join("requirements.txt").is_file()
+            || cwd.join("setup.py").is_file(),
+        RepoFeature::Python,
+    );
+    add_if(cwd.join("package.json").is_file(), RepoFeature::PackageJson);
+    add_if(
+        cwd.join("tsconfig.json").is_file() || package_json_contents.contains("typescript"),
+        RepoFeature::TypeScript,
+    );
+    add_if(
+        package_json_contents.contains("\"next\""),
+        RepoFeature::NextJs,
+    );
+    add_if(
+        package_json_contents.contains("\"react\""),
+        RepoFeature::React,
+    );
+    add_if(
