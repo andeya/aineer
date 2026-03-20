@@ -2262,3 +2262,117 @@ mod tests {
   "version": "1.0.0",
   "description": "Duplicate validation",
   "permissions": ["read", "read"],
+  "commands": [
+    {"name": "sync", "description": "Sync one", "command": "./commands/sync.sh"},
+    {"name": "sync", "description": "Sync two", "command": "./commands/sync.sh"}
+  ]
+}"#,
+        );
+
+        let error = load_plugin_from_directory(&root).expect_err("duplicates should fail");
+        match error {
+            PluginError::ManifestValidation(errors) => {
+                assert!(errors.iter().any(|error| matches!(
+                    error,
+                    PluginManifestValidationError::DuplicatePermission { permission }
+                    if permission == "read"
+                )));
+                assert!(errors.iter().any(|error| matches!(
+                    error,
+                    PluginManifestValidationError::DuplicateEntry { kind, name }
+                    if *kind == "command" && name == "sync"
+                )));
+            }
+            other => panic!("expected manifest validation errors, got {other}"),
+        }
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn load_plugin_from_directory_rejects_missing_tool_or_command_paths() {
+        let root = temp_dir("manifest-paths");
+        write_file(
+            root.join(MANIFEST_FILE_NAME).as_path(),
+            r#"{
+  "name": "missing-paths",
+  "version": "1.0.0",
+  "description": "Missing path validation",
+  "tools": [
+    {
+      "name": "tool_one",
+      "description": "Missing tool script",
+      "inputSchema": {"type": "object"},
+      "command": "./tools/missing.sh"
+    }
+  ]
+}"#,
+        );
+
+        let error = load_plugin_from_directory(&root).expect_err("missing paths should fail");
+        assert!(error.to_string().contains("does not exist"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn load_plugin_from_directory_rejects_invalid_permissions() {
+        let root = temp_dir("manifest-invalid-permissions");
+        write_file(
+            root.join(MANIFEST_FILE_NAME).as_path(),
+            r#"{
+  "name": "invalid-permissions",
+  "version": "1.0.0",
+  "description": "Invalid permission validation",
+  "permissions": ["admin"]
+}"#,
+        );
+
+        let error = load_plugin_from_directory(&root).expect_err("invalid permissions should fail");
+        match error {
+            PluginError::ManifestValidation(errors) => {
+                assert!(errors.iter().any(|error| matches!(
+                    error,
+                    PluginManifestValidationError::InvalidPermission { permission }
+                    if permission == "admin"
+                )));
+            }
+            other => panic!("expected manifest validation errors, got {other}"),
+        }
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn load_plugin_from_directory_rejects_invalid_tool_required_permission() {
+        let root = temp_dir("manifest-invalid-tool-permission");
+        write_file(
+            root.join("tools").join("echo.sh").as_path(),
+            "#!/bin/sh\ncat\n",
+        );
+        write_file(
+            root.join(MANIFEST_FILE_NAME).as_path(),
+            r#"{
+  "name": "invalid-tool-permission",
+  "version": "1.0.0",
+  "description": "Invalid tool permission validation",
+  "tools": [
+    {
+      "name": "echo_tool",
+      "description": "Echo tool",
+      "inputSchema": {"type": "object"},
+      "command": "./tools/echo.sh",
+      "requiredPermission": "admin"
+    }
+  ]
+}"#,
+        );
+
+        let error =
+            load_plugin_from_directory(&root).expect_err("invalid tool permission should fail");
+        match error {
+            PluginError::ManifestValidation(errors) => {
+                assert!(errors.iter().any(|error| matches!(
+                    error,
+                    PluginManifestValidationError::InvalidToolRequiredPermission {
+                        tool_name,
