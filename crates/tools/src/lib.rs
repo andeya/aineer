@@ -2424,3 +2424,75 @@ fn build_notebook_cell(cell_id: &str, cell_type: NotebookCellType, source: &str)
             NotebookCellType::Code => "code",
             NotebookCellType::Markdown => "markdown",
         },
+        "id": cell_id,
+        "metadata": {},
+        "source": source_lines(source),
+    });
+    if let Some(object) = cell.as_object_mut() {
+        match cell_type {
+            NotebookCellType::Code => {
+                object.insert(String::from("outputs"), json!([]));
+                object.insert(String::from("execution_count"), Value::Null);
+            }
+            NotebookCellType::Markdown => {}
+        }
+    }
+    cell
+}
+
+fn cell_kind(cell: &serde_json::Value) -> Option<NotebookCellType> {
+    cell.get("cell_type")
+        .and_then(serde_json::Value::as_str)
+        .map(|kind| {
+            if kind == "markdown" {
+                NotebookCellType::Markdown
+            } else {
+                NotebookCellType::Code
+            }
+        })
+}
+
+#[allow(clippy::needless_pass_by_value)]
+fn execute_sleep(input: SleepInput) -> SleepOutput {
+    std::thread::sleep(Duration::from_millis(input.duration_ms));
+    SleepOutput {
+        duration_ms: input.duration_ms,
+        message: format!("Slept for {}ms", input.duration_ms),
+    }
+}
+
+fn execute_brief(input: BriefInput) -> Result<BriefOutput, String> {
+    if input.message.trim().is_empty() {
+        return Err(String::from("message must not be empty"));
+    }
+
+    let attachments = input
+        .attachments
+        .as_ref()
+        .map(|paths| {
+            paths
+                .iter()
+                .map(|path| resolve_attachment(path))
+                .collect::<Result<Vec<_>, String>>()
+        })
+        .transpose()?;
+
+    let message = match input.status {
+        BriefStatus::Normal | BriefStatus::Proactive => input.message,
+    };
+
+    Ok(BriefOutput {
+        message,
+        attachments,
+        sent_at: iso8601_timestamp(),
+    })
+}
+
+fn resolve_attachment(path: &str) -> Result<ResolvedAttachment, String> {
+    let resolved = std::fs::canonicalize(path).map_err(|error| error.to_string())?;
+    let metadata = std::fs::metadata(&resolved).map_err(|error| error.to_string())?;
+    Ok(ResolvedAttachment {
+        path: resolved.display().to_string(),
+        size: metadata.len(),
+        is_image: is_image_path(&resolved),
+    })
