@@ -1660,3 +1660,70 @@ impl LiveCli {
 
     fn handle_plugins_command(
         &mut self,
+        action: Option<&str>,
+        target: Option<&str>,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
+        let cwd = env::current_dir()?;
+        let loader = ConfigLoader::default_for(&cwd);
+        let runtime_config = loader.load()?;
+        let mut manager = build_plugin_manager(&cwd, &loader, &runtime_config);
+        let result = handle_plugins_slash_command(action, target, &mut manager)?;
+        println!("{}", result.message);
+        if result.reload_runtime {
+            self.reload_runtime_features()?;
+        }
+        Ok(false)
+    }
+
+    fn reload_runtime_features(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        self.runtime = build_runtime(RuntimeParams {
+            session: self.runtime.session().clone(),
+            model: self.model.clone(),
+            system_prompt: self.system_prompt.clone(),
+            enable_tools: true,
+            emit_output: true,
+            allowed_tools: self.allowed_tools.clone(),
+            permission_mode: self.permission_mode,
+            progress_reporter: None,
+            mcp_manager: Arc::clone(&self.mcp_manager),
+        })?;
+        self.persist_session()
+    }
+
+    fn compact(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let result = self.runtime.compact(CompactionConfig::default());
+        let removed = result.removed_message_count;
+        let kept = result.compacted_session.messages.len();
+        let skipped = removed == 0;
+        self.runtime = build_runtime(RuntimeParams {
+            session: result.compacted_session,
+            model: self.model.clone(),
+            system_prompt: self.system_prompt.clone(),
+            enable_tools: true,
+            emit_output: true,
+            allowed_tools: self.allowed_tools.clone(),
+            permission_mode: self.permission_mode,
+            progress_reporter: None,
+            mcp_manager: Arc::clone(&self.mcp_manager),
+        })?;
+        self.persist_session()?;
+        println!("{}", format_compact_report(removed, kept, skipped));
+        Ok(())
+    }
+
+    fn run_internal_prompt_text_with_progress(
+        &self,
+        prompt: &str,
+        enable_tools: bool,
+        progress: Option<InternalPromptProgressReporter>,
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        let session = self.runtime.session().clone();
+        let mut runtime = build_runtime(RuntimeParams {
+            session,
+            model: self.model.clone(),
+            system_prompt: self.system_prompt.clone(),
+            enable_tools,
+            emit_output: false,
+            allowed_tools: self.allowed_tools.clone(),
+            permission_mode: self.permission_mode,
+            progress_reporter: progress,
