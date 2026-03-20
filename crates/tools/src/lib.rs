@@ -2638,3 +2638,75 @@ enum ConfigKind {
 }
 
 fn supported_config_setting(setting: &str) -> Option<ConfigSettingSpec> {
+    Some(match setting {
+        "theme" => ConfigSettingSpec {
+            scope: ConfigScope::Global,
+            kind: ConfigKind::String,
+            path: &["theme"],
+            options: None,
+        },
+        "editorMode" => ConfigSettingSpec {
+            scope: ConfigScope::Global,
+            kind: ConfigKind::String,
+            path: &["editorMode"],
+            options: Some(&["default", "vim", "emacs"]),
+        },
+        "verbose" => ConfigSettingSpec {
+            scope: ConfigScope::Global,
+            kind: ConfigKind::Boolean,
+            path: &["verbose"],
+            options: None,
+        },
+        "preferredNotifChannel" => ConfigSettingSpec {
+            scope: ConfigScope::Global,
+            kind: ConfigKind::String,
+            path: &["preferredNotifChannel"],
+            options: None,
+        },
+        "autoCompactEnabled" => ConfigSettingSpec {
+            scope: ConfigScope::Global,
+            kind: ConfigKind::Boolean,
+            path: &["autoCompactEnabled"],
+            options: None,
+        },
+        "autoMemoryEnabled" => ConfigSettingSpec {
+            scope: ConfigScope::Settings,
+            kind: ConfigKind::Boolean,
+            path: &["autoMemoryEnabled"],
+            options: None,
+        },
+        "autoDreamEnabled" => ConfigSettingSpec {
+            scope: ConfigScope::Settings,
+            kind: ConfigKind::Boolean,
+            path: &["autoDreamEnabled"],
+            options: None,
+        },
+        "fileCheckpointingEnabled" => ConfigSettingSpec {
+            scope: ConfigScope::Global,
+            kind: ConfigKind::Boolean,
+            path: &["fileCheckpointingEnabled"],
+            options: None,
+        },
+        "showTurnDuration" => ConfigSettingSpec {
+            scope: ConfigScope::Global,
+            kind: ConfigKind::Boolean,
+            path: &["showTurnDuration"],
+            options: None,
+        },
+        "terminalProgressBarEnabled" => ConfigSettingSpec {
+            scope: ConfigScope::Global,
+            kind: ConfigKind::Boolean,
+            path: &["terminalProgressBarEnabled"],
+            options: None,
+        },
+        "todoFeatureEnabled" => ConfigSettingSpec {
+            scope: ConfigScope::Global,
+            kind: ConfigKind::Boolean,
+            path: &["todoFeatureEnabled"],
+            options: None,
+        },
+        "model" => ConfigSettingSpec {
+            scope: ConfigScope::Settings,
+            kind: ConfigKind::String,
+            path: &["model"],
+            options: None,
