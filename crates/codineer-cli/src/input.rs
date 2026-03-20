@@ -116,3 +116,120 @@ impl EditSession {
         self.visual_anchor = None;
     }
 
+    fn enter_normal_mode(&mut self) {
+        self.mode = EditorMode::Normal;
+        self.pending_operator = None;
+        self.visual_anchor = None;
+    }
+
+    fn enter_visual_mode(&mut self) {
+        self.mode = EditorMode::Visual;
+        self.pending_operator = None;
+        self.visual_anchor = Some(self.cursor);
+    }
+
+    fn enter_command_mode(&mut self) {
+        self.mode = EditorMode::Command;
+        self.pending_operator = None;
+        self.visual_anchor = None;
+        self.command_buffer.clear();
+        self.command_buffer.push(':');
+        self.command_cursor = self.command_buffer.len();
+    }
+
+    fn exit_command_mode(&mut self) {
+        self.command_buffer.clear();
+        self.command_cursor = 0;
+        self.enter_normal_mode();
+    }
+
+    fn visible_buffer(&self) -> Cow<'_, str> {
+        if self.mode != EditorMode::Visual {
+            return Cow::Borrowed(self.active_text());
+        }
+
+        let Some(anchor) = self.visual_anchor else {
+            return Cow::Borrowed(self.active_text());
+        };
+        let Some((start, end)) = selection_bounds(&self.text, anchor, self.cursor) else {
+            return Cow::Borrowed(self.active_text());
+        };
+
+        Cow::Owned(render_selected_text(&self.text, start, end))
+    }
+
+    fn prompt<'a>(&self, base_prompt: &'a str, vim_enabled: bool) -> Cow<'a, str> {
+        match self.mode.indicator(vim_enabled) {
+            Some(mode) => Cow::Owned(format!("[{mode}] {base_prompt}")),
+            None => Cow::Borrowed(base_prompt),
+        }
+    }
+
+    fn clear_render(&self, out: &mut impl Write) -> io::Result<()> {
+        if self.rendered_cursor_row > 0 {
+            queue!(out, MoveUp(to_u16(self.rendered_cursor_row)?))?;
+        }
+        queue!(out, MoveToColumn(0), Clear(ClearType::FromCursorDown))?;
+        out.flush()
+    }
+
+    fn render(
+        &mut self,
+        out: &mut impl Write,
+        base_prompt: &str,
+        vim_enabled: bool,
+    ) -> io::Result<()> {
+        self.clear_render(out)?;
+
+        let prompt = self.prompt(base_prompt, vim_enabled);
+        let buffer = self.visible_buffer();
+        write!(out, "{prompt}{buffer}")?;
+
+        let (cursor_row, cursor_col, total_lines) = self.cursor_layout(prompt.as_ref());
+        let rows_to_move_up = total_lines.saturating_sub(cursor_row + 1);
+        if rows_to_move_up > 0 {
+            queue!(out, MoveUp(to_u16(rows_to_move_up)?))?;
+        }
+        queue!(out, MoveToColumn(to_u16(cursor_col)?))?;
+        out.flush()?;
+
+        self.rendered_cursor_row = cursor_row;
+        self.rendered_lines = total_lines;
+        Ok(())
+    }
+
+    fn finalize_render(
+        &self,
+        out: &mut impl Write,
+        base_prompt: &str,
+        vim_enabled: bool,
+    ) -> io::Result<()> {
+        self.clear_render(out)?;
+        let prompt = self.prompt(base_prompt, vim_enabled);
+        let buffer = self.visible_buffer();
+        write!(out, "{prompt}{buffer}")?;
+        writeln!(out)
+    }
+
+    fn cursor_layout(&self, prompt: &str) -> (usize, usize, usize) {
+        let active_text = self.active_text();
+        let cursor = if self.mode == EditorMode::Command {
+            self.command_cursor
+        } else {
+            self.cursor
+        };
+
+        let cursor_prefix = &active_text[..cursor];
+        let cursor_row = cursor_prefix.bytes().filter(|byte| *byte == b'\n').count();
+        let cursor_col = match cursor_prefix.rsplit_once('\n') {
+            Some((_, suffix)) => suffix.chars().count(),
+            None => prompt.chars().count() + cursor_prefix.chars().count(),
+        };
+        let total_lines = active_text.bytes().filter(|byte| *byte == b'\n').count() + 1;
+        (cursor_row, cursor_col, total_lines)
+    }
+
+    fn handle_escape(&mut self) -> KeyAction {
+        match self.mode {
+            EditorMode::Plain | EditorMode::Normal => KeyAction::Continue,
+            EditorMode::Insert => {
