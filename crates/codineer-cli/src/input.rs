@@ -233,3 +233,61 @@ impl EditSession {
         match self.mode {
             EditorMode::Plain | EditorMode::Normal => KeyAction::Continue,
             EditorMode::Insert => {
+                if self.cursor > 0 {
+                    self.cursor = previous_boundary(&self.text, self.cursor);
+                }
+                self.enter_normal_mode();
+                KeyAction::Continue
+            }
+            EditorMode::Visual => {
+                self.enter_normal_mode();
+                KeyAction::Continue
+            }
+            EditorMode::Command => {
+                self.exit_command_mode();
+                KeyAction::Continue
+            }
+        }
+    }
+
+    fn handle_backspace(&mut self) {
+        match self.mode {
+            EditorMode::Normal | EditorMode::Visual => self.move_left(),
+            EditorMode::Command => {
+                if self.command_cursor <= 1 {
+                    self.exit_command_mode();
+                } else {
+                    remove_previous_char(&mut self.command_buffer, &mut self.command_cursor);
+                }
+            }
+            EditorMode::Plain | EditorMode::Insert => {
+                remove_previous_char(&mut self.text, &mut self.cursor);
+            }
+        }
+    }
+
+    fn submit_or_toggle(&self) -> KeyAction {
+        let line = self.current_line();
+        if is_vim_toggle(&line) {
+            KeyAction::ToggleVim
+        } else {
+            KeyAction::Submit(line)
+        }
+    }
+
+    fn insert_char(&mut self, ch: char) {
+        let mut buffer = [0; 4];
+        self.insert_text(ch.encode_utf8(&mut buffer));
+    }
+
+    fn insert_text(&mut self, text: &str) {
+        if self.mode == EditorMode::Command {
+            self.command_buffer.insert_str(self.command_cursor, text);
+            self.command_cursor += text.len();
+        } else {
+            self.text.insert_str(self.cursor, text);
+            self.cursor += text.len();
+        }
+    }
+
+    fn move_left(&mut self) {
