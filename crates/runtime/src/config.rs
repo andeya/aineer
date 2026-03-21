@@ -1236,3 +1236,157 @@ mod tests {
         fs::create_dir_all(cwd.join(".codineer")).expect("project config dir");
         fs::create_dir_all(&home).expect("home config dir");
 
+        fs::write(
+            home.join("settings.json"),
+            r#"{
+              "enabledPlugins": {
+                "core-helpers@builtin": true
+              },
+              "plugins": {
+                "externalDirectories": ["./external-plugins"],
+                "installRoot": "plugin-cache/installed",
+                "registryPath": "plugin-cache/installed.json",
+                "bundledRoot": "./bundled-plugins"
+              }
+            }"#,
+        )
+        .expect("write plugin settings");
+
+        let loaded = ConfigLoader::new(&cwd, &home)
+            .load()
+            .expect("config should load");
+
+        assert_eq!(
+            loaded
+                .plugins()
+                .enabled_plugins()
+                .get("core-helpers@builtin"),
+            Some(&true)
+        );
+        assert_eq!(
+            loaded.plugins().external_directories(),
+            &["./external-plugins".to_string()]
+        );
+        assert_eq!(
+            loaded.plugins().install_root(),
+            Some("plugin-cache/installed")
+        );
+        assert_eq!(
+            loaded.plugins().registry_path(),
+            Some("plugin-cache/installed.json")
+        );
+        assert_eq!(loaded.plugins().bundled_root(), Some("./bundled-plugins"));
+
+        fs::remove_dir_all(root).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn rejects_invalid_mcp_server_shapes() {
+        let root = temp_dir();
+        let cwd = root.join("project");
+        let home = root.join("home").join(".codineer");
+        fs::create_dir_all(&home).expect("home config dir");
+        fs::create_dir_all(&cwd).expect("project dir");
+        fs::write(
+            home.join("settings.json"),
+            r#"{"mcpServers":{"broken":{"type":"http","url":123}}}"#,
+        )
+        .expect("write broken settings");
+
+        let error = ConfigLoader::new(&cwd, &home)
+            .load()
+            .expect_err("config should fail");
+        assert!(error
+            .to_string()
+            .contains("mcpServers.broken: missing string field url"));
+
+        fs::remove_dir_all(root).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn parses_sse_and_sdk_and_managed_proxy_mcp_types() {
+        let root = temp_dir();
+        let cwd = root.join("project");
+        let home = root.join("home").join(".codineer");
+        fs::create_dir_all(&home).expect("home dir");
+        fs::create_dir_all(&cwd).expect("project dir");
+        fs::write(
+            home.join("settings.json"),
+            r#"{
+                "mcpServers": {
+                    "events": {"type": "sse", "url": "https://sse.example/events"},
+                    "built-in": {"type": "sdk", "name": "sdk-server"},
+                    "proxy": {"type": "claudeai-proxy", "url": "https://proxy.example", "id": "p1"}
+                }
+            }"#,
+        )
+        .expect("write mcp settings");
+
+        let loaded = ConfigLoader::new(&cwd, &home).load().expect("load config");
+        let servers = loaded.mcp().servers();
+        assert_eq!(servers.len(), 3);
+        assert!(matches!(&servers["events"].config, McpServerConfig::Sse(_)));
+        assert!(matches!(&servers["built-in"].config, McpServerConfig::Sdk(_)));
+        assert!(matches!(&servers["proxy"].config, McpServerConfig::ManagedProxy(_)));
+
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn rejects_unsupported_mcp_server_type() {
+        let root = temp_dir();
+        let cwd = root.join("project");
+        let home = root.join("home").join(".codineer");
+        fs::create_dir_all(&home).expect("home dir");
+        fs::create_dir_all(&cwd).expect("project dir");
+        fs::write(
+            home.join("settings.json"),
+            r#"{"mcpServers":{"x":{"type":"grpc","url":"x"}}}"#,
+        )
+        .expect("write");
+
+        let err = ConfigLoader::new(&cwd, &home)
+            .load()
+            .expect_err("should fail");
+        assert!(err.to_string().contains("unsupported MCP server type"));
+
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn rejects_non_object_flat_config_gracefully() {
+        let root = temp_dir();
+        let cwd = root.join("project");
+        let home = root.join("home");
+        let config_home = home.join(".codineer");
+        fs::create_dir_all(&config_home).expect("config dir");
+        fs::create_dir_all(&cwd).expect("project dir");
+        fs::write(home.join(".codineer.json"), "[1,2,3]").expect("write flat config");
+
+        let loaded = ConfigLoader::new(&cwd, &config_home).load().expect("load config");
+        assert!(loaded.model().is_none());
+
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn parses_permission_and_sandbox_mode_labels() {
+        let root = temp_dir();
+        let cwd = root.join("project");
+        let home = root.join("home").join(".codineer");
+        fs::create_dir_all(&home).expect("home dir");
+        fs::create_dir_all(&cwd).expect("project dir");
+        fs::write(
+            home.join("settings.json"),
+            r#"{"permissionMode":"read-only","sandbox":{"filesystemMode":"off"}}"#,
+        )
+        .expect("write settings");
+
+        let loaded = ConfigLoader::new(&cwd, &home).load().expect("load");
+        assert!(matches!(loaded.permission_mode(), Some(ResolvedPermissionMode::ReadOnly)));
+        let sandbox = loaded.sandbox();
+        assert_eq!(sandbox.filesystem_mode, Some(crate::sandbox::FilesystemIsolationMode::Off));
+
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+}
