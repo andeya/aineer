@@ -1555,3 +1555,175 @@ mod tests {
                 .await
                 .expect("call beta tool");
 
+            assert_eq!(
+                alpha
+                    .result
+                    .as_ref()
+                    .and_then(|result| result.structured_content.as_ref())
+                    .and_then(|value| value.get("server")),
+                Some(&json!("alpha"))
+            );
+            assert_eq!(
+                beta.result
+                    .as_ref()
+                    .and_then(|result| result.structured_content.as_ref())
+                    .and_then(|value| value.get("server")),
+                Some(&json!("beta"))
+            );
+
+            manager.shutdown().await.expect("shutdown");
+            cleanup_script(&script_path);
+        });
+    }
+
+    #[test]
+    fn manager_records_unsupported_non_stdio_servers_without_panicking() {
+        let servers = BTreeMap::from([
+            (
+                "http".to_string(),
+                ScopedMcpServerConfig {
+                    scope: ConfigSource::Local,
+                    config: McpServerConfig::Http(McpRemoteServerConfig {
+                        url: "https://example.test/mcp".to_string(),
+                        headers: BTreeMap::new(),
+                        headers_helper: None,
+                        oauth: None,
+                    }),
+                },
+            ),
+            (
+                "sdk".to_string(),
+                ScopedMcpServerConfig {
+                    scope: ConfigSource::Local,
+                    config: McpServerConfig::Sdk(McpSdkServerConfig {
+                        name: "sdk-server".to_string(),
+                    }),
+                },
+            ),
+            (
+                "ws".to_string(),
+                ScopedMcpServerConfig {
+                    scope: ConfigSource::Local,
+                    config: McpServerConfig::Ws(McpWebSocketServerConfig {
+                        url: "wss://example.test/mcp".to_string(),
+                        headers: BTreeMap::new(),
+                        headers_helper: None,
+                    }),
+                },
+            ),
+        ]);
+
+        let manager = McpServerManager::from_servers(&servers);
+        let unsupported = manager.unsupported_servers();
+
+        assert_eq!(unsupported.len(), 3);
+        assert_eq!(unsupported[0].server_name, "http");
+        assert_eq!(unsupported[1].server_name, "sdk");
+        assert_eq!(unsupported[2].server_name, "ws");
+    }
+
+    #[test]
+    fn manager_shutdown_terminates_spawned_children_and_is_idempotent() {
+        let runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        runtime.block_on(async {
+            let script_path = write_manager_mcp_server_script();
+            let root = script_path.parent().expect("script parent");
+            let log_path = root.join("alpha.log");
+            let servers = BTreeMap::from([(
+                "alpha".to_string(),
+                manager_server_config(&script_path, "alpha", &log_path),
+            )]);
+            let mut manager = McpServerManager::from_servers(&servers);
+
+            manager.discover_tools().await.expect("discover tools");
+            manager.shutdown().await.expect("first shutdown");
+            manager.shutdown().await.expect("second shutdown");
+
+            cleanup_script(&script_path);
+        });
+    }
+
+    #[test]
+    fn manager_reuses_spawned_server_between_discovery_and_call() {
+        let runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        runtime.block_on(async {
+            let script_path = write_manager_mcp_server_script();
+            let root = script_path.parent().expect("script parent");
+            let log_path = root.join("alpha.log");
+            let servers = BTreeMap::from([(
+                "alpha".to_string(),
+                manager_server_config(&script_path, "alpha", &log_path),
+            )]);
+            let mut manager = McpServerManager::from_servers(&servers);
+
+            manager.discover_tools().await.expect("discover tools");
+            let response = manager
+                .call_tool(
+                    &mcp_tool_name("alpha", "echo"),
+                    Some(json!({"text": "reuse"})),
+                )
+                .await
+                .expect("call tool");
+
+            assert_eq!(
+                response
+                    .result
+                    .as_ref()
+                    .and_then(|result| result.structured_content.as_ref())
+                    .and_then(|value| value.get("initializeCount")),
+                Some(&json!(1))
+            );
+
+            let log = fs::read_to_string(&log_path).expect("read log");
+            assert_eq!(log.lines().filter(|line| *line == "initialize").count(), 1);
+            assert_eq!(
+                log.lines().collect::<Vec<_>>(),
+                vec!["initialize", "tools/list", "tools/call"]
+            );
+
+            manager.shutdown().await.expect("shutdown");
+            cleanup_script(&script_path);
+        });
+    }
+
+    #[test]
+    fn manager_reports_unknown_qualified_tool_name() {
+        let runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        runtime.block_on(async {
+            let script_path = write_manager_mcp_server_script();
+            let root = script_path.parent().expect("script parent");
+            let log_path = root.join("alpha.log");
+            let servers = BTreeMap::from([(
+                "alpha".to_string(),
+                manager_server_config(&script_path, "alpha", &log_path),
+            )]);
+            let mut manager = McpServerManager::from_servers(&servers);
+
+            let error = manager
+                .call_tool(
+                    &mcp_tool_name("alpha", "missing"),
+                    Some(json!({"text": "nope"})),
+                )
+                .await
+                .expect_err("unknown qualified tool should fail");
+
+            match error {
+                McpServerManagerError::UnknownTool { qualified_name } => {
+                    assert_eq!(qualified_name, mcp_tool_name("alpha", "missing"));
+                }
+                other => panic!("expected unknown tool error, got {other:?}"),
+            }
+
+            cleanup_script(&script_path);
+        });
+    }
+}
