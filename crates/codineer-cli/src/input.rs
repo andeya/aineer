@@ -291,3 +291,62 @@ impl EditSession {
     }
 
     fn move_left(&mut self) {
+        if self.mode == EditorMode::Command {
+            self.command_cursor =
+                previous_command_boundary(&self.command_buffer, self.command_cursor);
+        } else {
+            self.cursor = previous_boundary(&self.text, self.cursor);
+        }
+    }
+
+    fn move_right(&mut self) {
+        if self.mode == EditorMode::Command {
+            self.command_cursor = next_boundary(&self.command_buffer, self.command_cursor);
+        } else {
+            self.cursor = next_boundary(&self.text, self.cursor);
+        }
+    }
+
+    fn move_line_start(&mut self) {
+        if self.mode == EditorMode::Command {
+            self.command_cursor = 1;
+        } else {
+            self.cursor = line_start(&self.text, self.cursor);
+        }
+    }
+
+    fn move_line_end(&mut self) {
+        if self.mode == EditorMode::Command {
+            self.command_cursor = self.command_buffer.len();
+        } else {
+            self.cursor = line_end(&self.text, self.cursor);
+        }
+    }
+
+    fn move_up(&mut self) {
+        if self.mode == EditorMode::Command {
+            return;
+        }
+        self.cursor = move_vertical(&self.text, self.cursor, -1);
+    }
+
+    fn move_down(&mut self) {
+        if self.mode == EditorMode::Command {
+            return;
+        }
+        self.cursor = move_vertical(&self.text, self.cursor, 1);
+    }
+
+    fn delete_char_under_cursor(&mut self) {
+        match self.mode {
+            EditorMode::Command => {
+                if self.command_cursor < self.command_buffer.len() {
+                    let end = next_boundary(&self.command_buffer, self.command_cursor);
+                    self.command_buffer.drain(self.command_cursor..end);
+                }
+            }
+            _ => {
+                if self.cursor < self.text.len() {
+                    let end = next_boundary(&self.text, self.cursor);
+                    self.text.drain(self.cursor..end);
+                }
