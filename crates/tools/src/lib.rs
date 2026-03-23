@@ -2924,3 +2924,146 @@ fn execute_shell_command(
             persisted_output_size: None,
             sandbox_status: None,
         });
+    }
+
+    let mut process = std::process::Command::new(shell);
+    process
+        .arg("-NoProfile")
+        .arg("-NonInteractive")
+        .arg("-Command")
+        .arg(command);
+    process
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+    if let Some(timeout_ms) = timeout {
+        let mut child = process.spawn()?;
+        let started = Instant::now();
+        loop {
+            if let Some(status) = child.try_wait()? {
+                let output = child.wait_with_output()?;
+                return Ok(runtime::BashCommandOutput {
+                    stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+                    stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+                    raw_output_path: None,
+                    interrupted: false,
+                    is_image: None,
+                    background_task_id: None,
+                    backgrounded_by_user: None,
+                    assistant_auto_backgrounded: None,
+                    dangerously_disable_sandbox: None,
+                    return_code_interpretation: status
+                        .code()
+                        .filter(|code| *code != 0)
+                        .map(|code| format!("exit_code:{code}")),
+                    no_output_expected: Some(output.stdout.is_empty() && output.stderr.is_empty()),
+                    structured_content: None,
+                    persisted_output_path: None,
+                    persisted_output_size: None,
+                    sandbox_status: None,
+                });
+            }
+            if started.elapsed() >= Duration::from_millis(timeout_ms) {
+                let _ = child.kill();
+                let output = child.wait_with_output()?;
+                let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+                let stderr = if stderr.trim().is_empty() {
+                    format!("Command exceeded timeout of {timeout_ms} ms")
+                } else {
+                    format!(
+                        "{}
+Command exceeded timeout of {timeout_ms} ms",
+                        stderr.trim_end()
+                    )
+                };
+                return Ok(runtime::BashCommandOutput {
+                    stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+                    stderr,
+                    raw_output_path: None,
+                    interrupted: true,
+                    is_image: None,
+                    background_task_id: None,
+                    backgrounded_by_user: None,
+                    assistant_auto_backgrounded: None,
+                    dangerously_disable_sandbox: None,
+                    return_code_interpretation: Some(String::from("timeout")),
+                    no_output_expected: Some(false),
+                    structured_content: None,
+                    persisted_output_path: None,
+                    persisted_output_size: None,
+                    sandbox_status: None,
+                });
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    let output = process.output()?;
+    Ok(runtime::BashCommandOutput {
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        raw_output_path: None,
+        interrupted: false,
+        is_image: None,
+        background_task_id: None,
+        backgrounded_by_user: None,
+        assistant_auto_backgrounded: None,
+        dangerously_disable_sandbox: None,
+        return_code_interpretation: output
+            .status
+            .code()
+            .filter(|code| *code != 0)
+            .map(|code| format!("exit_code:{code}")),
+        no_output_expected: Some(output.stdout.is_empty() && output.stderr.is_empty()),
+        structured_content: None,
+        persisted_output_path: None,
+        persisted_output_size: None,
+        sandbox_status: None,
+    })
+}
+
+fn resolve_cell_index(
+    cells: &[serde_json::Value],
+    cell_id: Option<&str>,
+    edit_mode: NotebookEditMode,
+) -> Result<usize, String> {
+    if cells.is_empty()
+        && matches!(
+            edit_mode,
+            NotebookEditMode::Replace | NotebookEditMode::Delete
+        )
+    {
+        return Err(String::from("Notebook has no cells to edit"));
+    }
+    if let Some(cell_id) = cell_id {
+        cells
+            .iter()
+            .position(|cell| cell.get("id").and_then(serde_json::Value::as_str) == Some(cell_id))
+            .ok_or_else(|| format!("Cell id not found: {cell_id}"))
+    } else {
+        Ok(cells.len().saturating_sub(1))
+    }
+}
+
+fn source_lines(source: &str) -> Vec<serde_json::Value> {
+    if source.is_empty() {
+        return vec![serde_json::Value::String(String::new())];
+    }
+    source
+        .split_inclusive('\n')
+        .map(|line| serde_json::Value::String(line.to_string()))
+        .collect()
+}
+
+fn format_notebook_edit_mode(mode: NotebookEditMode) -> String {
+    match mode {
+        NotebookEditMode::Replace => String::from("replace"),
+        NotebookEditMode::Insert => String::from("insert"),
+        NotebookEditMode::Delete => String::from("delete"),
+    }
+}
+
+fn make_cell_id(index: usize) -> String {
+    format!("cell-{}", index + 1)
+}
+
