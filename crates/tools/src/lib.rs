@@ -2995,3 +2995,146 @@ Command exceeded timeout of {timeout_ms} ms",
                 });
             }
             std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    let output = process.output()?;
+    Ok(runtime::BashCommandOutput {
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        raw_output_path: None,
+        interrupted: false,
+        is_image: None,
+        background_task_id: None,
+        backgrounded_by_user: None,
+        assistant_auto_backgrounded: None,
+        dangerously_disable_sandbox: None,
+        return_code_interpretation: output
+            .status
+            .code()
+            .filter(|code| *code != 0)
+            .map(|code| format!("exit_code:{code}")),
+        no_output_expected: Some(output.stdout.is_empty() && output.stderr.is_empty()),
+        structured_content: None,
+        persisted_output_path: None,
+        persisted_output_size: None,
+        sandbox_status: None,
+    })
+}
+
+fn resolve_cell_index(
+    cells: &[serde_json::Value],
+    cell_id: Option<&str>,
+    edit_mode: NotebookEditMode,
+) -> Result<usize, String> {
+    if cells.is_empty()
+        && matches!(
+            edit_mode,
+            NotebookEditMode::Replace | NotebookEditMode::Delete
+        )
+    {
+        return Err(String::from("Notebook has no cells to edit"));
+    }
+    if let Some(cell_id) = cell_id {
+        cells
+            .iter()
+            .position(|cell| cell.get("id").and_then(serde_json::Value::as_str) == Some(cell_id))
+            .ok_or_else(|| format!("Cell id not found: {cell_id}"))
+    } else {
+        Ok(cells.len().saturating_sub(1))
+    }
+}
+
+fn source_lines(source: &str) -> Vec<serde_json::Value> {
+    if source.is_empty() {
+        return vec![serde_json::Value::String(String::new())];
+    }
+    source
+        .split_inclusive('\n')
+        .map(|line| serde_json::Value::String(line.to_string()))
+        .collect()
+}
+
+fn format_notebook_edit_mode(mode: NotebookEditMode) -> String {
+    match mode {
+        NotebookEditMode::Replace => String::from("replace"),
+        NotebookEditMode::Insert => String::from("insert"),
+        NotebookEditMode::Delete => String::from("delete"),
+    }
+}
+
+fn make_cell_id(index: usize) -> String {
+    format!("cell-{}", index + 1)
+}
+
+fn parse_skill_description(contents: &str) -> Option<String> {
+    for line in contents.lines() {
+        if let Some(value) = line.strip_prefix("description:") {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+    use std::collections::BTreeSet;
+    use std::fs;
+    use std::io::{Read, Write};
+    use std::net::{SocketAddr, TcpListener};
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex, OnceLock};
+    use std::thread;
+    use std::time::Duration;
+
+    use super::{
+        agent_permission_policy, allowed_tools_for_subagent, execute_agent_with_spawn,
+        execute_tool, final_assistant_text, mvp_tool_specs, persist_agent_terminal_state,
+        push_output_block, AgentInput, AgentJob, SubagentToolExecutor,
+    };
+    use api::OutputContentBlock;
+    use runtime::{ApiRequest, AssistantEvent, ConversationRuntime, RuntimeError, Session};
+    use serde_json::json;
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn temp_path(name: &str) -> PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        std::env::temp_dir().join(format!("codineer-tools-{unique}-{name}"))
+    }
+
+    #[test]
+    fn exposes_mvp_tools() {
+        let names = mvp_tool_specs()
+            .into_iter()
+            .map(|spec| spec.name)
+            .collect::<Vec<_>>();
+        assert!(names.contains(&"bash"));
+        assert!(names.contains(&"read_file"));
+        assert!(names.contains(&"WebFetch"));
+        assert!(names.contains(&"WebSearch"));
+        assert!(names.contains(&"TodoWrite"));
+        assert!(names.contains(&"Skill"));
+        assert!(names.contains(&"Agent"));
+        assert!(names.contains(&"ToolSearch"));
+        assert!(names.contains(&"NotebookEdit"));
+        assert!(names.contains(&"Sleep"));
+        assert!(names.contains(&"SendUserMessage"));
+        assert!(names.contains(&"Config"));
+        assert!(names.contains(&"StructuredOutput"));
+        assert!(names.contains(&"REPL"));
+        assert!(names.contains(&"PowerShell"));
+    }
+
+    #[test]
+    fn rejects_unknown_tool_names() {
