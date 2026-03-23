@@ -2059,3 +2059,202 @@ fn append_repl_command_suggestions(lines: &mut Vec<String>, name: &str) {
     if suggestions.is_empty() {
         lines.push("  Try              /help shows the full slash command map".to_string());
         return;
+    }
+
+    lines.push("  Try              /help shows the full slash command map".to_string());
+    lines.push("Suggestions".to_string());
+    lines.extend(
+        suggestions
+            .into_iter()
+            .map(|suggestion| format!("  {suggestion}")),
+    );
+}
+
+fn render_mode_unavailable(command: &str, label: &str) -> String {
+    [
+        "Command unavailable in this REPL mode".to_string(),
+        format!("  Command          /{command}"),
+        format!("  Feature          {label}"),
+        "  Tip              Use /help to find currently wired REPL commands".to_string(),
+    ]
+    .join("\n")
+}
+
+fn status_context(
+    session_path: Option<&Path>,
+) -> Result<StatusContext, Box<dyn std::error::Error>> {
+    let cwd = env::current_dir()?;
+    let loader = ConfigLoader::default_for(&cwd);
+    let discovered_config_files = loader.discover().len();
+    let runtime_config = loader.load()?;
+    let date = current_date();
+    let project_context = ProjectContext::discover_with_git(&cwd, &date)?;
+    let (project_root, git_branch) =
+        parse_git_status_metadata(project_context.git_status.as_deref());
+    Ok(StatusContext {
+        cwd,
+        session_path: session_path.map(Path::to_path_buf),
+        loaded_config_files: runtime_config.loaded_entries().len(),
+        discovered_config_files,
+        memory_file_count: project_context.instruction_files.len(),
+        project_root,
+        git_branch,
+    })
+}
+
+fn format_status_report(
+    model: &str,
+    usage: StatusUsage,
+    permission_mode: &str,
+    context: &StatusContext,
+) -> String {
+    [
+        format!(
+            "Session
+  Model            {model}
+  Permissions      {permission_mode}
+  Activity         {} messages · {} turns
+  Tokens           est {} · latest {} · total {}",
+            usage.message_count,
+            usage.turns,
+            usage.estimated_tokens,
+            usage.latest.total_tokens(),
+            usage.cumulative.total_tokens(),
+        ),
+        format!(
+            "Usage
+  Cumulative input {}
+  Cumulative output {}
+  Cache create     {}
+  Cache read       {}",
+            usage.cumulative.input_tokens,
+            usage.cumulative.output_tokens,
+            usage.cumulative.cache_creation_input_tokens,
+            usage.cumulative.cache_read_input_tokens,
+        ),
+        format!(
+            "Workspace
+  Folder           {}
+  Project root     {}
+  Git branch       {}
+  Session file     {}
+  Config files     loaded {}/{}
+  Memory files     {}
+
+Next
+  /help            Browse commands
+  /session list    Inspect saved sessions
+  /diff            Review current workspace changes",
+            context.cwd.display(),
+            context
+                .project_root
+                .as_ref()
+                .map_or_else(|| "unknown".to_string(), |path| path.display().to_string()),
+            context.git_branch.as_deref().unwrap_or("unknown"),
+            context.session_path.as_ref().map_or_else(
+                || "live-repl".to_string(),
+                |path| path.display().to_string()
+            ),
+            context.loaded_config_files,
+            context.discovered_config_files,
+            context.memory_file_count,
+        ),
+    ]
+    .join(
+        "
+
+",
+    )
+}
+
+fn render_config_report(section: Option<&str>) -> Result<String, Box<dyn std::error::Error>> {
+    let cwd = env::current_dir()?;
+    let loader = ConfigLoader::default_for(&cwd);
+    let discovered = loader.discover();
+    let runtime_config = loader.load()?;
+
+    let mut lines = vec![
+        format!(
+            "Config
+  Working directory {}
+  Loaded files      {}
+  Merged keys       {}",
+            cwd.display(),
+            runtime_config.loaded_entries().len(),
+            runtime_config.merged().len()
+        ),
+        "Discovered files".to_string(),
+    ];
+    for entry in discovered {
+        let source = match entry.source {
+            ConfigSource::User => "user",
+            ConfigSource::Project => "project",
+            ConfigSource::Local => "local",
+        };
+        let status = if runtime_config
+            .loaded_entries()
+            .iter()
+            .any(|loaded_entry| loaded_entry.path == entry.path)
+        {
+            "loaded"
+        } else {
+            "missing"
+        };
+        lines.push(format!(
+            "  {source:<7} {status:<7} {}",
+            entry.path.display()
+        ));
+    }
+
+    if let Some(section) = section {
+        lines.push(format!("Merged section: {section}"));
+        let value = match section {
+            "env" => runtime_config.get("env"),
+            "hooks" => runtime_config.get("hooks"),
+            "model" => runtime_config.get("model"),
+            "plugins" => runtime_config
+                .get("plugins")
+                .or_else(|| runtime_config.get("enabledPlugins")),
+            other => {
+                lines.push(format!(
+                    "  Unsupported config section '{other}'. Use env, hooks, model, or plugins."
+                ));
+                return Ok(lines.join(
+                    "
+",
+                ));
+            }
+        };
+        lines.push(format!(
+            "  {}",
+            match value {
+                Some(value) => value.render(),
+                None => "<unset>".to_string(),
+            }
+        ));
+        return Ok(lines.join(
+            "
+",
+        ));
+    }
+
+    lines.push("Merged JSON".to_string());
+    lines.push(format!("  {}", runtime_config.as_json().render()));
+    Ok(lines.join(
+        "
+",
+    ))
+}
+
+fn render_memory_report() -> Result<String, Box<dyn std::error::Error>> {
+    let cwd = env::current_dir()?;
+    let date = current_date();
+    let project_context = ProjectContext::discover(&cwd, &date)?;
+    let mut lines = vec![format!(
+        "Memory
+  Working directory {}
+  Instruction files {}",
+        cwd.display(),
+        project_context.instruction_files.len()
+    )];
+    if project_context.instruction_files.is_empty() {
