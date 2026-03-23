@@ -1639,3 +1639,75 @@ mod tests {
     use super::{
         handle_branch_slash_command, handle_commit_push_pr_slash_command,
         handle_commit_slash_command, handle_plugins_slash_command, handle_slash_command,
+        handle_worktree_slash_command, load_agents_from_roots, load_skills_from_roots,
+        render_agents_report, render_plugins_report, render_skills_report,
+        render_slash_command_help, resume_supported_slash_commands, slash_command_specs,
+        suggest_slash_commands, CommitPushPrRequest, DefinitionSource, SkillRoot, SlashCommand,
+    };
+    use plugins::{PluginKind, PluginManager, PluginManagerConfig, PluginMetadata, PluginSummary};
+    use runtime::{CompactionConfig, ContentBlock, ConversationMessage, MessageRole, Session};
+    use std::env;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+    use std::sync::{Mutex, OnceLock};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
+    fn temp_dir(label: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be after epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("commands-plugin-{label}-{nanos}"))
+    }
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("env lock")
+    }
+
+    fn run_command(cwd: &Path, program: &str, args: &[&str]) -> String {
+        let output = Command::new(program)
+            .args(args)
+            .current_dir(cwd)
+            .output()
+            .expect("command should run");
+        assert!(
+            output.status.success(),
+            "{} {} failed: {}",
+            program,
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).expect("stdout should be utf8")
+    }
+
+    fn init_git_repo(label: &str) -> PathBuf {
+        let root = temp_dir(label);
+        fs::create_dir_all(&root).expect("repo root");
+
+        let init = Command::new("git")
+            .args(["init", "-b", "main"])
+            .current_dir(&root)
+            .output()
+            .expect("git init should run");
+        if !init.status.success() {
+            let fallback = Command::new("git")
+                .arg("init")
+                .current_dir(&root)
+                .output()
+                .expect("fallback git init should run");
+            assert!(
+                fallback.status.success(),
+                "fallback git init should succeed"
+            );
+            let rename = Command::new("git")
+                .args(["branch", "-m", "main"])
+                .current_dir(&root)
+                .output()
+                .expect("git branch -m should run");
