@@ -1497,3 +1497,74 @@ fn agent_detail(agent: &AgentSummary) -> String {
     if let Some(description) = &agent.description {
         parts.push(description.clone());
     }
+    if let Some(model) = &agent.model {
+        parts.push(model.clone());
+    }
+    if let Some(reasoning) = &agent.reasoning_effort {
+        parts.push(reasoning.clone());
+    }
+    parts.join(" · ")
+}
+
+fn render_skills_report(skills: &[SkillSummary]) -> String {
+    if skills.is_empty() {
+        return "No skills found.".to_string();
+    }
+
+    let total_active = skills
+        .iter()
+        .filter(|skill| skill.shadowed_by.is_none())
+        .count();
+    let mut lines = vec![
+        "Skills".to_string(),
+        format!("  {total_active} available skills"),
+        String::new(),
+    ];
+
+    for source in [DefinitionSource::Project, DefinitionSource::User] {
+        let group = skills
+            .iter()
+            .filter(|skill| skill.source == source)
+            .collect::<Vec<_>>();
+        if group.is_empty() {
+            continue;
+        }
+
+        lines.push(format!("{}:", source.label()));
+        for skill in group {
+            let mut parts = vec![skill.name.clone()];
+            if let Some(description) = &skill.description {
+                parts.push(description.clone());
+            }
+            let detail = parts.join(" · ");
+            match skill.shadowed_by {
+                Some(winner) => lines.push(format!("  (shadowed by {}) {detail}", winner.label())),
+                None => lines.push(format!("  {detail}")),
+            }
+        }
+        lines.push(String::new());
+    }
+
+    lines.join("\n").trim_end().to_string()
+}
+
+fn normalize_optional_args(args: Option<&str>) -> Option<&str> {
+    args.map(str::trim).filter(|value| !value.is_empty())
+}
+
+fn render_agents_usage(unexpected: Option<&str>) -> String {
+    let mut lines = vec![
+        "Agents".to_string(),
+        "  Usage            /agents".to_string(),
+        "  Direct CLI       codineer agents".to_string(),
+        "  Sources          .codineer/agents, ~/.codineer/agents".to_string(),
+    ];
+    if let Some(args) = unexpected {
+        lines.push(format!("  Unexpected       {args}"));
+    }
+    lines.join("\n")
+}
+
+fn render_skills_usage(unexpected: Option<&str>) -> String {
+    let mut lines = vec![
+        "Skills".to_string(),
