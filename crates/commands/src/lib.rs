@@ -1425,3 +1425,217 @@ fn parse_skill_frontmatter(contents: &str) -> (Option<String>, Option<String>) {
         if let Some(value) = trimmed.strip_prefix("name:") {
             let value = unquote_frontmatter_value(value.trim());
             if !value.is_empty() {
+                name = Some(value);
+            }
+            continue;
+        }
+        if let Some(value) = trimmed.strip_prefix("description:") {
+            let value = unquote_frontmatter_value(value.trim());
+            if !value.is_empty() {
+                description = Some(value);
+            }
+        }
+    }
+
+    (name, description)
+}
+
+fn unquote_frontmatter_value(value: &str) -> String {
+    value
+        .strip_prefix('"')
+        .and_then(|trimmed| trimmed.strip_suffix('"'))
+        .or_else(|| {
+            value
+                .strip_prefix('\'')
+                .and_then(|trimmed| trimmed.strip_suffix('\''))
+        })
+        .unwrap_or(value)
+        .trim()
+        .to_string()
+}
+
+fn render_agents_report(agents: &[AgentSummary]) -> String {
+    if agents.is_empty() {
+        return "No agents found.".to_string();
+    }
+
+    let total_active = agents
+        .iter()
+        .filter(|agent| agent.shadowed_by.is_none())
+        .count();
+    let mut lines = vec![
+        "Agents".to_string(),
+        format!("  {total_active} active agents"),
+        String::new(),
+    ];
+
+    for source in [DefinitionSource::Project, DefinitionSource::User] {
+        let group = agents
+            .iter()
+            .filter(|agent| agent.source == source)
+            .collect::<Vec<_>>();
+        if group.is_empty() {
+            continue;
+        }
+
+        lines.push(format!("{}:", source.label()));
+        for agent in group {
+            let detail = agent_detail(agent);
+            match agent.shadowed_by {
+                Some(winner) => lines.push(format!("  (shadowed by {}) {detail}", winner.label())),
+                None => lines.push(format!("  {detail}")),
+            }
+        }
+        lines.push(String::new());
+    }
+
+    lines.join("\n").trim_end().to_string()
+}
+
+fn agent_detail(agent: &AgentSummary) -> String {
+    let mut parts = vec![agent.name.clone()];
+    if let Some(description) = &agent.description {
+        parts.push(description.clone());
+    }
+    if let Some(model) = &agent.model {
+        parts.push(model.clone());
+    }
+    if let Some(reasoning) = &agent.reasoning_effort {
+        parts.push(reasoning.clone());
+    }
+    parts.join(" · ")
+}
+
+fn render_skills_report(skills: &[SkillSummary]) -> String {
+    if skills.is_empty() {
+        return "No skills found.".to_string();
+    }
+
+    let total_active = skills
+        .iter()
+        .filter(|skill| skill.shadowed_by.is_none())
+        .count();
+    let mut lines = vec![
+        "Skills".to_string(),
+        format!("  {total_active} available skills"),
+        String::new(),
+    ];
+
+    for source in [DefinitionSource::Project, DefinitionSource::User] {
+        let group = skills
+            .iter()
+            .filter(|skill| skill.source == source)
+            .collect::<Vec<_>>();
+        if group.is_empty() {
+            continue;
+        }
+
+        lines.push(format!("{}:", source.label()));
+        for skill in group {
+            let mut parts = vec![skill.name.clone()];
+            if let Some(description) = &skill.description {
+                parts.push(description.clone());
+            }
+            let detail = parts.join(" · ");
+            match skill.shadowed_by {
+                Some(winner) => lines.push(format!("  (shadowed by {}) {detail}", winner.label())),
+                None => lines.push(format!("  {detail}")),
+            }
+        }
+        lines.push(String::new());
+    }
+
+    lines.join("\n").trim_end().to_string()
+}
+
+fn normalize_optional_args(args: Option<&str>) -> Option<&str> {
+    args.map(str::trim).filter(|value| !value.is_empty())
+}
+
+fn render_agents_usage(unexpected: Option<&str>) -> String {
+    let mut lines = vec![
+        "Agents".to_string(),
+        "  Usage            /agents".to_string(),
+        "  Direct CLI       codineer agents".to_string(),
+        "  Sources          .codineer/agents, ~/.codineer/agents".to_string(),
+    ];
+    if let Some(args) = unexpected {
+        lines.push(format!("  Unexpected       {args}"));
+    }
+    lines.join("\n")
+}
+
+fn render_skills_usage(unexpected: Option<&str>) -> String {
+    let mut lines = vec![
+        "Skills".to_string(),
+        "  Usage            /skills".to_string(),
+        "  Direct CLI       codineer skills".to_string(),
+        "  Sources          .codineer/skills, ~/.codineer/skills".to_string(),
+    ];
+    if let Some(args) = unexpected {
+        lines.push(format!("  Unexpected       {args}"));
+    }
+    lines.join("\n")
+}
+
+#[must_use]
+pub fn handle_slash_command(
+    input: &str,
+    session: &Session,
+    compaction: CompactionConfig,
+) -> Option<SlashCommandResult> {
+    match SlashCommand::parse(input)? {
+        SlashCommand::Compact => {
+            let result = compact_session(session, compaction);
+            let message = if result.removed_message_count == 0 {
+                "Compaction skipped: session is below the compaction threshold.".to_string()
+            } else {
+                format!(
+                    "Compacted {} messages into a resumable system summary.",
+                    result.removed_message_count
+                )
+            };
+            Some(SlashCommandResult {
+                message,
+                session: result.compacted_session,
+            })
+        }
+        SlashCommand::Help => Some(SlashCommandResult {
+            message: render_slash_command_help(),
+            session: session.clone(),
+        }),
+        SlashCommand::Status
+        | SlashCommand::Branch { .. }
+        | SlashCommand::Bughunter { .. }
+        | SlashCommand::Worktree { .. }
+        | SlashCommand::Commit
+        | SlashCommand::CommitPushPr { .. }
+        | SlashCommand::Pr { .. }
+        | SlashCommand::Issue { .. }
+        | SlashCommand::Ultraplan { .. }
+        | SlashCommand::Teleport { .. }
+        | SlashCommand::DebugToolCall
+        | SlashCommand::Model { .. }
+        | SlashCommand::Permissions { .. }
+        | SlashCommand::Clear { .. }
+        | SlashCommand::Cost
+        | SlashCommand::Resume { .. }
+        | SlashCommand::Config { .. }
+        | SlashCommand::Memory
+        | SlashCommand::Init
+        | SlashCommand::Diff
+        | SlashCommand::Version
+        | SlashCommand::Export { .. }
+        | SlashCommand::Session { .. }
+        | SlashCommand::Plugins { .. }
+        | SlashCommand::Agents { .. }
+        | SlashCommand::Skills { .. }
+        | SlashCommand::Unknown(_) => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        handle_branch_slash_command, handle_commit_push_pr_slash_command,
+        handle_commit_slash_command, handle_plugins_slash_command, handle_slash_command,
