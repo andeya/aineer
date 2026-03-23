@@ -537,3 +537,93 @@ mod tests {
     }
 
     #[test]
+    fn discovers_instruction_files_from_ancestor_chain() {
+        let root = temp_dir();
+        let nested = root.join("apps").join("api");
+        fs::create_dir_all(nested.join(".codineer")).expect("nested codineer dir");
+        fs::write(root.join("CODINEER.md"), "root instructions").expect("write root instructions");
+        fs::write(root.join("CODINEER.local.md"), "local instructions")
+            .expect("write local instructions");
+        fs::create_dir_all(root.join("apps")).expect("apps dir");
+        fs::create_dir_all(root.join("apps").join(".codineer")).expect("apps codineer dir");
+        fs::write(root.join("apps").join("CODINEER.md"), "apps instructions")
+            .expect("write apps instructions");
+        fs::write(
+            root.join("apps").join(".codineer").join("instructions.md"),
+            "apps dot codineer instructions",
+        )
+        .expect("write apps dot codineer instructions");
+        fs::write(nested.join(".codineer").join("CODINEER.md"), "nested rules")
+            .expect("write nested rules");
+        fs::write(
+            nested.join(".codineer").join("instructions.md"),
+            "nested instructions",
+        )
+        .expect("write nested instructions");
+
+        let context = ProjectContext::discover(&nested, "2026-03-31").expect("context should load");
+        let contents = context
+            .instruction_files
+            .iter()
+            .map(|file| file.content.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            contents,
+            vec![
+                "root instructions",
+                "local instructions",
+                "apps instructions",
+                "apps dot codineer instructions",
+                "nested rules",
+                "nested instructions"
+            ]
+        );
+        fs::remove_dir_all(root).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn dedupes_identical_instruction_content_across_scopes() {
+        let root = temp_dir();
+        let nested = root.join("apps").join("api");
+        fs::create_dir_all(&nested).expect("nested dir");
+        fs::write(root.join("CODINEER.md"), "same rules\n\n").expect("write root");
+        fs::write(nested.join("CODINEER.md"), "same rules\n").expect("write nested");
+
+        let context = ProjectContext::discover(&nested, "2026-03-31").expect("context should load");
+        assert_eq!(context.instruction_files.len(), 1);
+        assert_eq!(
+            normalize_instruction_content(&context.instruction_files[0].content),
+            "same rules"
+        );
+        fs::remove_dir_all(root).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn truncates_large_instruction_content_for_rendering() {
+        let rendered = render_instruction_content(&"x".repeat(4500));
+        assert!(rendered.contains("[truncated]"));
+        assert!(rendered.len() < 4_100);
+    }
+
+    #[test]
+    fn normalizes_and_collapses_blank_lines() {
+        let normalized = normalize_instruction_content("line one\n\n\nline two\n");
+        assert_eq!(normalized, "line one\n\nline two");
+        assert_eq!(collapse_blank_lines("a\n\n\n\nb\n"), "a\n\nb\n");
+    }
+
+    #[test]
+    fn displays_context_paths_compactly() {
+        assert_eq!(
+            display_context_path(Path::new("/tmp/project/.codineer/CODINEER.md")),
+            "CODINEER.md"
+        );
+    }
+
+    #[test]
+    fn discover_with_git_includes_status_snapshot() {
+        let _guard = env_lock();
+        let root = temp_dir();
+        fs::create_dir_all(&root).expect("root dir");
+        std::process::Command::new("git")
