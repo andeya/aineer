@@ -79,3 +79,29 @@ jobs:
           staging="codineer-${{ github.ref_name }}-${{ matrix.target }}"
           mkdir -p "$staging"
           cp "${{ steps.bin.outputs.path }}" "$staging/"
+          cp LICENSE README.md "$staging/" 2>/dev/null || true
+          7z a "$staging.zip" "$staging"
+          echo "ASSET=$staging.zip" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: codineer-${{ matrix.target }}
+          path: ${{ env.ASSET }}
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: artifacts/*
