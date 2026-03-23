@@ -2781,3 +2781,146 @@ fn config_file_for_scope(scope: ConfigScope) -> Result<PathBuf, String> {
 }
 
 fn config_home_dir() -> Result<PathBuf, String> {
+    if let Ok(path) = std::env::var("CODINEER_CONFIG_HOME") {
+        return Ok(PathBuf::from(path));
+    }
+    let home = std::env::var("HOME").map_err(|_| String::from("HOME is not set"))?;
+    Ok(PathBuf::from(home).join(".codineer"))
+}
+
+fn read_json_object(path: &Path) -> Result<serde_json::Map<String, Value>, String> {
+    match std::fs::read_to_string(path) {
+        Ok(contents) => {
+            if contents.trim().is_empty() {
+                return Ok(serde_json::Map::new());
+            }
+            serde_json::from_str::<Value>(&contents)
+                .map_err(|error| error.to_string())?
+                .as_object()
+                .cloned()
+                .ok_or_else(|| String::from("config file must contain a JSON object"))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(serde_json::Map::new()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+fn write_json_object(path: &Path, value: &serde_json::Map<String, Value>) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    std::fs::write(
+        path,
+        serde_json::to_string_pretty(value).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())
+}
+
+fn get_nested_value<'a>(
+    value: &'a serde_json::Map<String, Value>,
+    path: &[&str],
+) -> Option<&'a Value> {
+    let (first, rest) = path.split_first()?;
+    let mut current = value.get(*first)?;
+    for key in rest {
+        current = current.as_object()?.get(*key)?;
+    }
+    Some(current)
+}
+
+fn set_nested_value(root: &mut serde_json::Map<String, Value>, path: &[&str], new_value: Value) {
+    let (first, rest) = path.split_first().expect("config path must not be empty");
+    if rest.is_empty() {
+        root.insert((*first).to_string(), new_value);
+        return;
+    }
+
+    let entry = root
+        .entry((*first).to_string())
+        .or_insert_with(|| Value::Object(serde_json::Map::new()));
+    if !entry.is_object() {
+        *entry = Value::Object(serde_json::Map::new());
+    }
+    let map = entry.as_object_mut().expect("object inserted");
+    set_nested_value(map, rest, new_value);
+}
+
+fn iso8601_timestamp() -> String {
+    if let Ok(output) = Command::new("date")
+        .args(["-u", "+%Y-%m-%dT%H:%M:%SZ"])
+        .output()
+    {
+        if output.status.success() {
+            return String::from_utf8_lossy(&output.stdout).trim().to_string();
+        }
+    }
+    iso8601_now()
+}
+
+#[allow(clippy::needless_pass_by_value)]
+fn execute_powershell(input: PowerShellInput) -> std::io::Result<runtime::BashCommandOutput> {
+    let _ = &input.description;
+    let shell = detect_powershell_shell()?;
+    execute_shell_command(
+        shell,
+        &input.command,
+        input.timeout,
+        input.run_in_background,
+    )
+}
+
+fn detect_powershell_shell() -> std::io::Result<&'static str> {
+    if command_exists("pwsh") {
+        Ok("pwsh")
+    } else if command_exists("powershell") {
+        Ok("powershell")
+    } else {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "PowerShell executable not found (expected `pwsh` or `powershell` in PATH)",
+        ))
+    }
+}
+
+fn command_exists(command: &str) -> bool {
+    std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!("command -v {command} >/dev/null 2>&1"))
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+#[allow(clippy::too_many_lines)]
+fn execute_shell_command(
+    shell: &str,
+    command: &str,
+    timeout: Option<u64>,
+    run_in_background: Option<bool>,
+) -> std::io::Result<runtime::BashCommandOutput> {
+    if run_in_background.unwrap_or(false) {
+        let child = std::process::Command::new(shell)
+            .arg("-NoProfile")
+            .arg("-NonInteractive")
+            .arg("-Command")
+            .arg(command)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()?;
+        return Ok(runtime::BashCommandOutput {
+            stdout: String::new(),
+            stderr: String::new(),
+            raw_output_path: None,
+            interrupted: false,
+            is_image: None,
+            background_task_id: Some(child.id().to_string()),
+            backgrounded_by_user: Some(true),
+            assistant_auto_backgrounded: Some(false),
+            dangerously_disable_sandbox: None,
+            return_code_interpretation: None,
+            no_output_expected: Some(true),
+            structured_content: None,
+            persisted_output_path: None,
+            persisted_output_size: None,
+            sandbox_status: None,
+        });
