@@ -2524,3 +2524,70 @@ fn parse_titled_body(value: &str) -> Option<(String, String)> {
 }
 
 fn render_version_report() -> String {
+    let git_sha = GIT_SHA.unwrap_or("unknown");
+    let target = BUILD_TARGET.unwrap_or("unknown");
+    let date = current_date();
+    format!(
+        "Codineer\n  Version          {VERSION}\n  Git SHA          {git_sha}\n  Target           {target}\n  Date             {date}\n\nSupport\n  Help             codineer --help\n  REPL             /help"
+    )
+}
+
+fn render_export_text(session: &Session) -> String {
+    let mut lines = vec!["# Conversation Export".to_string(), String::new()];
+    for (index, message) in session.messages.iter().enumerate() {
+        let role = match message.role {
+            MessageRole::System => "system",
+            MessageRole::User => "user",
+            MessageRole::Assistant => "assistant",
+            MessageRole::Tool => "tool",
+        };
+        lines.push(format!("## {}. {role}", index + 1));
+        for block in &message.blocks {
+            match block {
+                ContentBlock::Text { text } => lines.push(text.clone()),
+                ContentBlock::ToolUse { id, name, input } => {
+                    lines.push(format!("[tool_use id={id} name={name}] {input}"));
+                }
+                ContentBlock::ToolResult {
+                    tool_use_id,
+                    tool_name,
+                    output,
+                    is_error,
+                } => {
+                    lines.push(format!(
+                        "[tool_result id={tool_use_id} name={tool_name} error={is_error}] {output}"
+                    ));
+                }
+            }
+        }
+        lines.push(String::new());
+    }
+    lines.join("\n")
+}
+
+fn default_export_filename(session: &Session) -> String {
+    let stem = session
+        .messages
+        .iter()
+        .find_map(|message| match message.role {
+            MessageRole::User => message.blocks.iter().find_map(|block| match block {
+                ContentBlock::Text { text } => Some(text.as_str()),
+                _ => None,
+            }),
+            _ => None,
+        })
+        .map_or("conversation", |text| {
+            text.lines().next().unwrap_or("conversation")
+        })
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .take(8)
