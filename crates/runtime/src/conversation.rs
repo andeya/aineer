@@ -716,3 +716,92 @@ mod tests {
         );
     }
 
+    #[test]
+    fn reconstructs_usage_tracker_from_restored_session() {
+        struct SimpleApi;
+        impl ApiClient for SimpleApi {
+            fn stream(
+                &mut self,
+                _request: ApiRequest,
+            ) -> Result<Vec<AssistantEvent>, RuntimeError> {
+                Ok(vec![
+                    AssistantEvent::TextDelta("done".to_string()),
+                    AssistantEvent::MessageStop,
+                ])
+            }
+        }
+
+        let mut session = Session::new();
+        session
+            .messages
+            .push(crate::session::ConversationMessage::assistant_with_usage(
+                vec![ContentBlock::Text {
+                    text: "earlier".to_string(),
+                }],
+                Some(TokenUsage {
+                    input_tokens: 11,
+                    output_tokens: 7,
+                    cache_creation_input_tokens: 2,
+                    cache_read_input_tokens: 1,
+                }),
+            ));
+
+        let runtime = ConversationRuntime::new(
+            session,
+            SimpleApi,
+            StaticToolExecutor::new(),
+            PermissionPolicy::new(PermissionMode::DangerFullAccess),
+            vec!["system".to_string()],
+        );
+
+        assert_eq!(runtime.usage().turns(), 1);
+        assert_eq!(runtime.usage().cumulative_usage().total_tokens(), 21);
+    }
+
+    #[test]
+    fn compacts_session_after_turns() {
+        struct SimpleApi;
+        impl ApiClient for SimpleApi {
+            fn stream(
+                &mut self,
+                _request: ApiRequest,
+            ) -> Result<Vec<AssistantEvent>, RuntimeError> {
+                Ok(vec![
+                    AssistantEvent::TextDelta("done".to_string()),
+                    AssistantEvent::MessageStop,
+                ])
+            }
+        }
+
+        let mut runtime = ConversationRuntime::new(
+            Session::new(),
+            SimpleApi,
+            StaticToolExecutor::new(),
+            PermissionPolicy::new(PermissionMode::DangerFullAccess),
+            vec!["system".to_string()],
+        );
+        runtime.run_turn("a", None).expect("turn a");
+        runtime.run_turn("b", None).expect("turn b");
+        runtime.run_turn("c", None).expect("turn c");
+
+        let result = runtime.compact(CompactionConfig {
+            preserve_recent_messages: 2,
+            max_estimated_tokens: 1,
+        });
+        assert!(result.summary.contains("Conversation summary"));
+        assert_eq!(
+            result.compacted_session.messages[0].role,
+            MessageRole::System
+        );
+    }
+
+    #[cfg(windows)]
+    fn shell_snippet(script: &str) -> String {
+        script.replace('\'', "\"")
+    }
+
+    #[cfg(not(windows))]
+    fn shell_snippet(script: &str) -> String {
+        script.to_string()
+    }
+}
