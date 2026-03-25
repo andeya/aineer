@@ -378,3 +378,57 @@ impl TerminalRenderer {
             Event::End(TagEnd::List(..)) => {
                 state.list_stack.pop();
                 output.push('\n');
+            }
+            Event::Start(Tag::Item) => Self::start_item(state, output),
+            Event::Start(Tag::CodeBlock(kind)) => {
+                *in_code_block = true;
+                *code_language = match kind {
+                    CodeBlockKind::Indented => String::from("text"),
+                    CodeBlockKind::Fenced(lang) => lang.to_string(),
+                };
+                code_buffer.clear();
+                self.start_code_block(code_language, output);
+            }
+            Event::End(TagEnd::CodeBlock) => {
+                self.finish_code_block(code_buffer, code_language, output);
+                *in_code_block = false;
+                code_language.clear();
+                code_buffer.clear();
+            }
+            Event::Start(Tag::Emphasis) => state.emphasis += 1,
+            Event::End(TagEnd::Emphasis) => state.emphasis = state.emphasis.saturating_sub(1),
+            Event::Start(Tag::Strong) => state.strong += 1,
+            Event::End(TagEnd::Strong) => state.strong = state.strong.saturating_sub(1),
+            Event::Code(code) => {
+                let rendered = styled(&format!("`{code}`"), self.color_theme.inline_code);
+                state.append_raw(output, &rendered);
+            }
+            Event::Rule => output.push_str("---\n"),
+            Event::Text(text) => {
+                self.push_text(text.as_ref(), state, output, code_buffer, *in_code_block);
+            }
+            Event::Html(html) | Event::InlineHtml(html) => {
+                state.append_raw(output, &html);
+            }
+            Event::FootnoteReference(reference) => {
+                state.append_raw(output, &format!("[{reference}]"));
+            }
+            Event::TaskListMarker(done) => {
+                state.append_raw(output, if done { "[x] " } else { "[ ] " });
+            }
+            Event::InlineMath(math) | Event::DisplayMath(math) => {
+                state.append_raw(output, &math);
+            }
+            Event::Start(Tag::Link { dest_url, .. }) => {
+                state.link_stack.push(LinkState {
+                    destination: dest_url.to_string(),
+                    text: String::new(),
+                });
+            }
+            Event::End(TagEnd::Link) => {
+                if let Some(link) = state.link_stack.pop() {
+                    let label = if link.text.is_empty() {
+                        link.destination.clone()
+                    } else {
+                        link.text
+                    };
