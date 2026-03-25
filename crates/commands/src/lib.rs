@@ -1782,3 +1782,146 @@ mod tests {
             root.join(format!("{name}.toml")),
             format!(
                 "name = \"{name}\"\ndescription = \"{description}\"\nmodel = \"{model}\"\nmodel_reasoning_effort = \"{reasoning}\"\n"
+            ),
+        )
+        .expect("write agent");
+    }
+
+    fn write_skill(root: &Path, name: &str, description: &str) {
+        let skill_root = root.join(name);
+        fs::create_dir_all(&skill_root).expect("skill root");
+        fs::write(
+            skill_root.join("SKILL.md"),
+            format!("---\nname: {name}\ndescription: {description}\n---\n\n# {name}\n"),
+        )
+        .expect("write skill");
+    }
+
+    #[allow(clippy::too_many_lines)]
+    #[test]
+    fn parses_supported_slash_commands() {
+        assert_eq!(SlashCommand::parse("/help"), Some(SlashCommand::Help));
+        assert_eq!(SlashCommand::parse(" /status "), Some(SlashCommand::Status));
+        assert_eq!(
+            SlashCommand::parse("/bughunter runtime"),
+            Some(SlashCommand::Bughunter {
+                scope: Some("runtime".to_string())
+            })
+        );
+        assert_eq!(
+            SlashCommand::parse("/branch create feature/demo"),
+            Some(SlashCommand::Branch {
+                action: Some("create".to_string()),
+                target: Some("feature/demo".to_string()),
+            })
+        );
+        assert_eq!(
+            SlashCommand::parse("/worktree add ../demo wt-demo"),
+            Some(SlashCommand::Worktree {
+                action: Some("add".to_string()),
+                path: Some("../demo".to_string()),
+                branch: Some("wt-demo".to_string()),
+            })
+        );
+        assert_eq!(SlashCommand::parse("/commit"), Some(SlashCommand::Commit));
+        assert_eq!(
+            SlashCommand::parse("/commit-push-pr ready for review"),
+            Some(SlashCommand::CommitPushPr {
+                context: Some("ready for review".to_string())
+            })
+        );
+        assert_eq!(
+            SlashCommand::parse("/pr ready for review"),
+            Some(SlashCommand::Pr {
+                context: Some("ready for review".to_string())
+            })
+        );
+        assert_eq!(
+            SlashCommand::parse("/issue flaky test"),
+            Some(SlashCommand::Issue {
+                context: Some("flaky test".to_string())
+            })
+        );
+        assert_eq!(
+            SlashCommand::parse("/ultraplan ship both features"),
+            Some(SlashCommand::Ultraplan {
+                task: Some("ship both features".to_string())
+            })
+        );
+        assert_eq!(
+            SlashCommand::parse("/teleport conversation.rs"),
+            Some(SlashCommand::Teleport {
+                target: Some("conversation.rs".to_string())
+            })
+        );
+        assert_eq!(
+            SlashCommand::parse("/debug-tool-call"),
+            Some(SlashCommand::DebugToolCall)
+        );
+        assert_eq!(
+            SlashCommand::parse("/model opus"),
+            Some(SlashCommand::Model {
+                model: Some("opus".to_string()),
+            })
+        );
+        assert_eq!(
+            SlashCommand::parse("/model"),
+            Some(SlashCommand::Model { model: None })
+        );
+        assert_eq!(
+            SlashCommand::parse("/permissions read-only"),
+            Some(SlashCommand::Permissions {
+                mode: Some("read-only".to_string()),
+            })
+        );
+        assert_eq!(
+            SlashCommand::parse("/clear"),
+            Some(SlashCommand::Clear { confirm: false })
+        );
+        assert_eq!(
+            SlashCommand::parse("/clear --confirm"),
+            Some(SlashCommand::Clear { confirm: true })
+        );
+        assert_eq!(SlashCommand::parse("/cost"), Some(SlashCommand::Cost));
+        assert_eq!(
+            SlashCommand::parse("/resume session.json"),
+            Some(SlashCommand::Resume {
+                session_path: Some("session.json".to_string()),
+            })
+        );
+        assert_eq!(
+            SlashCommand::parse("/config"),
+            Some(SlashCommand::Config { section: None })
+        );
+        assert_eq!(
+            SlashCommand::parse("/config env"),
+            Some(SlashCommand::Config {
+                section: Some("env".to_string())
+            })
+        );
+        assert_eq!(SlashCommand::parse("/memory"), Some(SlashCommand::Memory));
+        assert_eq!(SlashCommand::parse("/init"), Some(SlashCommand::Init));
+        assert_eq!(SlashCommand::parse("/diff"), Some(SlashCommand::Diff));
+        assert_eq!(SlashCommand::parse("/version"), Some(SlashCommand::Version));
+        assert_eq!(
+            SlashCommand::parse("/export notes.txt"),
+            Some(SlashCommand::Export {
+                path: Some("notes.txt".to_string())
+            })
+        );
+        assert_eq!(
+            SlashCommand::parse("/session switch abc123"),
+            Some(SlashCommand::Session {
+                action: Some("switch".to_string()),
+                target: Some("abc123".to_string())
+            })
+        );
+        assert_eq!(
+            SlashCommand::parse("/plugins install demo"),
+            Some(SlashCommand::Plugins {
+                action: Some("install".to_string()),
+                target: Some("demo".to_string())
+            })
+        );
+        assert_eq!(
+            SlashCommand::parse("/plugins list"),
