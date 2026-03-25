@@ -6,3 +6,10 @@ class Codineer < Formula
   on_macos do
     if Hardware::CPU.arm?
       url "https://github.com/andeya/codineer/releases/latest/download/codineer-#{version}-aarch64-apple-darwin.tar.gz"
+    else
+      url "https://github.com/andeya/codineer/releases/latest/download/codineer-#{version}-x86_64-apple-darwin.tar.gz"
+    end
+  end
+
+  on_linux do
+    if Hardware::CPU.arm?
