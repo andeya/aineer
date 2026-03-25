@@ -2828,3 +2828,116 @@ mod tests {
         let _ = fs::remove_dir_all(source_root);
     }
 
+    #[test]
+    fn plugin_registry_runs_initialize_and_shutdown_for_enabled_plugins() {
+        let config_home = temp_dir("lifecycle-home");
+        let source_root = temp_dir("lifecycle-source");
+        let _ = write_lifecycle_plugin(&source_root, "lifecycle-demo", "1.0.0");
+
+        let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+        let install = manager
+            .install(source_root.to_str().expect("utf8 path"))
+            .expect("install should succeed");
+        let log_path = install.install_path.join("lifecycle.log");
+
+        let registry = manager.plugin_registry().expect("registry should build");
+        registry.initialize().expect("init should succeed");
+        registry.shutdown().expect("shutdown should succeed");
+
+        let log = fs::read_to_string(&log_path).expect("lifecycle log should exist");
+        assert_eq!(log, "init\nshutdown\n");
+
+        let _ = fs::remove_dir_all(config_home);
+        let _ = fs::remove_dir_all(source_root);
+    }
+
+    #[test]
+    fn aggregates_and_executes_plugin_tools() {
+        let config_home = temp_dir("tool-home");
+        let source_root = temp_dir("tool-source");
+        write_tool_plugin(&source_root, "tool-demo", "1.0.0");
+
+        let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+        manager
+            .install(source_root.to_str().expect("utf8 path"))
+            .expect("install should succeed");
+
+        let tools = manager.aggregated_tools().expect("tools should aggregate");
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].definition().name, "plugin_echo");
+        assert_eq!(tools[0].required_permission(), "workspace-write");
+
+        let output = tools[0]
+            .execute(&serde_json::json!({ "message": "hello" }))
+            .expect("plugin tool should execute");
+        let payload: Value = serde_json::from_str(&output).expect("valid json");
+        assert_eq!(payload["plugin"], "tool-demo@external");
+        assert_eq!(payload["tool"], "plugin_echo");
+        assert_eq!(payload["input"]["message"], "hello");
+
+        let _ = fs::remove_dir_all(config_home);
+        let _ = fs::remove_dir_all(source_root);
+    }
+
+    #[test]
+    fn list_installed_plugins_scans_install_root_without_registry_entries() {
+        let config_home = temp_dir("installed-scan-home");
+        let bundled_root = temp_dir("installed-scan-bundled");
+        let install_root = config_home.join("plugins").join("installed");
+        let installed_plugin_root = install_root.join("scan-demo");
+        write_file(
+            installed_plugin_root.join(MANIFEST_FILE_NAME).as_path(),
+            r#"{
+  "name": "scan-demo",
+  "version": "1.0.0",
+  "description": "Scanned from install root"
+}"#,
+        );
+
+        let mut config = PluginManagerConfig::new(&config_home);
+        config.bundled_root = Some(bundled_root.clone());
+        config.install_root = Some(install_root);
+        let manager = PluginManager::new(config);
+
+        let installed = manager
+            .list_installed_plugins()
+            .expect("installed plugins should scan directories");
+        assert!(installed
+            .iter()
+            .any(|plugin| plugin.metadata.id == "scan-demo@external"));
+
+        let _ = fs::remove_dir_all(config_home);
+        let _ = fs::remove_dir_all(bundled_root);
+    }
+
+    #[test]
+    fn list_installed_plugins_scans_packaged_manifests_in_install_root() {
+        let config_home = temp_dir("installed-packaged-scan-home");
+        let bundled_root = temp_dir("installed-packaged-scan-bundled");
+        let install_root = config_home.join("plugins").join("installed");
+        let installed_plugin_root = install_root.join("scan-packaged");
+        write_file(
+            installed_plugin_root.join(MANIFEST_RELATIVE_PATH).as_path(),
+            r#"{
+  "name": "scan-packaged",
+  "version": "1.0.0",
+  "description": "Packaged manifest in install root"
+}"#,
+        );
+
+        let mut config = PluginManagerConfig::new(&config_home);
+        config.bundled_root = Some(bundled_root.clone());
+        config.install_root = Some(install_root);
+        let manager = PluginManager::new(config);
+
+        let installed = manager
+            .list_installed_plugins()
+            .expect("installed plugins should scan packaged manifests");
+        assert!(installed
+            .iter()
+            .any(|plugin| plugin.metadata.id == "scan-packaged@external"));
+
+        let _ = fs::remove_dir_all(config_home);
+        let _ = fs::remove_dir_all(bundled_root);
+    }
+}
