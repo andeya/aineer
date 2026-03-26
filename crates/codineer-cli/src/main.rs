@@ -3255,3 +3255,203 @@ impl StreamState {
                         self.events.push(AssistantEvent::TextDelta(text));
                     }
                 }
+                ContentBlockDelta::InputJsonDelta { partial_json } => {
+                    if let Some((_, _, input)) = &mut self.pending_tool {
+                        input.push_str(&partial_json);
+                    }
+                }
+                ContentBlockDelta::ThinkingDelta { .. }
+                | ContentBlockDelta::SignatureDelta { .. } => {}
+            },
+            ApiStreamEvent::ContentBlockStop(_) => {
+                if let Some(rendered) = self.markdown_stream.flush(&self.renderer) {
+                    write_flush(out, &rendered)?;
+                }
+                if let Some((id, name, input)) = self.pending_tool.take() {
+                    if let Some(reporter) = progress {
+                        reporter.mark_tool_phase(&name, &input);
+                    }
+                    let display = format!("\n{}", format_tool_call_start(&name, &input));
+                    writeln!(out, "{display}")
+                        .and_then(|()| out.flush())
+                        .map_err(|error| RuntimeError::new(error.to_string()))?;
+                    self.events.push(AssistantEvent::ToolUse { id, name, input });
+                }
+            }
+            ApiStreamEvent::MessageDelta(delta) => {
+                self.events.push(AssistantEvent::Usage(TokenUsage {
+                    input_tokens: delta.usage.input_tokens,
+                    output_tokens: delta.usage.output_tokens,
+                    cache_creation_input_tokens: 0,
+                    cache_read_input_tokens: 0,
+                }));
+            }
+            ApiStreamEvent::MessageStop(_) => {
+                self.saw_stop = true;
+                if let Some(rendered) = self.markdown_stream.flush(&self.renderer) {
+                    write_flush(out, &rendered)?;
+                }
+                self.events.push(AssistantEvent::MessageStop);
+            }
+        }
+        Ok(())
+    }
+
+    fn ensure_stop_event(mut self) -> Vec<AssistantEvent> {
+        if !self.saw_stop
+            && self.events.iter().any(|event| {
+                matches!(event, AssistantEvent::TextDelta(text) if !text.is_empty())
+                    || matches!(event, AssistantEvent::ToolUse { .. })
+            })
+        {
+            self.events.push(AssistantEvent::MessageStop);
+        }
+        self.events
+    }
+}
+
+impl DefaultRuntimeClient {
+    fn build_message_request(&self, request: &ApiRequest) -> MessageRequest {
+        MessageRequest {
+            model: self.model.clone(),
+            max_tokens: max_tokens_for_model(&self.model),
+            messages: convert_messages(&request.messages),
+            system: (!request.system_prompt.is_empty())
+                .then(|| request.system_prompt.join("\n\n")),
+            tools: self.enable_tools.then(|| {
+                let mut specs = filter_tool_specs(&self.tool_registry, self.allowed_tools.as_ref());
+                specs.extend(discover_mcp_tools(&self.runtime, &self.mcp_manager));
+                specs
+            }),
+            tool_choice: self.enable_tools.then_some(ToolChoice::Auto),
+            stream: true,
+        }
+    }
+}
+
+impl ApiClient for DefaultRuntimeClient {
+    fn stream(&mut self, request: ApiRequest) -> Result<Vec<AssistantEvent>, RuntimeError> {
+        if let Some(progress_reporter) = &self.progress_reporter {
+            progress_reporter.mark_model_phase();
+        }
+        let message_request = self.build_message_request(&request);
+
+        self.runtime.block_on(async {
+            let mut stream = self
+                .client
+                .stream_message(&message_request)
+                .await
+                .map_err(|error| RuntimeError::new(error.to_string()))?;
+            let mut stdout = io::stdout();
+            let mut sink = io::sink();
+            let out: &mut dyn Write = if self.emit_output {
+                &mut stdout
+            } else {
+                &mut sink
+            };
+            let mut state = StreamState::new();
+            while let Some(event) = stream
+                .next_event()
+                .await
+                .map_err(|error| RuntimeError::new(error.to_string()))?
+            {
+                state.handle_event(event, self.progress_reporter.as_ref(), out)?;
+            }
+
+            let events = state.ensure_stop_event();
+            if events
+                .iter()
+                .any(|event| matches!(event, AssistantEvent::MessageStop))
+            {
+                return Ok(events);
+            }
+
+            let response = self
+                .client
+                .send_message(&MessageRequest {
+                    stream: false,
+                    ..message_request.clone()
+                })
+                .await
+                .map_err(|error| RuntimeError::new(error.to_string()))?;
+            response_to_events(response, out)
+        })
+    }
+}
+
+fn final_assistant_text(summary: &runtime::TurnSummary) -> String {
+    summary
+        .assistant_messages
+        .last()
+        .map(|message| {
+            message
+                .blocks
+                .iter()
+                .filter_map(|block| match block {
+                    ContentBlock::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("")
+        })
+        .unwrap_or_default()
+}
+
+fn collect_tool_uses(summary: &runtime::TurnSummary) -> Vec<serde_json::Value> {
+    summary
+        .assistant_messages
+        .iter()
+        .flat_map(|message| message.blocks.iter())
+        .filter_map(|block| match block {
+            ContentBlock::ToolUse { id, name, input } => Some(json!({
+                "id": id,
+                "name": name,
+                "input": input,
+            })),
+            _ => None,
+        })
+        .collect()
+}
+
+fn collect_tool_results(summary: &runtime::TurnSummary) -> Vec<serde_json::Value> {
+    summary
+        .tool_results
+        .iter()
+        .flat_map(|message| message.blocks.iter())
+        .filter_map(|block| match block {
+            ContentBlock::ToolResult {
+                tool_use_id,
+                tool_name,
+                output,
+                is_error,
+            } => Some(json!({
+                "tool_use_id": tool_use_id,
+                "tool_name": tool_name,
+                "output": output,
+                "is_error": is_error,
+            })),
+            _ => None,
+        })
+        .collect()
+}
+
+fn slash_command_completion_candidates() -> Vec<String> {
+    let mut candidates = slash_command_specs()
+        .iter()
+        .flat_map(|spec| {
+            std::iter::once(spec.name)
+                .chain(spec.aliases.iter().copied())
+                .map(|name| format!("/{name}"))
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    candidates.extend([
+        String::from("/vim"),
+        String::from("/exit"),
+        String::from("/quit"),
+    ]);
+    candidates.sort();
+    candidates.dedup();
+    candidates
+}
+
