@@ -467,3 +467,62 @@ impl LineEditor {
             if bytes_read == 0 {
                 return Ok(ReadOutcome::Exit);
             }
+
+            while matches!(buffer.chars().last(), Some('\n' | '\r')) {
+                buffer.pop();
+            }
+
+            if is_vim_toggle(&buffer) {
+                self.vim_enabled = !self.vim_enabled;
+                writeln!(
+                    stdout,
+                    "Vim mode {}.",
+                    if self.vim_enabled {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    }
+                )?;
+                continue;
+            }
+
+            return Ok(ReadOutcome::Submit(buffer));
+        }
+    }
+
+    fn handle_key_event(&mut self, session: &mut EditSession, key: KeyEvent) -> KeyAction {
+        if key.code != KeyCode::Tab {
+            self.completion_state = None;
+        }
+
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            match key.code {
+                KeyCode::Char('c' | 'C') => {
+                    return if session.has_input() {
+                        KeyAction::Cancel
+                    } else {
+                        KeyAction::Exit
+                    };
+                }
+                KeyCode::Char('j' | 'J') => {
+                    if session.mode != EditorMode::Normal && session.mode != EditorMode::Visual {
+                        session.insert_text("\n");
+                    }
+                    return KeyAction::Continue;
+                }
+                KeyCode::Char('d' | 'D') => {
+                    if session.current_len() == 0 {
+                        return KeyAction::Exit;
+                    }
+                    session.delete_char_under_cursor();
+                    return KeyAction::Continue;
+                }
+                _ => {}
+            }
+        }
+
+        match key.code {
+            KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                if session.mode != EditorMode::Normal && session.mode != EditorMode::Visual {
+                    session.insert_text("\n");
+                }
