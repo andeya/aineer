@@ -3495,3 +3495,145 @@ mod tests {
             .contains("Guide on using oh-my-codex plugin"));
 
         let dollar_result = execute_tool(
+            "Skill",
+            &json!({
+                "skill": "$help"
+            }),
+        )
+        .expect("Skill should accept $skill invocation form");
+        let dollar_output: serde_json::Value =
+            serde_json::from_str(&dollar_result).expect("valid json");
+        assert_eq!(dollar_output["skill"], "$help");
+        assert!(dollar_output["path"]
+            .as_str()
+            .expect("path")
+            .ends_with("/help/SKILL.md"));
+    }
+
+    #[test]
+    fn tool_search_supports_keyword_and_select_queries() {
+        let keyword = execute_tool(
+            "ToolSearch",
+            &json!({"query": "web current", "max_results": 3}),
+        )
+        .expect("ToolSearch should succeed");
+        let keyword_output: serde_json::Value = serde_json::from_str(&keyword).expect("valid json");
+        let matches = keyword_output["matches"].as_array().expect("matches");
+        assert!(matches.iter().any(|value| value == "WebSearch"));
+
+        let selected = execute_tool("ToolSearch", &json!({"query": "select:Agent,Skill"}))
+            .expect("ToolSearch should succeed");
+        let selected_output: serde_json::Value =
+            serde_json::from_str(&selected).expect("valid json");
+        assert_eq!(selected_output["matches"][0], "Agent");
+        assert_eq!(selected_output["matches"][1], "Skill");
+
+        let aliased = execute_tool("ToolSearch", &json!({"query": "AgentTool"}))
+            .expect("ToolSearch should support tool aliases");
+        let aliased_output: serde_json::Value = serde_json::from_str(&aliased).expect("valid json");
+        assert_eq!(aliased_output["matches"][0], "Agent");
+        assert_eq!(aliased_output["normalized_query"], "agent");
+
+        let selected_with_alias =
+            execute_tool("ToolSearch", &json!({"query": "select:AgentTool,Skill"}))
+                .expect("ToolSearch alias select should succeed");
+        let selected_with_alias_output: serde_json::Value =
+            serde_json::from_str(&selected_with_alias).expect("valid json");
+        assert_eq!(selected_with_alias_output["matches"][0], "Agent");
+        assert_eq!(selected_with_alias_output["matches"][1], "Skill");
+    }
+
+    #[test]
+    fn agent_persists_handoff_metadata() {
+        let _guard = env_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let dir = temp_path("agent-store");
+        std::env::set_var("CODINEER_AGENT_STORE", &dir);
+        let captured = Arc::new(Mutex::new(None::<AgentJob>));
+        let captured_for_spawn = Arc::clone(&captured);
+
+        let manifest = execute_agent_with_spawn(
+            AgentInput {
+                description: "Audit the branch".to_string(),
+                prompt: "Check tests and outstanding work.".to_string(),
+                subagent_type: Some("Explore".to_string()),
+                name: Some("ship-audit".to_string()),
+                model: None,
+            },
+            move |job| {
+                *captured_for_spawn
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(job);
+                Ok(())
+            },
+        )
+        .expect("Agent should succeed");
+        std::env::remove_var("CODINEER_AGENT_STORE");
+
+        assert_eq!(manifest.name, "ship-audit");
+        assert_eq!(manifest.subagent_type.as_deref(), Some("Explore"));
+        assert_eq!(manifest.status, "running");
+        assert!(!manifest.created_at.is_empty());
+        assert!(manifest.started_at.is_some());
+        assert!(manifest.completed_at.is_none());
+        let contents = std::fs::read_to_string(&manifest.output_file).expect("agent file exists");
+        let manifest_contents =
+            std::fs::read_to_string(&manifest.manifest_file).expect("manifest file exists");
+        assert!(contents.contains("Audit the branch"));
+        assert!(contents.contains("Check tests and outstanding work."));
+        assert!(manifest_contents.contains("\"subagentType\": \"Explore\""));
+        assert!(manifest_contents.contains("\"status\": \"running\""));
+        let captured_job = captured
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+            .expect("spawn job should be captured");
+        assert_eq!(captured_job.prompt, "Check tests and outstanding work.");
+        assert!(captured_job.allowed_tools.contains("read_file"));
+        assert!(!captured_job.allowed_tools.contains("Agent"));
+
+        let normalized = execute_tool(
+            "Agent",
+            &json!({
+                "description": "Verify the branch",
+                "prompt": "Check tests.",
+                "subagent_type": "explorer"
+            }),
+        )
+        .expect("Agent should normalize built-in aliases");
+        let normalized_output: serde_json::Value =
+            serde_json::from_str(&normalized).expect("valid json");
+        assert_eq!(normalized_output["subagentType"], "Explore");
+
+        let named = execute_tool(
+            "Agent",
+            &json!({
+                "description": "Review the branch",
+                "prompt": "Inspect diff.",
+                "name": "Ship Audit!!!"
+            }),
+        )
+        .expect("Agent should normalize explicit names");
+        let named_output: serde_json::Value = serde_json::from_str(&named).expect("valid json");
+        assert_eq!(named_output["name"], "ship-audit");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn agent_fake_runner_can_persist_completion_and_failure() {
+        let _guard = env_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let dir = temp_path("agent-runner");
+        std::env::set_var("CODINEER_AGENT_STORE", &dir);
+
+        let completed = execute_agent_with_spawn(
+            AgentInput {
+                description: "Complete the task".to_string(),
+                prompt: "Do the work".to_string(),
+                subagent_type: Some("Explore".to_string()),
+                name: Some("complete-task".to_string()),
+                model: Some("claude-sonnet-4-6".to_string()),
+            },
+            |job| {
