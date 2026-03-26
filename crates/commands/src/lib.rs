@@ -2067,3 +2067,146 @@ mod tests {
         );
         assert!(
             handle_slash_command("/debug-tool-call", &session, CompactionConfig::default())
+                .is_none()
+        );
+        assert!(
+            handle_slash_command("/model sonnet", &session, CompactionConfig::default()).is_none()
+        );
+        assert!(handle_slash_command(
+            "/permissions read-only",
+            &session,
+            CompactionConfig::default()
+        )
+        .is_none());
+        assert!(handle_slash_command("/clear", &session, CompactionConfig::default()).is_none());
+        assert!(
+            handle_slash_command("/clear --confirm", &session, CompactionConfig::default())
+                .is_none()
+        );
+        assert!(handle_slash_command("/cost", &session, CompactionConfig::default()).is_none());
+        assert!(handle_slash_command(
+            "/resume session.json",
+            &session,
+            CompactionConfig::default()
+        )
+        .is_none());
+        assert!(handle_slash_command("/config", &session, CompactionConfig::default()).is_none());
+        assert!(
+            handle_slash_command("/config env", &session, CompactionConfig::default()).is_none()
+        );
+        assert!(handle_slash_command("/diff", &session, CompactionConfig::default()).is_none());
+        assert!(handle_slash_command("/version", &session, CompactionConfig::default()).is_none());
+        assert!(
+            handle_slash_command("/export note.txt", &session, CompactionConfig::default())
+                .is_none()
+        );
+        assert!(
+            handle_slash_command("/session list", &session, CompactionConfig::default()).is_none()
+        );
+        assert!(
+            handle_slash_command("/plugins list", &session, CompactionConfig::default()).is_none()
+        );
+    }
+
+    #[test]
+    fn renders_plugins_report_with_name_version_and_status() {
+        let rendered = render_plugins_report(&[
+            PluginSummary {
+                metadata: PluginMetadata {
+                    id: "demo@external".to_string(),
+                    name: "demo".to_string(),
+                    version: "1.2.3".to_string(),
+                    description: "demo plugin".to_string(),
+                    kind: PluginKind::External,
+                    source: "demo".to_string(),
+                    default_enabled: false,
+                    root: None,
+                },
+                enabled: true,
+            },
+            PluginSummary {
+                metadata: PluginMetadata {
+                    id: "sample@external".to_string(),
+                    name: "sample".to_string(),
+                    version: "0.9.0".to_string(),
+                    description: "sample plugin".to_string(),
+                    kind: PluginKind::External,
+                    source: "sample".to_string(),
+                    default_enabled: false,
+                    root: None,
+                },
+                enabled: false,
+            },
+        ]);
+
+        assert!(rendered.contains("demo"));
+        assert!(rendered.contains("v1.2.3"));
+        assert!(rendered.contains("enabled"));
+        assert!(rendered.contains("sample"));
+        assert!(rendered.contains("v0.9.0"));
+        assert!(rendered.contains("disabled"));
+    }
+
+    #[test]
+    fn lists_agents_from_project_and_user_roots() {
+        let workspace = temp_dir("agents-workspace");
+        let project_agents = workspace.join(".codineer").join("agents");
+        let user_home = temp_dir("agents-home");
+        let user_agents = user_home.join(".codineer").join("agents");
+
+        write_agent(
+            &project_agents,
+            "planner",
+            "Project planner",
+            "gpt-5.4",
+            "medium",
+        );
+        write_agent(
+            &user_agents,
+            "planner",
+            "User planner",
+            "gpt-5.4-mini",
+            "high",
+        );
+        write_agent(
+            &user_agents,
+            "verifier",
+            "Verification agent",
+            "gpt-5.4-mini",
+            "high",
+        );
+
+        let roots = vec![
+            (DefinitionSource::Project, project_agents),
+            (DefinitionSource::User, user_agents),
+        ];
+        let report =
+            render_agents_report(&load_agents_from_roots(&roots).expect("agent roots should load"));
+
+        assert!(report.contains("Agents"));
+        assert!(report.contains("2 active agents"));
+        assert!(report.contains("Project (.codineer):"));
+        assert!(report.contains("planner · Project planner · gpt-5.4 · medium"));
+        assert!(report.contains("User (~/.codineer):"));
+        assert!(report.contains("(shadowed by Project (.codineer)) planner · User planner"));
+        assert!(report.contains("verifier · Verification agent · gpt-5.4-mini · high"));
+
+        let _ = fs::remove_dir_all(workspace);
+        let _ = fs::remove_dir_all(user_home);
+    }
+
+    #[test]
+    fn lists_skills_from_project_and_user_roots() {
+        let workspace = temp_dir("skills-workspace");
+        let project_skills = workspace.join(".codineer").join("skills");
+        let user_home = temp_dir("skills-home");
+        let user_skills = user_home.join(".codineer").join("skills");
+
+        write_skill(&project_skills, "plan", "Project planning guidance");
+        write_skill(&user_skills, "plan", "User planning guidance");
+        write_skill(&user_skills, "help", "Help guidance");
+
+        let roots = vec![
+            SkillRoot {
+                source: DefinitionSource::Project,
+                path: project_skills,
