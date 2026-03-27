@@ -2353,3 +2353,74 @@ mod tests {
         assert!(list.message.contains("starter"));
         assert!(list.message.contains("v0.1.0"));
         assert!(list.message.contains("disabled"));
+
+        let _ = fs::remove_dir_all(config_home);
+        let _ = fs::remove_dir_all(bundled_root);
+    }
+
+    #[test]
+    fn branch_and_worktree_commands_manage_git_state() {
+        // given
+        let repo = init_git_repo("branch-worktree");
+        let worktree_path = repo
+            .parent()
+            .expect("repo should have parent")
+            .join("branch-worktree-linked");
+
+        // when
+        let branch_list =
+            handle_branch_slash_command(Some("list"), None, &repo).expect("branch list succeeds");
+        let created = handle_branch_slash_command(Some("create"), Some("feature/demo"), &repo)
+            .expect("branch create succeeds");
+        let switched = handle_branch_slash_command(Some("switch"), Some("main"), &repo)
+            .expect("branch switch succeeds");
+        let added = handle_worktree_slash_command(
+            Some("add"),
+            Some(worktree_path.to_str().expect("utf8 path")),
+            Some("wt-demo"),
+            &repo,
+        )
+        .expect("worktree add succeeds");
+        let listed_worktrees =
+            handle_worktree_slash_command(Some("list"), None, None, &repo).expect("list succeeds");
+        let removed = handle_worktree_slash_command(
+            Some("remove"),
+            Some(worktree_path.to_str().expect("utf8 path")),
+            None,
+            &repo,
+        )
+        .expect("remove succeeds");
+
+        // then
+        assert!(branch_list.contains("main"));
+        assert!(created.contains("feature/demo"));
+        assert!(switched.contains("main"));
+        assert!(added.contains("wt-demo"));
+        assert!(listed_worktrees.contains(worktree_path.to_str().expect("utf8 path")));
+        assert!(removed.contains("Result           removed"));
+
+        let _ = fs::remove_dir_all(repo);
+        let _ = fs::remove_dir_all(worktree_path);
+    }
+
+    #[test]
+    fn commit_command_stages_and_commits_changes() {
+        // given
+        let repo = init_git_repo("commit-command");
+        fs::write(repo.join("notes.txt"), "hello\n").expect("write notes");
+
+        // when
+        let report =
+            handle_commit_slash_command("feat: add notes", &repo).expect("commit succeeds");
+        let status = run_command(&repo, "git", &["status", "--short"]);
+        let message = run_command(&repo, "git", &["log", "-1", "--pretty=%B"]);
+
+        // then
+        assert!(report.contains("Result           created"));
+        assert!(status.trim().is_empty());
+        assert_eq!(message.trim(), "feat: add notes");
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[cfg(unix)]
