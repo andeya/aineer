@@ -3654,3 +3654,69 @@ fn first_visible_line(text: &str) -> &str {
 fn format_bash_result(icon: &str, parsed: &serde_json::Value) -> String {
     let mut lines = vec![format!("{icon} \x1b[38;5;245mbash\x1b[0m")];
     if let Some(task_id) = parsed
+        .get("backgroundTaskId")
+        .and_then(|value| value.as_str())
+    {
+        write!(&mut lines[0], " backgrounded ({task_id})").expect("write to string");
+    } else if let Some(status) = parsed
+        .get("returnCodeInterpretation")
+        .and_then(|value| value.as_str())
+        .filter(|status| !status.is_empty())
+    {
+        write!(&mut lines[0], " {status}").expect("write to string");
+    }
+
+    if let Some(stdout) = parsed.get("stdout").and_then(|value| value.as_str()) {
+        if !stdout.trim().is_empty() {
+            lines.push(truncate_output_for_display(
+                stdout,
+                TOOL_OUTPUT_DISPLAY_MAX_LINES,
+                TOOL_OUTPUT_DISPLAY_MAX_CHARS,
+            ));
+        }
+    }
+    if let Some(stderr) = parsed.get("stderr").and_then(|value| value.as_str()) {
+        if !stderr.trim().is_empty() {
+            lines.push(format!(
+                "\x1b[38;5;203m{}\x1b[0m",
+                truncate_output_for_display(
+                    stderr,
+                    TOOL_OUTPUT_DISPLAY_MAX_LINES,
+                    TOOL_OUTPUT_DISPLAY_MAX_CHARS,
+                )
+            ));
+        }
+    }
+
+    lines.join("\n\n")
+}
+
+fn format_read_result(icon: &str, parsed: &serde_json::Value) -> String {
+    let file = parsed.get("file").unwrap_or(parsed);
+    let path = extract_tool_path(file);
+    let start_line = file
+        .get("startLine")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(1);
+    let num_lines = file
+        .get("numLines")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let total_lines = file
+        .get("totalLines")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(num_lines);
+    let content = file
+        .get("content")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default();
+    let end_line = start_line.saturating_add(num_lines.saturating_sub(1));
+
+    format!(
+        "{icon} \x1b[2m📄 Read {path} (lines {}-{} of {})\x1b[0m\n{}",
+        start_line,
+        end_line.max(start_line),
+        total_lines,
+        truncate_output_for_display(content, READ_DISPLAY_MAX_LINES, READ_DISPLAY_MAX_CHARS)
+    )
+}
