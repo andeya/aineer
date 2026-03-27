@@ -369,3 +369,56 @@ fn framework_notes(detection: &RepoDetection) -> Vec<String> {
     lines
 }
 
+#[cfg(test)]
+mod tests {
+    use super::{initialize_repo, render_init_codineer_md};
+    use std::fs;
+    use std::path::Path;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir() -> std::path::PathBuf {
+        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be after epoch")
+            .as_nanos();
+        let id = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        std::env::temp_dir().join(format!("codineer-init-{nanos}-{id}"))
+    }
+
+    #[test]
+    fn initialize_repo_creates_expected_files_and_gitignore_entries() {
+        let root = temp_dir();
+        fs::create_dir_all(root.join("rust")).expect("create rust dir");
+        fs::write(root.join("rust").join("Cargo.toml"), "[workspace]\n").expect("write cargo");
+
+        let report = initialize_repo(&root).expect("init should succeed");
+        let rendered = report.render();
+        assert!(rendered.contains(".codineer/       created"));
+        assert!(rendered.contains(".codineer.json   created"));
+        assert!(rendered.contains(".gitignore       created"));
+        assert!(rendered.contains("CODINEER.md      created"));
+        assert!(root.join(".codineer").is_dir());
+        assert!(root.join(".codineer.json").is_file());
+        assert!(root.join("CODINEER.md").is_file());
+        assert_eq!(
+            fs::read_to_string(root.join(".codineer.json")).expect("read codineer json"),
+            concat!(
+                "{\n",
+                "  \"permissions\": {\n",
+                "    \"defaultMode\": \"dontAsk\"\n",
+                "  }\n",
+                "}\n",
+            )
+        );
+        let gitignore = fs::read_to_string(root.join(".gitignore")).expect("read gitignore");
+        assert!(gitignore.contains(".codineer/settings.local.json"));
+        assert!(gitignore.contains(".codineer/sessions/"));
+        let codineer_md = fs::read_to_string(root.join("CODINEER.md")).expect("read codineer md");
+        assert!(codineer_md.contains("Languages: Rust."));
+        assert!(codineer_md.contains("cargo clippy --workspace --all-targets -- -D warnings"));
+
+        fs::remove_dir_all(root).expect("cleanup temp dir");
+    }
+
+    #[test]
