@@ -2281,3 +2281,75 @@ mod tests {
         assert!(install.message.contains("installed demo@external"));
         assert!(install.message.contains("Name             demo"));
         assert!(install.message.contains("Version          1.0.0"));
+        assert!(install.message.contains("Status           enabled"));
+
+        let list = handle_plugins_slash_command(Some("list"), None, &mut manager)
+            .expect("list command should succeed");
+        assert!(!list.reload_runtime);
+        assert!(list.message.contains("demo"));
+        assert!(list.message.contains("v1.0.0"));
+        assert!(list.message.contains("enabled"));
+
+        let _ = fs::remove_dir_all(config_home);
+        let _ = fs::remove_dir_all(source_root);
+    }
+
+    #[test]
+    fn enables_and_disables_plugin_by_name() {
+        let config_home = temp_dir("toggle-home");
+        let source_root = temp_dir("toggle-source");
+        write_external_plugin(&source_root, "demo", "1.0.0");
+
+        let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+        handle_plugins_slash_command(
+            Some("install"),
+            Some(source_root.to_str().expect("utf8 path")),
+            &mut manager,
+        )
+        .expect("install command should succeed");
+
+        let disable = handle_plugins_slash_command(Some("disable"), Some("demo"), &mut manager)
+            .expect("disable command should succeed");
+        assert!(disable.reload_runtime);
+        assert!(disable.message.contains("disabled demo@external"));
+        assert!(disable.message.contains("Name             demo"));
+        assert!(disable.message.contains("Status           disabled"));
+
+        let list = handle_plugins_slash_command(Some("list"), None, &mut manager)
+            .expect("list command should succeed");
+        assert!(list.message.contains("demo"));
+        assert!(list.message.contains("disabled"));
+
+        let enable = handle_plugins_slash_command(Some("enable"), Some("demo"), &mut manager)
+            .expect("enable command should succeed");
+        assert!(enable.reload_runtime);
+        assert!(enable.message.contains("enabled demo@external"));
+        assert!(enable.message.contains("Name             demo"));
+        assert!(enable.message.contains("Status           enabled"));
+
+        let list = handle_plugins_slash_command(Some("list"), None, &mut manager)
+            .expect("list command should succeed");
+        assert!(list.message.contains("demo"));
+        assert!(list.message.contains("enabled"));
+
+        let _ = fs::remove_dir_all(config_home);
+        let _ = fs::remove_dir_all(source_root);
+    }
+
+    #[test]
+    fn lists_auto_installed_bundled_plugins_with_status() {
+        let config_home = temp_dir("bundled-home");
+        let bundled_root = temp_dir("bundled-root");
+        let bundled_plugin = bundled_root.join("starter");
+        write_bundled_plugin(&bundled_plugin, "starter", "0.1.0", false);
+
+        let mut config = PluginManagerConfig::new(&config_home);
+        config.bundled_root = Some(bundled_root.clone());
+        let mut manager = PluginManager::new(config);
+
+        let list = handle_plugins_slash_command(Some("list"), None, &mut manager)
+            .expect("list command should succeed");
+        assert!(!list.reload_runtime);
+        assert!(list.message.contains("starter"));
+        assert!(list.message.contains("v0.1.0"));
+        assert!(list.message.contains("disabled"));
