@@ -2424,3 +2424,74 @@ mod tests {
     }
 
     #[cfg(unix)]
+    #[test]
+    fn commit_push_pr_command_commits_pushes_and_creates_pr() {
+        // given
+        let _guard = env_lock();
+        let repo = init_git_repo("commit-push-pr");
+        let remote = init_bare_repo("commit-push-pr-remote");
+        run_command(
+            &repo,
+            "git",
+            &[
+                "remote",
+                "add",
+                "origin",
+                remote.to_str().expect("utf8 remote"),
+            ],
+        );
+        run_command(&repo, "git", &["push", "-u", "origin", "main"]);
+        fs::write(repo.join("feature.txt"), "feature\n").expect("write feature file");
+
+        let fake_bin = temp_dir("fake-gh-bin");
+        let gh_log = fake_bin.join("gh.log");
+        write_fake_gh(&fake_bin, &gh_log, "https://example.com/pr/123");
+
+        let previous_path = env::var_os("PATH");
+        let mut new_path = fake_bin.display().to_string();
+        if let Some(path) = &previous_path {
+            new_path.push(':');
+            new_path.push_str(&path.to_string_lossy());
+        }
+        env::set_var("PATH", &new_path);
+        let previous_safeuser = env::var_os("SAFEUSER");
+        env::set_var("SAFEUSER", "tester");
+
+        let request = CommitPushPrRequest {
+            commit_message: Some("feat: add feature file".to_string()),
+            pr_title: "Add feature file".to_string(),
+            pr_body: "## Summary\n- add feature file".to_string(),
+            branch_name_hint: "Add feature file".to_string(),
+        };
+
+        // when
+        let report =
+            handle_commit_push_pr_slash_command(&request, &repo).expect("commit-push-pr succeeds");
+        let branch = run_command(&repo, "git", &["branch", "--show-current"]);
+        let message = run_command(&repo, "git", &["log", "-1", "--pretty=%B"]);
+        let gh_invocations = fs::read_to_string(&gh_log).expect("gh log should exist");
+
+        // then
+        assert!(report.contains("Result           created"));
+        assert!(report.contains("URL              https://example.com/pr/123"));
+        assert_eq!(branch.trim(), "tester/add-feature-file");
+        assert_eq!(message.trim(), "feat: add feature file");
+        assert!(gh_invocations.contains("pr create"));
+        assert!(gh_invocations.contains("--base main"));
+
+        if let Some(path) = previous_path {
+            env::set_var("PATH", path);
+        } else {
+            env::remove_var("PATH");
+        }
+        if let Some(safeuser) = previous_safeuser {
+            env::set_var("SAFEUSER", safeuser);
+        } else {
+            env::remove_var("SAFEUSER");
+        }
+
+        let _ = fs::remove_dir_all(repo);
+        let _ = fs::remove_dir_all(remote);
+        let _ = fs::remove_dir_all(fake_bin);
+    }
+}
