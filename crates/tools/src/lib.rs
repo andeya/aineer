@@ -3709,3 +3709,74 @@ mod tests {
         assert!(spawn_error_manifest.contains("thread creation failed"));
 
         std::env::remove_var("CODINEER_AGENT_STORE");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn agent_tool_subset_mapping_is_expected() {
+        let general = allowed_tools_for_subagent("general-purpose");
+        assert!(general.contains("bash"));
+        assert!(general.contains("write_file"));
+        assert!(!general.contains("Agent"));
+
+        let explore = allowed_tools_for_subagent("Explore");
+        assert!(explore.contains("read_file"));
+        assert!(explore.contains("grep_search"));
+        assert!(!explore.contains("bash"));
+
+        let plan = allowed_tools_for_subagent("Plan");
+        assert!(plan.contains("TodoWrite"));
+        assert!(plan.contains("StructuredOutput"));
+        assert!(!plan.contains("Agent"));
+
+        let verification = allowed_tools_for_subagent("Verification");
+        assert!(verification.contains("bash"));
+        assert!(verification.contains("PowerShell"));
+        assert!(!verification.contains("write_file"));
+    }
+
+    #[derive(Debug)]
+    struct MockSubagentApiClient {
+        calls: usize,
+        input_path: String,
+    }
+
+    impl runtime::ApiClient for MockSubagentApiClient {
+        fn stream(&mut self, request: ApiRequest) -> Result<Vec<AssistantEvent>, RuntimeError> {
+            self.calls += 1;
+            match self.calls {
+                1 => {
+                    assert_eq!(request.messages.len(), 1);
+                    Ok(vec![
+                        AssistantEvent::ToolUse {
+                            id: "tool-1".to_string(),
+                            name: "read_file".to_string(),
+                            input: json!({ "path": self.input_path }).to_string(),
+                        },
+                        AssistantEvent::MessageStop,
+                    ])
+                }
+                2 => {
+                    assert!(request.messages.len() >= 3);
+                    Ok(vec![
+                        AssistantEvent::TextDelta("Scope: completed mock review".to_string()),
+                        AssistantEvent::MessageStop,
+                    ])
+                }
+                _ => panic!("unexpected mock stream call"),
+            }
+        }
+    }
+
+    #[test]
+    fn subagent_runtime_executes_tool_loop_with_isolated_session() {
+        let _guard = env_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let tmp = std::env::temp_dir()
+            .canonicalize()
+            .unwrap_or_else(|_| std::env::temp_dir());
+        std::env::set_var("CODINEER_WORKSPACE_ROOT", &tmp);
+        let path = temp_path("subagent-input.txt");
+        std::fs::write(&path, "hello from child").expect("write input file");
+
