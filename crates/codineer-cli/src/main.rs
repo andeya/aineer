@@ -3920,3 +3920,69 @@ fn truncate_output_for_display(content: &str, max_lines: usize, max_chars: usize
         }
 
         let line_chars = line.chars().count();
+        if line_chars > available {
+            preview_lines.push(line.chars().take(available).collect::<String>());
+            truncated = true;
+            break;
+        }
+
+        preview_lines.push(line.to_string());
+        used_chars += newline_cost + line_chars;
+    }
+
+    let mut preview = preview_lines.join("\n");
+    if truncated {
+        if !preview.is_empty() {
+            preview.push('\n');
+        }
+        preview.push_str(DISPLAY_TRUNCATION_NOTICE);
+    }
+    preview
+}
+
+fn push_output_block(
+    block: OutputContentBlock,
+    out: &mut (impl Write + ?Sized),
+    events: &mut Vec<AssistantEvent>,
+    pending_tool: &mut Option<(String, String, String)>,
+    streaming_tool_input: bool,
+) -> Result<(), RuntimeError> {
+    match block {
+        OutputContentBlock::Text { text } => {
+            if !text.is_empty() {
+                let rendered = TerminalRenderer::new().markdown_to_ansi(&text);
+                write!(out, "{rendered}")
+                    .and_then(|()| out.flush())
+                    .map_err(|error| RuntimeError::new(error.to_string()))?;
+                events.push(AssistantEvent::TextDelta(text));
+            }
+        }
+        OutputContentBlock::ToolUse { id, name, input } => {
+            // During streaming, the initial content_block_start has an empty input ({}).
+            // The real input arrives via input_json_delta events. In
+            // non-streaming responses, preserve a legitimate empty object.
+            let initial_input = if streaming_tool_input
+                && input.is_object()
+                && input.as_object().is_some_and(serde_json::Map::is_empty)
+            {
+                String::new()
+            } else {
+                input.to_string()
+            };
+            *pending_tool = Some((id, name, initial_input));
+        }
+        OutputContentBlock::Thinking { .. } | OutputContentBlock::RedactedThinking { .. } => {}
+    }
+    Ok(())
+}
+
+fn response_to_events(
+    response: MessageResponse,
+    out: &mut (impl Write + ?Sized),
+) -> Result<Vec<AssistantEvent>, RuntimeError> {
+    let mut events = Vec::new();
+    let mut pending_tool = None;
+
+    for block in response.content {
+        push_output_block(block, out, &mut events, &mut pending_tool, false)?;
+        if let Some((id, name, input)) = pending_tool.take() {
