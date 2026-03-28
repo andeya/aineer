@@ -3853,3 +3853,70 @@ fn format_grep_result(icon: &str, parsed: &serde_json::Value) -> String {
         summary
     }
 }
+
+fn format_generic_tool_result(icon: &str, name: &str, parsed: &serde_json::Value) -> String {
+    let rendered_output = match parsed {
+        serde_json::Value::String(text) => text.clone(),
+        serde_json::Value::Null => String::new(),
+        serde_json::Value::Object(_) | serde_json::Value::Array(_) => {
+            serde_json::to_string_pretty(parsed).unwrap_or_else(|_| parsed.to_string())
+        }
+        _ => parsed.to_string(),
+    };
+    let preview = truncate_output_for_display(
+        &rendered_output,
+        TOOL_OUTPUT_DISPLAY_MAX_LINES,
+        TOOL_OUTPUT_DISPLAY_MAX_CHARS,
+    );
+
+    if preview.is_empty() {
+        format!("{icon} \x1b[38;5;245m{name}\x1b[0m")
+    } else if preview.contains('\n') {
+        format!("{icon} \x1b[38;5;245m{name}\x1b[0m\n{preview}")
+    } else {
+        format!("{icon} \x1b[38;5;245m{name}:\x1b[0m {preview}")
+    }
+}
+
+fn summarize_tool_payload(payload: &str) -> String {
+    let compact = match serde_json::from_str::<serde_json::Value>(payload) {
+        Ok(value) => value.to_string(),
+        Err(_) => payload.trim().to_string(),
+    };
+    truncate_for_summary(&compact, 96)
+}
+
+fn truncate_for_summary(value: &str, limit: usize) -> String {
+    let mut chars = value.chars();
+    let truncated = chars.by_ref().take(limit).collect::<String>();
+    if chars.next().is_some() {
+        format!("{truncated}…")
+    } else {
+        truncated
+    }
+}
+
+fn truncate_output_for_display(content: &str, max_lines: usize, max_chars: usize) -> String {
+    let original = content.trim_end_matches('\n');
+    if original.is_empty() {
+        return String::new();
+    }
+
+    let mut preview_lines = Vec::new();
+    let mut used_chars = 0usize;
+    let mut truncated = false;
+
+    for (index, line) in original.lines().enumerate() {
+        if index >= max_lines {
+            truncated = true;
+            break;
+        }
+
+        let newline_cost = usize::from(!preview_lines.is_empty());
+        let available = max_chars.saturating_sub(used_chars + newline_cost);
+        if available == 0 {
+            truncated = true;
+            break;
+        }
+
+        let line_chars = line.chars().count();
