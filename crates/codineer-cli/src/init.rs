@@ -422,3 +422,56 @@ mod tests {
     }
 
     #[test]
+    fn initialize_repo_is_idempotent_and_preserves_existing_files() {
+        let root = temp_dir();
+        fs::create_dir_all(&root).expect("create root");
+        fs::write(root.join("CODINEER.md"), "custom guidance\n")
+            .expect("write existing codineer md");
+        fs::write(root.join(".gitignore"), ".codineer/settings.local.json\n")
+            .expect("write gitignore");
+
+        let first = initialize_repo(&root).expect("first init should succeed");
+        assert!(first
+            .render()
+            .contains("CODINEER.md      skipped (already exists)"));
+        let second = initialize_repo(&root).expect("second init should succeed");
+        let second_rendered = second.render();
+        assert!(second_rendered.contains(".codineer/       skipped (already exists)"));
+        assert!(second_rendered.contains(".codineer.json   skipped (already exists)"));
+        assert!(second_rendered.contains(".gitignore       skipped (already exists)"));
+        assert!(second_rendered.contains("CODINEER.md      skipped (already exists)"));
+        assert_eq!(
+            fs::read_to_string(root.join("CODINEER.md")).expect("read existing codineer md"),
+            "custom guidance\n"
+        );
+        let gitignore = fs::read_to_string(root.join(".gitignore")).expect("read gitignore");
+        assert_eq!(
+            gitignore.matches(".codineer/settings.local.json").count(),
+            1
+        );
+        assert_eq!(gitignore.matches(".codineer/sessions/").count(), 1);
+
+        fs::remove_dir_all(root).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn render_init_template_mentions_detected_python_and_nextjs_markers() {
+        let root = temp_dir();
+        fs::create_dir_all(&root).expect("create root");
+        fs::write(root.join("pyproject.toml"), "[project]\nname = \"demo\"\n")
+            .expect("write pyproject");
+        fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"next":"14.0.0","react":"18.0.0"},"devDependencies":{"typescript":"5.0.0"}}"#,
+        )
+        .expect("write package json");
+
+        let rendered = render_init_codineer_md(Path::new(&root));
+        assert!(rendered.contains("Languages: Python, TypeScript."));
+        assert!(rendered.contains("Frameworks/tooling markers: Next.js, React."));
+        assert!(rendered.contains("pyproject.toml"));
+        assert!(rendered.contains("Next.js detected"));
+
+        fs::remove_dir_all(root).expect("cleanup temp dir");
+    }
+}
