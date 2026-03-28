@@ -3994,3 +3994,74 @@ mod tests {
         .expect("bash background should succeed");
         let background_output: serde_json::Value = serde_json::from_str(&background).expect("json");
         assert!(background_output["backgroundTaskId"].as_str().is_some());
+        assert_eq!(background_output["noOutputExpected"], true);
+    }
+
+    #[test]
+    fn file_tools_cover_read_write_and_edit_behaviors() {
+        let _guard = env_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let root = temp_path("fs-suite");
+        fs::create_dir_all(&root).expect("create root");
+        let original_dir = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(&root).expect("set cwd");
+
+        let write_create = execute_tool(
+            "write_file",
+            &json!({ "path": "nested/demo.txt", "content": "alpha\nbeta\nalpha\n" }),
+        )
+        .expect("write create should succeed");
+        let write_create_output: serde_json::Value =
+            serde_json::from_str(&write_create).expect("json");
+        assert_eq!(write_create_output["type"], "create");
+        assert!(root.join("nested/demo.txt").exists());
+
+        let write_update = execute_tool(
+            "write_file",
+            &json!({ "path": "nested/demo.txt", "content": "alpha\nbeta\ngamma\n" }),
+        )
+        .expect("write update should succeed");
+        let write_update_output: serde_json::Value =
+            serde_json::from_str(&write_update).expect("json");
+        assert_eq!(write_update_output["type"], "update");
+        assert_eq!(write_update_output["originalFile"], "alpha\nbeta\nalpha\n");
+
+        let read_full = execute_tool("read_file", &json!({ "path": "nested/demo.txt" }))
+            .expect("read full should succeed");
+        let read_full_output: serde_json::Value = serde_json::from_str(&read_full).expect("json");
+        assert_eq!(read_full_output["file"]["content"], "alpha\nbeta\ngamma");
+        assert_eq!(read_full_output["file"]["startLine"], 1);
+
+        let read_slice = execute_tool(
+            "read_file",
+            &json!({ "path": "nested/demo.txt", "offset": 1, "limit": 1 }),
+        )
+        .expect("read slice should succeed");
+        let read_slice_output: serde_json::Value = serde_json::from_str(&read_slice).expect("json");
+        assert_eq!(read_slice_output["file"]["content"], "beta");
+        assert_eq!(read_slice_output["file"]["startLine"], 2);
+
+        let read_past_end = execute_tool(
+            "read_file",
+            &json!({ "path": "nested/demo.txt", "offset": 50 }),
+        )
+        .expect("read past EOF should succeed");
+        let read_past_end_output: serde_json::Value =
+            serde_json::from_str(&read_past_end).expect("json");
+        assert_eq!(read_past_end_output["file"]["content"], "");
+        assert_eq!(read_past_end_output["file"]["startLine"], 4);
+
+        let read_error = execute_tool("read_file", &json!({ "path": "missing.txt" }))
+            .expect_err("missing file should fail");
+        assert!(!read_error.is_empty());
+
+        let edit_once = execute_tool(
+            "edit_file",
+            &json!({ "path": "nested/demo.txt", "old_string": "alpha", "new_string": "omega" }),
+        )
+        .expect("single edit should succeed");
+        let edit_once_output: serde_json::Value = serde_json::from_str(&edit_once).expect("json");
+        assert_eq!(edit_once_output["replaceAll"], false);
+        assert_eq!(
+            fs::read_to_string(root.join("nested/demo.txt")).expect("read file"),
