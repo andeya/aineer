@@ -4137,3 +4137,74 @@ mod tests {
         let glob_error = execute_tool("glob_search", &json!({ "pattern": "[" }))
             .expect_err("invalid glob should fail");
         assert!(!glob_error.is_empty());
+
+        let grep_content = execute_tool(
+            "grep_search",
+            &json!({
+                "pattern": "alpha",
+                "path": "nested",
+                "glob": "*.rs",
+                "output_mode": "content",
+                "-n": true,
+                "head_limit": 1,
+                "offset": 1
+            }),
+        )
+        .expect("grep content should succeed");
+        let grep_content_output: serde_json::Value =
+            serde_json::from_str(&grep_content).expect("json");
+        assert_eq!(grep_content_output["numFiles"], 0);
+        assert!(grep_content_output["appliedLimit"].is_null());
+        assert_eq!(grep_content_output["appliedOffset"], 1);
+        assert!(grep_content_output["content"]
+            .as_str()
+            .expect("content")
+            .contains("let alpha = 2;"));
+
+        let grep_count = execute_tool(
+            "grep_search",
+            &json!({ "pattern": "alpha", "path": "nested", "output_mode": "count" }),
+        )
+        .expect("grep count should succeed");
+        let grep_count_output: serde_json::Value = serde_json::from_str(&grep_count).expect("json");
+        assert_eq!(grep_count_output["numMatches"], 3);
+
+        let grep_error = execute_tool(
+            "grep_search",
+            &json!({ "pattern": "(alpha", "path": "nested" }),
+        )
+        .expect_err("invalid regex should fail");
+        assert!(!grep_error.is_empty());
+
+        std::env::set_current_dir(&original_dir).expect("restore cwd");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn sleep_waits_and_reports_duration() {
+        let started = std::time::Instant::now();
+        let result =
+            execute_tool("Sleep", &json!({"duration_ms": 20})).expect("Sleep should succeed");
+        let elapsed = started.elapsed();
+        let output: serde_json::Value = serde_json::from_str(&result).expect("json");
+        assert_eq!(output["duration_ms"], 20);
+        assert!(output["message"]
+            .as_str()
+            .expect("message")
+            .contains("Slept for 20ms"));
+        assert!(elapsed >= Duration::from_millis(15));
+    }
+
+    #[test]
+    fn brief_returns_sent_message_and_attachment_metadata() {
+        let attachment = std::env::temp_dir().join(format!(
+            "codineer-brief-{}.png",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
+        std::fs::write(&attachment, b"png-data").expect("write attachment");
+
+        let result = execute_tool(
+            "SendUserMessage",
