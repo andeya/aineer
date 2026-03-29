@@ -4065,3 +4065,75 @@ mod tests {
         assert_eq!(edit_once_output["replaceAll"], false);
         assert_eq!(
             fs::read_to_string(root.join("nested/demo.txt")).expect("read file"),
+            "omega\nbeta\ngamma\n"
+        );
+
+        execute_tool(
+            "write_file",
+            &json!({ "path": "nested/demo.txt", "content": "alpha\nbeta\nalpha\n" }),
+        )
+        .expect("reset file");
+        let edit_all = execute_tool(
+            "edit_file",
+            &json!({
+                "path": "nested/demo.txt",
+                "old_string": "alpha",
+                "new_string": "omega",
+                "replace_all": true
+            }),
+        )
+        .expect("replace all should succeed");
+        let edit_all_output: serde_json::Value = serde_json::from_str(&edit_all).expect("json");
+        assert_eq!(edit_all_output["replaceAll"], true);
+        assert_eq!(
+            fs::read_to_string(root.join("nested/demo.txt")).expect("read file"),
+            "omega\nbeta\nomega\n"
+        );
+
+        let edit_same = execute_tool(
+            "edit_file",
+            &json!({ "path": "nested/demo.txt", "old_string": "omega", "new_string": "omega" }),
+        )
+        .expect_err("identical old/new should fail");
+        assert!(edit_same.contains("must differ"));
+
+        let edit_missing = execute_tool(
+            "edit_file",
+            &json!({ "path": "nested/demo.txt", "old_string": "missing", "new_string": "omega" }),
+        )
+        .expect_err("missing substring should fail");
+        assert!(edit_missing.contains("old_string not found"));
+
+        std::env::set_current_dir(&original_dir).expect("restore cwd");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn glob_and_grep_tools_cover_success_and_errors() {
+        let _guard = env_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let root = temp_path("search-suite");
+        fs::create_dir_all(root.join("nested")).expect("create root");
+        let original_dir = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(&root).expect("set cwd");
+
+        fs::write(
+            root.join("nested/lib.rs"),
+            "fn main() {}\nlet alpha = 1;\nlet alpha = 2;\n",
+        )
+        .expect("write rust file");
+        fs::write(root.join("nested/notes.txt"), "alpha\nbeta\n").expect("write txt file");
+
+        let globbed = execute_tool("glob_search", &json!({ "pattern": "nested/*.rs" }))
+            .expect("glob should succeed");
+        let globbed_output: serde_json::Value = serde_json::from_str(&globbed).expect("json");
+        assert_eq!(globbed_output["numFiles"], 1);
+        assert!(globbed_output["filenames"][0]
+            .as_str()
+            .expect("filename")
+            .ends_with("nested/lib.rs"));
+
+        let glob_error = execute_tool("glob_search", &json!({ "pattern": "[" }))
+            .expect_err("invalid glob should fail");
+        assert!(!glob_error.is_empty());
