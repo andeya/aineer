@@ -4208,3 +4208,74 @@ mod tests {
 
         let result = execute_tool(
             "SendUserMessage",
+            &json!({
+                "message": "hello user",
+                "attachments": [attachment.display().to_string()],
+                "status": "normal"
+            }),
+        )
+        .expect("SendUserMessage should succeed");
+
+        let output: serde_json::Value = serde_json::from_str(&result).expect("json");
+        assert_eq!(output["message"], "hello user");
+        assert!(output["sentAt"].as_str().is_some());
+        assert_eq!(output["attachments"][0]["isImage"], true);
+        let _ = std::fs::remove_file(attachment);
+    }
+
+    #[test]
+    fn config_reads_and_writes_supported_values() {
+        let _guard = env_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let root = std::env::temp_dir().join(format!(
+            "codineer-config-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
+        let home = root.join("home");
+        let cwd = root.join("cwd");
+        std::fs::create_dir_all(home.join(".codineer")).expect("home dir");
+        std::fs::create_dir_all(cwd.join(".codineer")).expect("cwd dir");
+        std::fs::write(
+            home.join(".codineer").join("settings.json"),
+            r#"{"verbose":false}"#,
+        )
+        .expect("write global settings");
+
+        let original_home = std::env::var("HOME").ok();
+        let original_config_home = std::env::var("CODINEER_CONFIG_HOME").ok();
+        let original_dir = std::env::current_dir().expect("cwd");
+        std::env::set_var("HOME", &home);
+        std::env::remove_var("CODINEER_CONFIG_HOME");
+        std::env::set_current_dir(&cwd).expect("set cwd");
+
+        let get = execute_tool("Config", &json!({"setting": "verbose"})).expect("get config");
+        let get_output: serde_json::Value = serde_json::from_str(&get).expect("json");
+        assert_eq!(get_output["value"], false);
+
+        let set = execute_tool(
+            "Config",
+            &json!({"setting": "permissions.defaultMode", "value": "plan"}),
+        )
+        .expect("set config");
+        let set_output: serde_json::Value = serde_json::from_str(&set).expect("json");
+        assert_eq!(set_output["operation"], "set");
+        assert_eq!(set_output["newValue"], "plan");
+
+        let invalid = execute_tool(
+            "Config",
+            &json!({"setting": "permissions.defaultMode", "value": "bogus"}),
+        )
+        .expect_err("invalid config value should error");
+        assert!(invalid.contains("Invalid value"));
+
+        let unknown =
+            execute_tool("Config", &json!({"setting": "nope"})).expect("unknown setting result");
+        let unknown_output: serde_json::Value = serde_json::from_str(&unknown).expect("json");
+        assert_eq!(unknown_output["success"], false);
+
+        std::env::set_current_dir(&original_dir).expect("restore cwd");
+        match original_home {
