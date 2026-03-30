@@ -4119,3 +4119,136 @@ impl ToolExecutor for CliToolExecutor {
                         .stream_markdown(&markdown, &mut io::stdout())
                         .map_err(|stream_error| ToolError::new(stream_error.to_string()))?;
                 }
+                Err(ToolError::new(error))
+            }
+        }
+    }
+}
+
+fn permission_policy(mode: PermissionMode, tool_registry: &GlobalToolRegistry) -> PermissionPolicy {
+    tool_registry.permission_specs(None).into_iter().fold(
+        PermissionPolicy::new(mode),
+        |policy, (name, required_permission)| {
+            policy.with_tool_requirement(name, required_permission)
+        },
+    )
+}
+
+fn convert_messages(messages: &[ConversationMessage]) -> Vec<InputMessage> {
+    messages
+        .iter()
+        .filter_map(|message| {
+            let role = match message.role {
+                MessageRole::System | MessageRole::User | MessageRole::Tool => "user",
+                MessageRole::Assistant => "assistant",
+            };
+            let content = message
+                .blocks
+                .iter()
+                .map(|block| match block {
+                    ContentBlock::Text { text } => InputContentBlock::Text { text: text.clone() },
+                    ContentBlock::ToolUse { id, name, input } => InputContentBlock::ToolUse {
+                        id: id.clone(),
+                        name: name.clone(),
+                        input: serde_json::from_str(input)
+                            .unwrap_or_else(|_| serde_json::json!({ "raw": input })),
+                    },
+                    ContentBlock::ToolResult {
+                        tool_use_id,
+                        output,
+                        is_error,
+                        ..
+                    } => InputContentBlock::ToolResult {
+                        tool_use_id: tool_use_id.clone(),
+                        content: vec![ToolResultContentBlock::Text {
+                            text: output.clone(),
+                        }],
+                        is_error: *is_error,
+                    },
+                })
+                .collect::<Vec<_>>();
+            (!content.is_empty()).then(|| InputMessage {
+                role: role.to_string(),
+                content,
+            })
+        })
+        .collect()
+}
+
+fn print_help_section(out: &mut impl Write, title: &str, entries: &[&str]) -> io::Result<()> {
+    writeln!(out, "{title}")?;
+    for entry in entries {
+        writeln!(out, "{entry}")?;
+    }
+    writeln!(out)
+}
+
+fn print_help_to(out: &mut impl Write) -> io::Result<()> {
+    writeln!(out, "Codineer CLI v{VERSION}")?;
+    writeln!(
+        out,
+        "  Interactive coding assistant for the current workspace."
+    )?;
+    writeln!(out)?;
+    print_help_section(
+        out,
+        "Quick start",
+        &[
+            "  codineer                                  Start the interactive REPL",
+            "  codineer \"summarize this repo\"            Run one prompt and exit",
+            "  codineer prompt \"explain src/main.rs\"     Explicit one-shot prompt",
+            "  codineer --resume SESSION.json /status    Inspect a saved session",
+        ],
+    )?;
+    print_help_section(
+        out,
+        "Interactive essentials",
+        &[
+            "  /help                                 Browse the full slash command map",
+            "  /status                               Inspect session + workspace state",
+            "  /model <name>                         Switch models mid-session",
+            "  /permissions <mode>                   Adjust tool access",
+            "  Tab                                   Complete slash commands",
+            "  /vim                                  Toggle modal editing",
+            "  Shift+Enter / Ctrl+J                  Insert a newline",
+        ],
+    )?;
+    print_help_section(
+        out,
+        "Commands",
+        &[
+            "  codineer help                             Show this help message",
+            "  codineer agents                           List configured agents",
+            "  codineer skills                           List installed skills",
+            "  codineer system-prompt [--cwd PATH] [--date YYYY-MM-DD]",
+            "  codineer login                            Start the OAuth login flow",
+            "  codineer logout                           Clear saved OAuth credentials",
+            "  codineer init                             Scaffold CODINEER.md + local files",
+        ],
+    )?;
+    print_help_section(
+        out,
+        "Flags",
+        &[
+            "  --model MODEL                         Override the active model",
+            "  --output-format FORMAT                Non-interactive output: text or json",
+            "  --permission-mode MODE                Set read-only, workspace-write, or danger-full-access",
+            "  --dangerously-skip-permissions        Skip all permission checks",
+            "  --allowedTools TOOLS                  Restrict enabled tools (repeatable; comma-separated aliases supported)",
+            "  --version, -V                         Print version and build information",
+        ],
+    )?;
+    print_help_section(
+        out,
+        "Environment variables",
+        &[
+            "  ANTHROPIC_API_KEY                     API key for Anthropic (Claude) models",
+            "  ANTHROPIC_AUTH_TOKEN                  Bearer token (alternative to API key)",
+            "  XAI_API_KEY                           API key for xAI (Grok) models",
+            "  OPENAI_API_KEY                        API key for OpenAI-compatible models",
+            "  CODINEER_WORKSPACE_ROOT               Override workspace root directory",
+            "  CODINEER_CONFIG_HOME                  Override config directory (default: ~/.codineer)",
+            "  NO_COLOR                              Disable colored output (no-color.org)",
+            "  CLICOLOR=0                            Disable colored output (alternative)",
+        ],
+    )?;
