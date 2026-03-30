@@ -4351,3 +4351,74 @@ printf 'pwsh:%s' "$1"
 
         let background = execute_tool(
             "PowerShell",
+            &json!({"command": "Write-Output hello", "run_in_background": true}),
+        )
+        .expect("PowerShell background should succeed");
+
+        std::env::set_var("PATH", original_path);
+        let _ = std::fs::remove_dir_all(dir);
+
+        let output: serde_json::Value = serde_json::from_str(&result).expect("json");
+        assert_eq!(output["stdout"], "pwsh:Write-Output hello");
+        assert!(output["stderr"].as_str().expect("stderr").is_empty());
+
+        let background_output: serde_json::Value = serde_json::from_str(&background).expect("json");
+        assert!(background_output["backgroundTaskId"].as_str().is_some());
+        assert_eq!(background_output["backgroundedByUser"], true);
+        assert_eq!(background_output["assistantAutoBackgrounded"], false);
+    }
+
+    #[test]
+    fn powershell_errors_when_shell_is_missing() {
+        let _guard = env_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let original_path = std::env::var("PATH").unwrap_or_default();
+        let empty_dir = std::env::temp_dir().join(format!(
+            "codineer-empty-bin-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&empty_dir).expect("create empty dir");
+        std::env::set_var("PATH", empty_dir.display().to_string());
+
+        let err = execute_tool("PowerShell", &json!({"command": "Write-Output hello"}))
+            .expect_err("PowerShell should fail when shell is missing");
+
+        std::env::set_var("PATH", original_path);
+        let _ = std::fs::remove_dir_all(empty_dir);
+
+        assert!(err.contains("PowerShell executable not found"));
+    }
+
+    struct TestServer {
+        addr: SocketAddr,
+        shutdown: Option<std::sync::mpsc::Sender<()>>,
+        handle: Option<thread::JoinHandle<()>>,
+    }
+
+    impl TestServer {
+        fn spawn(handler: Arc<dyn Fn(&str) -> HttpResponse + Send + Sync + 'static>) -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+            listener
+                .set_nonblocking(true)
+                .expect("set nonblocking listener");
+            let addr = listener.local_addr().expect("local addr");
+            let (tx, rx) = std::sync::mpsc::channel::<()>();
+
+            let handle = thread::spawn(move || loop {
+                if rx.try_recv().is_ok() {
+                    break;
+                }
+
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let mut buffer = [0_u8; 4096];
+                        let size = stream.read(&mut buffer).expect("read request");
+                        let request = String::from_utf8_lossy(&buffer[..size]).into_owned();
+                        let request_line = request.lines().next().unwrap_or_default().to_string();
+                        let response = handler(&request_line);
+                        stream
+                            .write_all(response.to_bytes().as_slice())
