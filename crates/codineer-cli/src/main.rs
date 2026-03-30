@@ -4252,3 +4252,136 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
             "  CLICOLOR=0                            Disable colored output (alternative)",
         ],
     )?;
+    print_help_section(
+        out,
+        "Configuration files (merged in order)",
+        &[
+            "  ~/.codineer/settings.json             Global settings",
+            "  .codineer.json                        Project-local settings",
+            "  CODINEER.md                           Project context and instructions",
+        ],
+    )?;
+    print_help_slash_reference(out)?;
+    print_help_section(
+        out,
+        "Examples",
+        &[
+            "  codineer --model opus \"summarize this repo\"",
+            "  codineer --output-format json prompt \"explain src/main.rs\"",
+            "  codineer --allowedTools read,glob \"summarize Cargo.toml\"",
+            "  codineer --resume session.json /status /diff /export notes.txt",
+            "  codineer agents",
+            "  codineer /skills",
+            "  codineer login",
+            "  codineer init",
+        ],
+    )
+}
+
+fn print_help_slash_reference(out: &mut impl Write) -> io::Result<()> {
+    writeln!(out, "Slash command reference")?;
+    writeln!(out, "{}", render_slash_command_help())?;
+    writeln!(out)?;
+    let resume_commands = resume_supported_slash_commands()
+        .into_iter()
+        .map(|spec| match spec.argument_hint {
+            Some(hint) => format!("/{} {hint}", spec.name),
+            None => format!("/{}", spec.name),
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    writeln!(out, "Resume-safe commands: {resume_commands}")
+}
+
+fn print_help() {
+    let _ = print_help_to(&mut io::stdout());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        describe_tool_progress, filter_tool_specs, format_compact_report, format_cost_report,
+        format_internal_prompt_progress_line, format_model_report, format_model_switch_report,
+        format_permissions_report, format_permissions_switch_report, format_resume_report,
+        format_status_report, format_tool_call_start, format_tool_result,
+        normalize_permission_mode, parse_args, parse_git_status_metadata, permission_policy,
+        print_help_to, push_output_block, render_config_report, render_memory_report,
+        render_repl_help, render_unknown_repl_command, resolve_model_alias, response_to_events,
+        resume_supported_slash_commands, slash_command_completion_candidates, status_context,
+        CliAction, CliOutputFormat, InternalPromptProgressEvent, InternalPromptProgressState,
+        SlashCommand, StatusUsage, default_model,
+    };
+    use api::{MessageResponse, OutputContentBlock, Usage};
+    use plugins::{PluginTool, PluginToolDefinition, PluginToolPermission};
+    use runtime::{AssistantEvent, ContentBlock, ConversationMessage, MessageRole, PermissionMode};
+    use serde_json::json;
+    use std::path::PathBuf;
+    use std::time::Duration;
+    use tools::GlobalToolRegistry;
+
+    fn registry_with_plugin_tool() -> GlobalToolRegistry {
+        GlobalToolRegistry::with_plugin_tools(vec![PluginTool::new(
+            "plugin-demo@external",
+            "plugin-demo",
+            PluginToolDefinition {
+                name: "plugin_echo".to_string(),
+                description: Some("Echo plugin payload".to_string()),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "message": { "type": "string" }
+                    },
+                    "required": ["message"],
+                    "additionalProperties": false
+                }),
+            },
+            "echo".to_string(),
+            Vec::new(),
+            PluginToolPermission::WorkspaceWrite,
+            None,
+        )])
+        .expect("plugin tool registry should build")
+    }
+
+    #[test]
+    fn defaults_to_repl_when_no_args() {
+        assert_eq!(
+            parse_args(&[]).expect("args should parse"),
+            CliAction::Repl {
+                model: default_model(),
+                allowed_tools: None,
+                permission_mode: PermissionMode::WorkspaceWrite,
+            }
+        );
+    }
+
+    #[test]
+    fn parses_prompt_subcommand() {
+        let args = vec![
+            "prompt".to_string(),
+            "hello".to_string(),
+            "world".to_string(),
+        ];
+        assert_eq!(
+            parse_args(&args).expect("args should parse"),
+            CliAction::Prompt {
+                prompt: "hello world".to_string(),
+                model: default_model(),
+                output_format: CliOutputFormat::Text,
+                allowed_tools: None,
+                permission_mode: PermissionMode::WorkspaceWrite,
+            }
+        );
+    }
+
+    #[test]
+    fn parses_bare_prompt_and_json_output_flag() {
+        let args = vec![
+            "--output-format=json".to_string(),
+            "--model".to_string(),
+            "custom-opus".to_string(),
+            "explain".to_string(),
+            "this".to_string(),
+        ];
+        assert_eq!(
+            parse_args(&args).expect("args should parse"),
