@@ -702,3 +702,120 @@ impl LineEditor {
             self.completion_state = None;
             return;
         };
+        let matches = self
+            .completions
+            .iter()
+            .filter(|candidate| candidate.starts_with(prefix) && candidate.as_str() != prefix)
+            .cloned()
+            .collect::<Vec<_>>();
+        if matches.is_empty() {
+            self.completion_state = None;
+            return;
+        }
+
+        let candidate = if let Some(state) = self
+            .completion_state
+            .as_mut()
+            .filter(|state| state.prefix == prefix && state.matches == matches)
+        {
+            let index = state.next_index % state.matches.len();
+            state.next_index += 1;
+            state.matches[index].clone()
+        } else {
+            let candidate = matches[0].clone();
+            self.completion_state = Some(CompletionState {
+                prefix: prefix.to_string(),
+                matches,
+                next_index: 1,
+            });
+            candidate
+        };
+
+        session.text.replace_range(..session.cursor, &candidate);
+        session.cursor = candidate.len();
+    }
+
+    fn history_up(&self, session: &mut EditSession) {
+        if session.mode == EditorMode::Command || self.history.is_empty() {
+            return;
+        }
+
+        let next_index = if let Some(index) = session.history_index {
+            index.saturating_sub(1)
+        } else {
+            session.history_backup = Some(session.text.clone());
+            self.history.len() - 1
+        };
+
+        session.history_index = Some(next_index);
+        session.set_text_from_history(self.history[next_index].clone());
+    }
+
+    fn history_down(&self, session: &mut EditSession) {
+        if session.mode == EditorMode::Command {
+            return;
+        }
+
+        let Some(index) = session.history_index else {
+            return;
+        };
+
+        if index + 1 < self.history.len() {
+            let next_index = index + 1;
+            session.history_index = Some(next_index);
+            session.set_text_from_history(self.history[next_index].clone());
+            return;
+        }
+
+        session.history_index = None;
+        let restored = session.history_backup.take().unwrap_or_default();
+        session.set_text_from_history(restored);
+        if self.vim_enabled {
+            session.enter_insert_mode();
+        } else {
+            session.mode = EditorMode::Plain;
+        }
+    }
+}
+
+fn is_vim_toggle(line: &str) -> bool {
+    line.trim() == "/vim"
+}
+
+struct RawModeGuard;
+
+impl RawModeGuard {
+    fn new() -> io::Result<Self> {
+        terminal::enable_raw_mode().map_err(io::Error::other)?;
+        Ok(Self)
+    }
+}
+
+impl Drop for RawModeGuard {
+    fn drop(&mut self) {
+        let _ = terminal::disable_raw_mode();
+    }
+}
+
+fn previous_boundary(text: &str, cursor: usize) -> usize {
+    if cursor == 0 {
+        return 0;
+    }
+
+    text[..cursor]
+        .char_indices()
+        .next_back()
+        .map_or(0, |(index, _)| index)
+}
+
+fn previous_command_boundary(text: &str, cursor: usize) -> usize {
+    previous_boundary(text, cursor).max(1)
+}
+
+fn next_boundary(text: &str, cursor: usize) -> usize {
+    if cursor >= text.len() {
+        return text.len();
+    }
+
+    text[cursor..]
+        .chars()
