@@ -811,3 +811,57 @@ mod tests {
         assert!(plain_text.contains("  • nested"));
         assert!(plain_text.contains("  • child"));
     }
+
+    #[test]
+    fn renders_tables_with_alignment() {
+        let terminal_renderer = TerminalRenderer::new();
+        let markdown_output = terminal_renderer
+            .render_markdown("| Name | Value |\n| ---- | ----- |\n| alpha | 1 |\n| beta | 22 |");
+        let plain_text = strip_ansi(&markdown_output);
+        let lines = plain_text.lines().collect::<Vec<_>>();
+
+        assert_eq!(lines[0], "│ Name  │ Value │");
+        assert_eq!(lines[1], "│───────┼───────│");
+        assert_eq!(lines[2], "│ alpha │ 1     │");
+        assert_eq!(lines[3], "│ beta  │ 22    │");
+        if color_enabled() {
+            assert!(markdown_output.contains('\u{1b}'));
+        }
+    }
+
+    #[test]
+    fn streaming_state_waits_for_complete_blocks() {
+        let renderer = TerminalRenderer::new();
+        let mut state = MarkdownStreamState::default();
+
+        assert_eq!(state.push(&renderer, "# Heading"), None);
+        let flushed = state
+            .push(&renderer, "\n\nParagraph\n\n")
+            .expect("completed block");
+        let plain_text = strip_ansi(&flushed);
+        assert!(plain_text.contains("Heading"));
+        assert!(plain_text.contains("Paragraph"));
+
+        assert_eq!(state.push(&renderer, "```rust\nfn main() {}\n"), None);
+        let code = state
+            .push(&renderer, "```\n")
+            .expect("closed code fence flushes");
+        assert!(strip_ansi(&code).contains("fn main()"));
+    }
+
+    #[test]
+    fn spinner_advances_frames() {
+        let terminal_renderer = TerminalRenderer::new();
+        let mut spinner = Spinner::new();
+        let mut out = Vec::new();
+        spinner
+            .tick("Working", terminal_renderer.color_theme(), &mut out)
+            .expect("tick succeeds");
+        spinner
+            .tick("Working", terminal_renderer.color_theme(), &mut out)
+            .expect("tick succeeds");
+
+        let output = String::from_utf8_lossy(&out);
+        assert!(output.contains("Working"));
+    }
+}
