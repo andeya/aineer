@@ -4451,3 +4451,269 @@ mod tests {
     }
 
     #[test]
+    fn parses_allowed_tools_flags_with_aliases_and_lists() {
+        let args = vec![
+            "--allowedTools".to_string(),
+            "read,glob".to_string(),
+            "--allowed-tools=write_file".to_string(),
+        ];
+        assert_eq!(
+            parse_args(&args).expect("args should parse"),
+            CliAction::Repl {
+                model: default_model(),
+                allowed_tools: Some(
+                    ["glob_search", "read_file", "write_file"]
+                        .into_iter()
+                        .map(str::to_string)
+                        .collect()
+                ),
+                permission_mode: PermissionMode::WorkspaceWrite,
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_allowed_tools() {
+        let error = parse_args(&["--allowedTools".to_string(), "teleport".to_string()])
+            .expect_err("tool should be rejected");
+        assert!(error.contains("unsupported tool in --allowedTools: teleport"));
+    }
+
+    #[test]
+    fn parses_system_prompt_options() {
+        let args = vec![
+            "system-prompt".to_string(),
+            "--cwd".to_string(),
+            "/tmp/project".to_string(),
+            "--date".to_string(),
+            "2026-04-01".to_string(),
+        ];
+        assert_eq!(
+            parse_args(&args).expect("args should parse"),
+            CliAction::PrintSystemPrompt {
+                cwd: PathBuf::from("/tmp/project"),
+                date: "2026-04-01".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn parses_help_subcommand() {
+        assert_eq!(
+            parse_args(&["help".to_string()]).expect("help should parse"),
+            CliAction::Help
+        );
+        assert_eq!(
+            parse_args(&["--help".to_string()]).expect("--help should parse"),
+            CliAction::Help
+        );
+        assert_eq!(
+            parse_args(&["-h".to_string()]).expect("-h should parse"),
+            CliAction::Help
+        );
+    }
+
+    #[test]
+    fn help_output_includes_environment_variables_section() {
+        let mut output = Vec::new();
+        print_help_to(&mut output).expect("help should write");
+        let text = String::from_utf8(output).expect("valid utf-8");
+        assert!(text.contains("Environment variables"));
+        assert!(text.contains("ANTHROPIC_API_KEY"));
+        assert!(text.contains("XAI_API_KEY"));
+        assert!(text.contains("OPENAI_API_KEY"));
+        assert!(text.contains("CODINEER_WORKSPACE_ROOT"));
+        assert!(text.contains("NO_COLOR"));
+        assert!(text.contains("Configuration files"));
+        assert!(text.contains("codineer help"));
+    }
+
+    #[test]
+    fn parses_login_and_logout_subcommands() {
+        assert_eq!(
+            parse_args(&["login".to_string()]).expect("login should parse"),
+            CliAction::Login
+        );
+        assert_eq!(
+            parse_args(&["logout".to_string()]).expect("logout should parse"),
+            CliAction::Logout
+        );
+        assert_eq!(
+            parse_args(&["init".to_string()]).expect("init should parse"),
+            CliAction::Init
+        );
+        assert_eq!(
+            parse_args(&["agents".to_string()]).expect("agents should parse"),
+            CliAction::Agents { args: None }
+        );
+        assert_eq!(
+            parse_args(&["skills".to_string()]).expect("skills should parse"),
+            CliAction::Skills { args: None }
+        );
+        assert_eq!(
+            parse_args(&["agents".to_string(), "--help".to_string()])
+                .expect("agents help should parse"),
+            CliAction::Agents {
+                args: Some("--help".to_string())
+            }
+        );
+    }
+
+    #[test]
+    fn parses_direct_agents_and_skills_slash_commands() {
+        assert_eq!(
+            parse_args(&["/agents".to_string()]).expect("/agents should parse"),
+            CliAction::Agents { args: None }
+        );
+        assert_eq!(
+            parse_args(&["/skills".to_string()]).expect("/skills should parse"),
+            CliAction::Skills { args: None }
+        );
+        assert_eq!(
+            parse_args(&["/skills".to_string(), "help".to_string()])
+                .expect("/skills help should parse"),
+            CliAction::Skills {
+                args: Some("help".to_string())
+            }
+        );
+        let error = parse_args(&["/status".to_string()])
+            .expect_err("/status should remain REPL-only when invoked directly");
+        assert!(error.contains("Direct slash command unavailable"));
+        assert!(error.contains("/status"));
+    }
+
+    #[test]
+    fn parses_resume_flag_with_slash_command() {
+        let args = vec![
+            "--resume".to_string(),
+            "session.json".to_string(),
+            "/compact".to_string(),
+        ];
+        assert_eq!(
+            parse_args(&args).expect("args should parse"),
+            CliAction::ResumeSession {
+                session_path: PathBuf::from("session.json"),
+                commands: vec!["/compact".to_string()],
+            }
+        );
+    }
+
+    #[test]
+    fn parses_resume_flag_with_multiple_slash_commands() {
+        let args = vec![
+            "--resume".to_string(),
+            "session.json".to_string(),
+            "/status".to_string(),
+            "/compact".to_string(),
+            "/cost".to_string(),
+        ];
+        assert_eq!(
+            parse_args(&args).expect("args should parse"),
+            CliAction::ResumeSession {
+                session_path: PathBuf::from("session.json"),
+                commands: vec![
+                    "/status".to_string(),
+                    "/compact".to_string(),
+                    "/cost".to_string(),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn filtered_tool_specs_respect_allowlist() {
+        let allowed = ["read_file", "grep_search"]
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+        let filtered = filter_tool_specs(&GlobalToolRegistry::builtin(), Some(&allowed));
+        let names = filtered
+            .into_iter()
+            .map(|spec| spec.name)
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec!["read_file", "grep_search"]);
+    }
+
+    #[test]
+    fn filtered_tool_specs_include_plugin_tools() {
+        let filtered = filter_tool_specs(&registry_with_plugin_tool(), None);
+        let names = filtered
+            .into_iter()
+            .map(|definition| definition.name)
+            .collect::<Vec<_>>();
+        assert!(names.contains(&"bash".to_string()));
+        assert!(names.contains(&"plugin_echo".to_string()));
+    }
+
+    #[test]
+    fn permission_policy_uses_plugin_tool_permissions() {
+        let policy = permission_policy(PermissionMode::ReadOnly, &registry_with_plugin_tool());
+        let required = policy.required_mode_for("plugin_echo");
+        assert_eq!(required, PermissionMode::WorkspaceWrite);
+    }
+
+    #[test]
+    fn shared_help_uses_resume_annotation_copy() {
+        let help = commands::render_slash_command_help();
+        assert!(help.contains("Slash commands"));
+        assert!(help.contains("Tab completes commands inside the REPL."));
+        assert!(help.contains("available via codineer --resume SESSION.json"));
+    }
+
+    #[test]
+    fn repl_help_includes_shared_commands_and_exit() {
+        let help = render_repl_help();
+        assert!(help.contains("Interactive REPL"));
+        assert!(help.contains("/help"));
+        assert!(help.contains("/status"));
+        assert!(help.contains("/model [model]"));
+        assert!(help.contains("/permissions [read-only|workspace-write|danger-full-access]"));
+        assert!(help.contains("/clear [--confirm]"));
+        assert!(help.contains("/cost"));
+        assert!(help.contains("/resume <session-path>"));
+        assert!(help.contains("/config [env|hooks|model|plugins]"));
+        assert!(help.contains("/memory"));
+        assert!(help.contains("/init"));
+        assert!(help.contains("/diff"));
+        assert!(help.contains("/version"));
+        assert!(help.contains("/export [file]"));
+        assert!(help.contains("/session [list|switch <session-id>]"));
+        assert!(help.contains(
+            "/plugin [list|install <path>|enable <name>|disable <name>|uninstall <id>|update <id>]"
+        ));
+        assert!(help.contains("aliases: /plugins, /marketplace"));
+        assert!(help.contains("/agents"));
+        assert!(help.contains("/skills"));
+        assert!(help.contains("/exit"));
+        assert!(help.contains("Tab cycles slash command matches"));
+    }
+
+    #[test]
+    fn completion_candidates_include_repl_only_exit_commands() {
+        let candidates = slash_command_completion_candidates();
+        assert!(candidates.contains(&"/help".to_string()));
+        assert!(candidates.contains(&"/vim".to_string()));
+        assert!(candidates.contains(&"/exit".to_string()));
+        assert!(candidates.contains(&"/quit".to_string()));
+    }
+
+    #[test]
+    fn unknown_repl_command_suggestions_include_repl_shortcuts() {
+        let rendered = render_unknown_repl_command("exi");
+        assert!(rendered.contains("Unknown slash command"));
+        assert!(rendered.contains("/exit"));
+        assert!(rendered.contains("/help"));
+    }
+
+    #[test]
+    fn resume_supported_command_list_matches_expected_surface() {
+        let names = resume_supported_slash_commands()
+            .into_iter()
+            .map(|spec| spec.name)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            vec![
+                "help", "status", "compact", "clear", "cost", "config", "memory", "init", "diff",
+                "version", "export", "agents", "skills",
+            ]
