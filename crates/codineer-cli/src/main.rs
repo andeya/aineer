@@ -4186,3 +4186,601 @@ fn print_help_section(out: &mut impl Write, title: &str, entries: &[&str]) -> io
 fn print_help_to(out: &mut impl Write) -> io::Result<()> {
     writeln!(out, "Codineer CLI v{VERSION}")?;
     writeln!(
+        out,
+        "  Interactive coding assistant for the current workspace."
+    )?;
+    writeln!(out)?;
+    print_help_section(
+        out,
+        "Quick start",
+        &[
+            "  codineer                                  Start the interactive REPL",
+            "  codineer \"summarize this repo\"            Run one prompt and exit",
+            "  codineer prompt \"explain src/main.rs\"     Explicit one-shot prompt",
+            "  codineer --resume SESSION.json /status    Inspect a saved session",
+        ],
+    )?;
+    print_help_section(
+        out,
+        "Interactive essentials",
+        &[
+            "  /help                                 Browse the full slash command map",
+            "  /status                               Inspect session + workspace state",
+            "  /model <name>                         Switch models mid-session",
+            "  /permissions <mode>                   Adjust tool access",
+            "  Tab                                   Complete slash commands",
+            "  /vim                                  Toggle modal editing",
+            "  Shift+Enter / Ctrl+J                  Insert a newline",
+        ],
+    )?;
+    print_help_section(
+        out,
+        "Commands",
+        &[
+            "  codineer help                             Show this help message",
+            "  codineer agents                           List configured agents",
+            "  codineer skills                           List installed skills",
+            "  codineer system-prompt [--cwd PATH] [--date YYYY-MM-DD]",
+            "  codineer login                            Start the OAuth login flow",
+            "  codineer logout                           Clear saved OAuth credentials",
+            "  codineer init                             Scaffold CODINEER.md + local files",
+        ],
+    )?;
+    print_help_section(
+        out,
+        "Flags",
+        &[
+            "  --model MODEL                         Override the active model",
+            "  --output-format FORMAT                Non-interactive output: text or json",
+            "  --permission-mode MODE                Set read-only, workspace-write, or danger-full-access",
+            "  --dangerously-skip-permissions        Skip all permission checks",
+            "  --allowedTools TOOLS                  Restrict enabled tools (repeatable; comma-separated aliases supported)",
+            "  --version, -V                         Print version and build information",
+        ],
+    )?;
+    print_help_section(
+        out,
+        "Environment variables",
+        &[
+            "  ANTHROPIC_API_KEY                     API key for Anthropic (Claude) models",
+            "  ANTHROPIC_AUTH_TOKEN                  Bearer token (alternative to API key)",
+            "  XAI_API_KEY                           API key for xAI (Grok) models",
+            "  OPENAI_API_KEY                        API key for OpenAI-compatible models",
+            "  CODINEER_WORKSPACE_ROOT               Override workspace root directory",
+            "  CODINEER_CONFIG_HOME                  Override config directory (default: ~/.codineer)",
+            "  NO_COLOR                              Disable colored output (no-color.org)",
+            "  CLICOLOR=0                            Disable colored output (alternative)",
+        ],
+    )?;
+    print_help_section(
+        out,
+        "Configuration files (merged in order)",
+        &[
+            "  ~/.codineer/settings.json             Global settings",
+            "  .codineer.json                        Project-local settings",
+            "  CODINEER.md                           Project context and instructions",
+        ],
+    )?;
+    print_help_slash_reference(out)?;
+    print_help_section(
+        out,
+        "Examples",
+        &[
+            "  codineer --model opus \"summarize this repo\"",
+            "  codineer --output-format json prompt \"explain src/main.rs\"",
+            "  codineer --allowedTools read,glob \"summarize Cargo.toml\"",
+            "  codineer --resume session.json /status /diff /export notes.txt",
+            "  codineer agents",
+            "  codineer /skills",
+            "  codineer login",
+            "  codineer init",
+        ],
+    )
+}
+
+fn print_help_slash_reference(out: &mut impl Write) -> io::Result<()> {
+    writeln!(out, "Slash command reference")?;
+    writeln!(out, "{}", render_slash_command_help())?;
+    writeln!(out)?;
+    let resume_commands = resume_supported_slash_commands()
+        .into_iter()
+        .map(|spec| match spec.argument_hint {
+            Some(hint) => format!("/{} {hint}", spec.name),
+            None => format!("/{}", spec.name),
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    writeln!(out, "Resume-safe commands: {resume_commands}")
+}
+
+fn print_help() {
+    let _ = print_help_to(&mut io::stdout());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        describe_tool_progress, filter_tool_specs, format_compact_report, format_cost_report,
+        format_internal_prompt_progress_line, format_model_report, format_model_switch_report,
+        format_permissions_report, format_permissions_switch_report, format_resume_report,
+        format_status_report, format_tool_call_start, format_tool_result,
+        normalize_permission_mode, parse_args, parse_git_status_metadata, permission_policy,
+        print_help_to, push_output_block, render_config_report, render_memory_report,
+        render_repl_help, render_unknown_repl_command, resolve_model_alias, response_to_events,
+        resume_supported_slash_commands, slash_command_completion_candidates, status_context,
+        CliAction, CliOutputFormat, InternalPromptProgressEvent, InternalPromptProgressState,
+        SlashCommand, StatusUsage, default_model,
+    };
+    use api::{MessageResponse, OutputContentBlock, Usage};
+    use plugins::{PluginTool, PluginToolDefinition, PluginToolPermission};
+    use runtime::{AssistantEvent, ContentBlock, ConversationMessage, MessageRole, PermissionMode};
+    use serde_json::json;
+    use std::path::PathBuf;
+    use std::time::Duration;
+    use tools::GlobalToolRegistry;
+
+    fn registry_with_plugin_tool() -> GlobalToolRegistry {
+        GlobalToolRegistry::with_plugin_tools(vec![PluginTool::new(
+            "plugin-demo@external",
+            "plugin-demo",
+            PluginToolDefinition {
+                name: "plugin_echo".to_string(),
+                description: Some("Echo plugin payload".to_string()),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "message": { "type": "string" }
+                    },
+                    "required": ["message"],
+                    "additionalProperties": false
+                }),
+            },
+            "echo".to_string(),
+            Vec::new(),
+            PluginToolPermission::WorkspaceWrite,
+            None,
+        )])
+        .expect("plugin tool registry should build")
+    }
+
+    #[test]
+    fn defaults_to_repl_when_no_args() {
+        assert_eq!(
+            parse_args(&[]).expect("args should parse"),
+            CliAction::Repl {
+                model: default_model(),
+                allowed_tools: None,
+                permission_mode: PermissionMode::WorkspaceWrite,
+            }
+        );
+    }
+
+    #[test]
+    fn parses_prompt_subcommand() {
+        let args = vec![
+            "prompt".to_string(),
+            "hello".to_string(),
+            "world".to_string(),
+        ];
+        assert_eq!(
+            parse_args(&args).expect("args should parse"),
+            CliAction::Prompt {
+                prompt: "hello world".to_string(),
+                model: default_model(),
+                output_format: CliOutputFormat::Text,
+                allowed_tools: None,
+                permission_mode: PermissionMode::WorkspaceWrite,
+            }
+        );
+    }
+
+    #[test]
+    fn parses_bare_prompt_and_json_output_flag() {
+        let args = vec![
+            "--output-format=json".to_string(),
+            "--model".to_string(),
+            "custom-opus".to_string(),
+            "explain".to_string(),
+            "this".to_string(),
+        ];
+        assert_eq!(
+            parse_args(&args).expect("args should parse"),
+            CliAction::Prompt {
+                prompt: "explain this".to_string(),
+                model: "custom-opus".to_string(),
+                output_format: CliOutputFormat::Json,
+                allowed_tools: None,
+                permission_mode: PermissionMode::WorkspaceWrite,
+            }
+        );
+    }
+
+    #[test]
+    fn resolves_model_aliases_in_args() {
+        let args = vec![
+            "--model".to_string(),
+            "opus".to_string(),
+            "explain".to_string(),
+            "this".to_string(),
+        ];
+        assert_eq!(
+            parse_args(&args).expect("args should parse"),
+            CliAction::Prompt {
+                prompt: "explain this".to_string(),
+                model: "claude-opus-4-6".to_string(),
+                output_format: CliOutputFormat::Text,
+                allowed_tools: None,
+                permission_mode: PermissionMode::WorkspaceWrite,
+            }
+        );
+    }
+
+    #[test]
+    fn resolves_known_model_aliases() {
+        assert_eq!(resolve_model_alias("opus"), "claude-opus-4-6");
+        assert_eq!(resolve_model_alias("sonnet"), "claude-sonnet-4-6");
+        assert_eq!(resolve_model_alias("haiku"), "claude-haiku-4-5-20251213");
+        assert_eq!(resolve_model_alias("grok"), "grok-3");
+        assert_eq!(resolve_model_alias("grok-mini"), "grok-3-mini");
+        assert_eq!(resolve_model_alias("custom-opus"), "custom-opus");
+    }
+
+    #[test]
+    fn parses_version_flags_without_initializing_prompt_mode() {
+        assert_eq!(
+            parse_args(&["--version".to_string()]).expect("args should parse"),
+            CliAction::Version
+        );
+        assert_eq!(
+            parse_args(&["-V".to_string()]).expect("args should parse"),
+            CliAction::Version
+        );
+    }
+
+    #[test]
+    fn parses_permission_mode_flag() {
+        let args = vec!["--permission-mode=read-only".to_string()];
+        assert_eq!(
+            parse_args(&args).expect("args should parse"),
+            CliAction::Repl {
+                model: default_model(),
+                allowed_tools: None,
+                permission_mode: PermissionMode::ReadOnly,
+            }
+        );
+    }
+
+    #[test]
+    fn parses_allowed_tools_flags_with_aliases_and_lists() {
+        let args = vec![
+            "--allowedTools".to_string(),
+            "read,glob".to_string(),
+            "--allowed-tools=write_file".to_string(),
+        ];
+        assert_eq!(
+            parse_args(&args).expect("args should parse"),
+            CliAction::Repl {
+                model: default_model(),
+                allowed_tools: Some(
+                    ["glob_search", "read_file", "write_file"]
+                        .into_iter()
+                        .map(str::to_string)
+                        .collect()
+                ),
+                permission_mode: PermissionMode::WorkspaceWrite,
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_allowed_tools() {
+        let error = parse_args(&["--allowedTools".to_string(), "teleport".to_string()])
+            .expect_err("tool should be rejected");
+        assert!(error.contains("unsupported tool in --allowedTools: teleport"));
+    }
+
+    #[test]
+    fn parses_system_prompt_options() {
+        let args = vec![
+            "system-prompt".to_string(),
+            "--cwd".to_string(),
+            "/tmp/project".to_string(),
+            "--date".to_string(),
+            "2026-04-01".to_string(),
+        ];
+        assert_eq!(
+            parse_args(&args).expect("args should parse"),
+            CliAction::PrintSystemPrompt {
+                cwd: PathBuf::from("/tmp/project"),
+                date: "2026-04-01".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn parses_help_subcommand() {
+        assert_eq!(
+            parse_args(&["help".to_string()]).expect("help should parse"),
+            CliAction::Help
+        );
+        assert_eq!(
+            parse_args(&["--help".to_string()]).expect("--help should parse"),
+            CliAction::Help
+        );
+        assert_eq!(
+            parse_args(&["-h".to_string()]).expect("-h should parse"),
+            CliAction::Help
+        );
+    }
+
+    #[test]
+    fn help_output_includes_environment_variables_section() {
+        let mut output = Vec::new();
+        print_help_to(&mut output).expect("help should write");
+        let text = String::from_utf8(output).expect("valid utf-8");
+        assert!(text.contains("Environment variables"));
+        assert!(text.contains("ANTHROPIC_API_KEY"));
+        assert!(text.contains("XAI_API_KEY"));
+        assert!(text.contains("OPENAI_API_KEY"));
+        assert!(text.contains("CODINEER_WORKSPACE_ROOT"));
+        assert!(text.contains("NO_COLOR"));
+        assert!(text.contains("Configuration files"));
+        assert!(text.contains("codineer help"));
+    }
+
+    #[test]
+    fn parses_login_and_logout_subcommands() {
+        assert_eq!(
+            parse_args(&["login".to_string()]).expect("login should parse"),
+            CliAction::Login
+        );
+        assert_eq!(
+            parse_args(&["logout".to_string()]).expect("logout should parse"),
+            CliAction::Logout
+        );
+        assert_eq!(
+            parse_args(&["init".to_string()]).expect("init should parse"),
+            CliAction::Init
+        );
+        assert_eq!(
+            parse_args(&["agents".to_string()]).expect("agents should parse"),
+            CliAction::Agents { args: None }
+        );
+        assert_eq!(
+            parse_args(&["skills".to_string()]).expect("skills should parse"),
+            CliAction::Skills { args: None }
+        );
+        assert_eq!(
+            parse_args(&["agents".to_string(), "--help".to_string()])
+                .expect("agents help should parse"),
+            CliAction::Agents {
+                args: Some("--help".to_string())
+            }
+        );
+    }
+
+    #[test]
+    fn parses_direct_agents_and_skills_slash_commands() {
+        assert_eq!(
+            parse_args(&["/agents".to_string()]).expect("/agents should parse"),
+            CliAction::Agents { args: None }
+        );
+        assert_eq!(
+            parse_args(&["/skills".to_string()]).expect("/skills should parse"),
+            CliAction::Skills { args: None }
+        );
+        assert_eq!(
+            parse_args(&["/skills".to_string(), "help".to_string()])
+                .expect("/skills help should parse"),
+            CliAction::Skills {
+                args: Some("help".to_string())
+            }
+        );
+        let error = parse_args(&["/status".to_string()])
+            .expect_err("/status should remain REPL-only when invoked directly");
+        assert!(error.contains("Direct slash command unavailable"));
+        assert!(error.contains("/status"));
+    }
+
+    #[test]
+    fn parses_resume_flag_with_slash_command() {
+        let args = vec![
+            "--resume".to_string(),
+            "session.json".to_string(),
+            "/compact".to_string(),
+        ];
+        assert_eq!(
+            parse_args(&args).expect("args should parse"),
+            CliAction::ResumeSession {
+                session_path: PathBuf::from("session.json"),
+                commands: vec!["/compact".to_string()],
+            }
+        );
+    }
+
+    #[test]
+    fn parses_resume_flag_with_multiple_slash_commands() {
+        let args = vec![
+            "--resume".to_string(),
+            "session.json".to_string(),
+            "/status".to_string(),
+            "/compact".to_string(),
+            "/cost".to_string(),
+        ];
+        assert_eq!(
+            parse_args(&args).expect("args should parse"),
+            CliAction::ResumeSession {
+                session_path: PathBuf::from("session.json"),
+                commands: vec![
+                    "/status".to_string(),
+                    "/compact".to_string(),
+                    "/cost".to_string(),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn filtered_tool_specs_respect_allowlist() {
+        let allowed = ["read_file", "grep_search"]
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+        let filtered = filter_tool_specs(&GlobalToolRegistry::builtin(), Some(&allowed));
+        let names = filtered
+            .into_iter()
+            .map(|spec| spec.name)
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec!["read_file", "grep_search"]);
+    }
+
+    #[test]
+    fn filtered_tool_specs_include_plugin_tools() {
+        let filtered = filter_tool_specs(&registry_with_plugin_tool(), None);
+        let names = filtered
+            .into_iter()
+            .map(|definition| definition.name)
+            .collect::<Vec<_>>();
+        assert!(names.contains(&"bash".to_string()));
+        assert!(names.contains(&"plugin_echo".to_string()));
+    }
+
+    #[test]
+    fn permission_policy_uses_plugin_tool_permissions() {
+        let policy = permission_policy(PermissionMode::ReadOnly, &registry_with_plugin_tool());
+        let required = policy.required_mode_for("plugin_echo");
+        assert_eq!(required, PermissionMode::WorkspaceWrite);
+    }
+
+    #[test]
+    fn shared_help_uses_resume_annotation_copy() {
+        let help = commands::render_slash_command_help();
+        assert!(help.contains("Slash commands"));
+        assert!(help.contains("Tab completes commands inside the REPL."));
+        assert!(help.contains("available via codineer --resume SESSION.json"));
+    }
+
+    #[test]
+    fn repl_help_includes_shared_commands_and_exit() {
+        let help = render_repl_help();
+        assert!(help.contains("Interactive REPL"));
+        assert!(help.contains("/help"));
+        assert!(help.contains("/status"));
+        assert!(help.contains("/model [model]"));
+        assert!(help.contains("/permissions [read-only|workspace-write|danger-full-access]"));
+        assert!(help.contains("/clear [--confirm]"));
+        assert!(help.contains("/cost"));
+        assert!(help.contains("/resume <session-path>"));
+        assert!(help.contains("/config [env|hooks|model|plugins]"));
+        assert!(help.contains("/memory"));
+        assert!(help.contains("/init"));
+        assert!(help.contains("/diff"));
+        assert!(help.contains("/version"));
+        assert!(help.contains("/export [file]"));
+        assert!(help.contains("/session [list|switch <session-id>]"));
+        assert!(help.contains(
+            "/plugin [list|install <path>|enable <name>|disable <name>|uninstall <id>|update <id>]"
+        ));
+        assert!(help.contains("aliases: /plugins, /marketplace"));
+        assert!(help.contains("/agents"));
+        assert!(help.contains("/skills"));
+        assert!(help.contains("/exit"));
+        assert!(help.contains("Tab cycles slash command matches"));
+    }
+
+    #[test]
+    fn completion_candidates_include_repl_only_exit_commands() {
+        let candidates = slash_command_completion_candidates();
+        assert!(candidates.contains(&"/help".to_string()));
+        assert!(candidates.contains(&"/vim".to_string()));
+        assert!(candidates.contains(&"/exit".to_string()));
+        assert!(candidates.contains(&"/quit".to_string()));
+    }
+
+    #[test]
+    fn unknown_repl_command_suggestions_include_repl_shortcuts() {
+        let rendered = render_unknown_repl_command("exi");
+        assert!(rendered.contains("Unknown slash command"));
+        assert!(rendered.contains("/exit"));
+        assert!(rendered.contains("/help"));
+    }
+
+    #[test]
+    fn resume_supported_command_list_matches_expected_surface() {
+        let names = resume_supported_slash_commands()
+            .into_iter()
+            .map(|spec| spec.name)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            vec![
+                "help", "status", "compact", "clear", "cost", "config", "memory", "init", "diff",
+                "version", "export", "agents", "skills",
+            ]
+        );
+    }
+
+    #[test]
+    fn resume_report_uses_sectioned_layout() {
+        let report = format_resume_report("session.json", 14, 6);
+        assert!(report.contains("Session resumed"));
+        assert!(report.contains("Session file     session.json"));
+        assert!(report.contains("History          14 messages · 6 turns"));
+        assert!(report.contains("/status · /diff · /export"));
+    }
+
+    #[test]
+    fn compact_report_uses_structured_output() {
+        let compacted = format_compact_report(8, 5, false);
+        assert!(compacted.contains("Compact"));
+        assert!(compacted.contains("Result           compacted"));
+        assert!(compacted.contains("Messages removed 8"));
+        assert!(compacted.contains("Use /status"));
+        let skipped = format_compact_report(0, 3, true);
+        assert!(skipped.contains("Result           skipped"));
+    }
+
+    #[test]
+    fn cost_report_uses_sectioned_layout() {
+        let report = format_cost_report(runtime::TokenUsage {
+            input_tokens: 20,
+            output_tokens: 8,
+            cache_creation_input_tokens: 3,
+            cache_read_input_tokens: 1,
+        });
+        assert!(report.contains("Cost"));
+        assert!(report.contains("Input tokens     20"));
+        assert!(report.contains("Output tokens    8"));
+        assert!(report.contains("Cache create     3"));
+        assert!(report.contains("Cache read       1"));
+        assert!(report.contains("Total tokens     32"));
+        assert!(report.contains("/compact"));
+    }
+
+    #[test]
+    fn permissions_report_uses_sectioned_layout() {
+        let report = format_permissions_report("workspace-write");
+        assert!(report.contains("Permissions"));
+        assert!(report.contains("Active mode      workspace-write"));
+        assert!(report.contains("Effect           Editing tools can modify files in the workspace"));
+        assert!(report.contains("Modes"));
+        assert!(report.contains("read-only          ○ available Read/search tools only"));
+        assert!(report.contains("workspace-write    ● current   Edit files inside the workspace"));
+        assert!(report.contains("danger-full-access ○ available Unrestricted tool access"));
+    }
+
+    #[test]
+    fn permissions_switch_report_is_structured() {
+        let report = format_permissions_switch_report("read-only", "workspace-write");
+        assert!(report.contains("Permissions updated"));
+        assert!(report.contains("Previous mode    read-only"));
+        assert!(report.contains("Active mode      workspace-write"));
+        assert!(report.contains("Applies to       Subsequent tool calls in this REPL"));
+    }
+
+    #[test]
+    fn init_help_mentions_direct_subcommand() {
+        let mut help = Vec::new();
+        print_help_to(&mut help).expect("help should render");
+        let help = String::from_utf8(help).expect("help should be utf8");
+        assert!(help.contains("codineer init"));
