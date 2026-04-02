@@ -4850,3 +4850,269 @@ mod tests {
         assert!(status.contains("Git branch       main"));
         assert!(status.contains("Session file     session.json"));
         assert!(status.contains("Config files     loaded 2/3"));
+        assert!(status.contains("Memory files     4"));
+        assert!(status.contains("/session list"));
+    }
+
+    #[test]
+    fn config_report_supports_section_views() {
+        let report = render_config_report(Some("env")).expect("config report should render");
+        assert!(report.contains("Merged section: env"));
+        let plugins_report =
+            render_config_report(Some("plugins")).expect("plugins config report should render");
+        assert!(plugins_report.contains("Merged section: plugins"));
+    }
+
+    #[test]
+    fn memory_report_uses_sectioned_layout() {
+        let report = render_memory_report().expect("memory report should render");
+        assert!(report.contains("Memory"));
+        assert!(report.contains("Working directory"));
+        assert!(report.contains("Instruction files"));
+        assert!(report.contains("Discovered files"));
+    }
+
+    #[test]
+    fn config_report_uses_sectioned_layout() {
+        let report = render_config_report(None).expect("config report should render");
+        assert!(report.contains("Config"));
+        assert!(report.contains("Discovered files"));
+        assert!(report.contains("Merged JSON"));
+    }
+
+    #[test]
+    fn parses_git_status_metadata() {
+        let (root, branch) = parse_git_status_metadata(Some(
+            "## rcc/cli...origin/rcc/cli
+ M src/main.rs",
+        ));
+        assert_eq!(branch.as_deref(), Some("rcc/cli"));
+        let _ = root;
+    }
+
+    #[test]
+    fn status_context_reads_real_workspace_metadata() {
+        let context = status_context(None).expect("status context should load");
+        assert!(context.cwd.is_absolute());
+        assert_eq!(context.discovered_config_files, 5);
+        assert!(context.loaded_config_files <= context.discovered_config_files);
+    }
+
+    #[test]
+    fn normalizes_supported_permission_modes() {
+        assert_eq!(normalize_permission_mode("read-only"), Some("read-only"));
+        assert_eq!(
+            normalize_permission_mode("workspace-write"),
+            Some("workspace-write")
+        );
+        assert_eq!(
+            normalize_permission_mode("danger-full-access"),
+            Some("danger-full-access")
+        );
+        assert_eq!(normalize_permission_mode("unknown"), None);
+    }
+
+    #[test]
+    fn clear_command_requires_explicit_confirmation_flag() {
+        assert_eq!(
+            SlashCommand::parse("/clear"),
+            Some(SlashCommand::Clear { confirm: false })
+        );
+        assert_eq!(
+            SlashCommand::parse("/clear --confirm"),
+            Some(SlashCommand::Clear { confirm: true })
+        );
+    }
+
+    #[test]
+    fn parses_resume_and_config_slash_commands() {
+        assert_eq!(
+            SlashCommand::parse("/resume saved-session.json"),
+            Some(SlashCommand::Resume {
+                session_path: Some("saved-session.json".to_string())
+            })
+        );
+        assert_eq!(
+            SlashCommand::parse("/clear --confirm"),
+            Some(SlashCommand::Clear { confirm: true })
+        );
+        assert_eq!(
+            SlashCommand::parse("/config"),
+            Some(SlashCommand::Config { section: None })
+        );
+        assert_eq!(
+            SlashCommand::parse("/config env"),
+            Some(SlashCommand::Config {
+                section: Some("env".to_string())
+            })
+        );
+        assert_eq!(SlashCommand::parse("/memory"), Some(SlashCommand::Memory));
+        assert_eq!(SlashCommand::parse("/init"), Some(SlashCommand::Init));
+    }
+
+    #[test]
+    fn init_template_mentions_detected_rust_workspace() {
+        let rendered = crate::init::render_init_codineer_md(std::path::Path::new("."));
+        assert!(rendered.contains("# CODINEER.md"));
+        assert!(rendered.contains("cargo clippy --workspace --all-targets -- -D warnings"));
+    }
+
+    #[test]
+    fn converts_tool_roundtrip_messages() {
+        let messages = vec![
+            ConversationMessage::user_text("hello"),
+            ConversationMessage::assistant(vec![ContentBlock::ToolUse {
+                id: "tool-1".to_string(),
+                name: "bash".to_string(),
+                input: "{\"command\":\"pwd\"}".to_string(),
+            }]),
+            ConversationMessage {
+                role: MessageRole::Tool,
+                blocks: vec![ContentBlock::ToolResult {
+                    tool_use_id: "tool-1".to_string(),
+                    tool_name: "bash".to_string(),
+                    output: "ok".to_string(),
+                    is_error: false,
+                }],
+                usage: None,
+            },
+        ];
+
+        let converted = super::convert_messages(&messages);
+        assert_eq!(converted.len(), 3);
+        assert_eq!(converted[1].role, "assistant");
+        assert_eq!(converted[2].role, "user");
+    }
+    #[test]
+    fn repl_help_mentions_history_completion_and_multiline() {
+        let help = render_repl_help();
+        assert!(help.contains("Up/Down"));
+        assert!(help.contains("Tab cycles"));
+        assert!(help.contains("Shift+Enter or Ctrl+J"));
+    }
+
+    #[test]
+    fn tool_rendering_helpers_compact_output() {
+        let start = format_tool_call_start("read_file", r#"{"path":"src/main.rs"}"#);
+        assert!(start.contains("read_file"));
+        assert!(start.contains("src/main.rs"));
+
+        let done = format_tool_result(
+            "read_file",
+            r#"{"file":{"filePath":"src/main.rs","content":"hello","numLines":1,"startLine":1,"totalLines":1}}"#,
+            false,
+        );
+        assert!(done.contains("📄 Read src/main.rs"));
+        assert!(done.contains("hello"));
+    }
+
+    #[test]
+    fn tool_rendering_truncates_large_read_output_for_display_only() {
+        let content = (0..200)
+            .map(|index| format!("line {index:03}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let output = json!({
+            "file": {
+                "filePath": "src/main.rs",
+                "content": content,
+                "numLines": 200,
+                "startLine": 1,
+                "totalLines": 200
+            }
+        })
+        .to_string();
+
+        let rendered = format_tool_result("read_file", &output, false);
+
+        assert!(rendered.contains("line 000"));
+        assert!(rendered.contains("line 079"));
+        assert!(!rendered.contains("line 199"));
+        assert!(rendered.contains("full result preserved in session"));
+        assert!(output.contains("line 199"));
+    }
+
+    #[test]
+    fn tool_rendering_truncates_large_bash_output_for_display_only() {
+        let stdout = (0..120)
+            .map(|index| format!("stdout {index:03}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let output = json!({
+            "stdout": stdout,
+            "stderr": "",
+            "returnCodeInterpretation": "completed successfully"
+        })
+        .to_string();
+
+        let rendered = format_tool_result("bash", &output, false);
+
+        assert!(rendered.contains("stdout 000"));
+        assert!(rendered.contains("stdout 059"));
+        assert!(!rendered.contains("stdout 119"));
+        assert!(rendered.contains("full result preserved in session"));
+        assert!(output.contains("stdout 119"));
+    }
+
+    #[test]
+    fn tool_rendering_truncates_generic_long_output_for_display_only() {
+        let items = (0..120)
+            .map(|index| format!("payload {index:03}"))
+            .collect::<Vec<_>>();
+        let output = json!({
+            "summary": "plugin payload",
+            "items": items,
+        })
+        .to_string();
+
+        let rendered = format_tool_result("plugin_echo", &output, false);
+
+        assert!(rendered.contains("plugin_echo"));
+        assert!(rendered.contains("payload 000"));
+        assert!(rendered.contains("payload 040"));
+        assert!(!rendered.contains("payload 080"));
+        assert!(!rendered.contains("payload 119"));
+        assert!(rendered.contains("full result preserved in session"));
+        assert!(output.contains("payload 119"));
+    }
+
+    #[test]
+    fn tool_rendering_truncates_raw_generic_output_for_display_only() {
+        let output = (0..120)
+            .map(|index| format!("raw {index:03}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let rendered = format_tool_result("plugin_echo", &output, false);
+
+        assert!(rendered.contains("plugin_echo"));
+        assert!(rendered.contains("raw 000"));
+        assert!(rendered.contains("raw 059"));
+        assert!(!rendered.contains("raw 119"));
+        assert!(rendered.contains("full result preserved in session"));
+        assert!(output.contains("raw 119"));
+    }
+
+    #[test]
+    fn ultraplan_progress_lines_include_phase_step_and_elapsed_status() {
+        let snapshot = InternalPromptProgressState {
+            command_label: "Ultraplan",
+            task_label: "ship plugin progress".to_string(),
+            step: 3,
+            phase: "running read_file".to_string(),
+            detail: Some("reading rust/crates/codineer-cli/src/main.rs".to_string()),
+            saw_final_text: false,
+        };
+
+        let started = format_internal_prompt_progress_line(
+            InternalPromptProgressEvent::Started,
+            &snapshot,
+            Duration::from_secs(0),
+            None,
+        );
+        let heartbeat = format_internal_prompt_progress_line(
+            InternalPromptProgressEvent::Heartbeat,
+            &snapshot,
+            Duration::from_secs(9),
+            None,
+        );
