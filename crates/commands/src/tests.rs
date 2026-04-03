@@ -12,7 +12,7 @@ use crate::{
 use plugins::{PluginKind, PluginManager, PluginManagerConfig, PluginMetadata, PluginSummary};
 use runtime::{CompactionConfig, ContentBlock, ConversationMessage, MessageRole, Session};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -21,7 +21,6 @@ use {
     crate::{handle_commit_push_pr_slash_command, CommitPushPrRequest},
     std::env,
     std::os::unix::fs::PermissionsExt,
-    std::path::Path,
     std::sync::{Mutex, OnceLock},
 };
 
