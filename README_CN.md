@@ -2,7 +2,7 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
     <source media="(prefers-color-scheme: light)" srcset="assets/logo-light.svg">
-    <img alt="Codineer" src="assets/logo-light.svg" width="360">
+    <img alt="Codineer" src="assets/logo-light.svg" width="340">
   </picture>
   <br>
   <em>你的本地 AI 编程助手 — 单一二进制，零云端锁定。</em>
