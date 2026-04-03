@@ -267,8 +267,7 @@ fn resolve_skill_path(skill: &str) -> Result<std::path::PathBuf, String> {
     if let Ok(codineer_home) = std::env::var("CODINEER_CONFIG_HOME") {
         candidates.push(std::path::PathBuf::from(codineer_home).join("skills"));
     }
-    if let Ok(home) = std::env::var("HOME") {
-        let home = std::path::PathBuf::from(home);
+    if let Some(home) = runtime::home_dir() {
         candidates.push(home.join(".codineer").join("skills"));
         candidates.push(home.join(".agents").join("skills"));
     }
@@ -335,6 +334,9 @@ fn deferred_tool_specs() -> Vec<ToolSpec> {
 }
 
 fn search_tool_specs(query: &str, max_results: usize, specs: &[ToolSpec]) -> Vec<String> {
+    if query.trim().is_empty() {
+        return Vec::new();
+    }
     let lowered = query.to_lowercase();
     if let Some(selection) = lowered.strip_prefix("select:") {
         return selection
@@ -519,6 +521,7 @@ fn execute_repl(input: ReplInput) -> Result<ReplOutput, String> {
         .spawn()
         .map_err(|error| error.to_string())?;
 
+    let pid = child.id();
     let timeout = Duration::from_millis(timeout_ms);
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
@@ -534,13 +537,16 @@ fn execute_repl(input: ReplInput) -> Result<ReplOutput, String> {
             duration_ms: started.elapsed().as_millis(),
         }),
         Ok(Err(error)) => Err(error.to_string()),
-        Err(_) => Ok(ReplOutput {
-            language: input.language,
-            stdout: String::new(),
-            stderr: format!("REPL execution timed out after {timeout_ms}ms"),
-            exit_code: 124,
-            duration_ms: started.elapsed().as_millis(),
-        }),
+        Err(_) => {
+            kill_process(pid);
+            Ok(ReplOutput {
+                language: input.language,
+                stdout: String::new(),
+                stderr: format!("REPL execution timed out after {timeout_ms}ms"),
+                exit_code: 124,
+                duration_ms: started.elapsed().as_millis(),
+            })
+        }
     }
 }
 
@@ -610,6 +616,25 @@ fn parse_skill_description(contents: &str) -> Option<String> {
         }
     }
     None
+}
+
+pub(crate) fn kill_process(pid: u32) {
+    #[cfg(unix)]
+    {
+        let _ = Command::new("kill")
+            .args(["-9", &pid.to_string()])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+    #[cfg(windows)]
+    {
+        let _ = Command::new("taskkill")
+            .args(["/F", "/PID", &pid.to_string()])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
 }
 
 #[cfg(test)]

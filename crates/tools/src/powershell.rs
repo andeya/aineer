@@ -91,31 +91,58 @@ pub(crate) fn execute_shell_command(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
 
-    // `timeout` is accepted for API parity with bash; we still run `output()` (blocking).
-    // Interrupt-after-timeout can be added later with a pid-aware kill path.
-    if let Some(_timeout_ms) = timeout {
-        let output = process.output()?;
-        return Ok(runtime::BashCommandOutput {
-            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-            raw_output_path: None,
-            interrupted: false,
-            is_image: None,
-            background_task_id: None,
-            backgrounded_by_user: None,
-            assistant_auto_backgrounded: None,
-            dangerously_disable_sandbox: None,
-            return_code_interpretation: output
-                .status
-                .code()
-                .filter(|code| *code != 0)
-                .map(|code| format!("exit_code:{code}")),
-            no_output_expected: Some(output.stdout.is_empty() && output.stderr.is_empty()),
-            structured_content: None,
-            persisted_output_path: None,
-            persisted_output_size: None,
-            sandbox_status: None,
+    if let Some(timeout_ms) = timeout {
+        let child = process.spawn()?;
+        let pid = child.id();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(child.wait_with_output());
         });
+        let deadline = std::time::Duration::from_millis(timeout_ms);
+        return match rx.recv_timeout(deadline) {
+            Ok(Ok(output)) => Ok(runtime::BashCommandOutput {
+                stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+                stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+                raw_output_path: None,
+                interrupted: false,
+                is_image: None,
+                background_task_id: None,
+                backgrounded_by_user: None,
+                assistant_auto_backgrounded: None,
+                dangerously_disable_sandbox: None,
+                return_code_interpretation: output
+                    .status
+                    .code()
+                    .filter(|code| *code != 0)
+                    .map(|code| format!("exit_code:{code}")),
+                no_output_expected: Some(output.stdout.is_empty() && output.stderr.is_empty()),
+                structured_content: None,
+                persisted_output_path: None,
+                persisted_output_size: None,
+                sandbox_status: None,
+            }),
+            Ok(Err(error)) => Err(error),
+            Err(_) => {
+                crate::kill_process(pid);
+                Ok(runtime::BashCommandOutput {
+                    stdout: String::new(),
+                    stderr: format!("PowerShell timed out after {timeout_ms}ms"),
+                    raw_output_path: None,
+                    interrupted: true,
+                    is_image: None,
+                    background_task_id: None,
+                    backgrounded_by_user: None,
+                    assistant_auto_backgrounded: None,
+                    dangerously_disable_sandbox: None,
+                    return_code_interpretation: Some(String::from("exit_code:124")),
+                    no_output_expected: Some(false),
+                    structured_content: None,
+                    persisted_output_path: None,
+                    persisted_output_size: None,
+                    sandbox_status: None,
+                })
+            }
+        };
     }
 
     let output = process.output()?;

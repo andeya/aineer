@@ -71,11 +71,16 @@ pub fn execute_bash(input: BashCommandInput) -> io::Result<BashCommandOutput> {
 
     if input.run_in_background.unwrap_or(false) {
         let mut child = prepare_command(&input.command, &cwd, &sandbox_status, false);
-        let child = child
+        let mut child = child
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()?;
+
+        let pid = child.id();
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
 
         return Ok(BashCommandOutput {
             stdout: String::new(),
@@ -83,7 +88,7 @@ pub fn execute_bash(input: BashCommandInput) -> io::Result<BashCommandOutput> {
             raw_output_path: None,
             interrupted: false,
             is_image: None,
-            background_task_id: Some(child.id().to_string()),
+            background_task_id: Some(pid.to_string()),
             backgrounded_by_user: Some(false),
             assistant_auto_backgrounded: Some(false),
             dangerously_disable_sandbox: input.dangerously_disable_sandbox,
