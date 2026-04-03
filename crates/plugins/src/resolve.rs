@@ -122,9 +122,7 @@ fn resolve_hook_entry(root: &Path, entry: &str) -> String {
     }
 }
 
-fn is_literal_command(entry: &str) -> bool {
-    !entry.starts_with("./") && !entry.starts_with("../") && !Path::new(entry).is_absolute()
-}
+use crate::constants::is_literal_command;
 
 impl Plugin for BundledPlugin {
     fn metadata(&self) -> &PluginMetadata {

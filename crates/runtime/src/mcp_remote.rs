@@ -191,6 +191,9 @@ impl McpRemoteClient {
                                 return Ok(response);
                             }
                         }
+                        WsMessage::Ping(data) => {
+                            let _ = ws.send(WsMessage::Pong(data)).await;
+                        }
                         WsMessage::Close(_) => {
                             return Err(io::Error::new(
                                 io::ErrorKind::ConnectionAborted,

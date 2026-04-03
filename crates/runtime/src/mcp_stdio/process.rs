@@ -105,7 +105,10 @@ impl McpStdioProcess {
             if line == "\r\n" {
                 break;
             }
-            if let Some(value) = line.strip_prefix("Content-Length:") {
+            if let Some(value) = line
+                .strip_prefix("Content-Length:")
+                .or_else(|| line.strip_prefix("content-length:"))
+            {
                 let parsed = value
                     .trim()
                     .parse::<usize>()

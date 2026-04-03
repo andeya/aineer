@@ -296,9 +296,7 @@ fn build_manifest_commands(
     validated
 }
 
-fn is_literal_command(entry: &str) -> bool {
-    !entry.starts_with("./") && !entry.starts_with("../") && !Path::new(entry).is_absolute()
-}
+use crate::constants::is_literal_command;
 
 fn validate_command_entries<'a>(
     root: &Path,

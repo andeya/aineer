@@ -200,9 +200,11 @@ fn run_hook_command(command: &str, ctx: &HookContext<'_>) -> HookCommandOutcome 
             let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
             let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
             let message = (!stdout.is_empty()).then_some(stdout);
+            const HOOK_EXIT_ALLOW: i32 = 0;
+            const HOOK_EXIT_DENY: i32 = 2;
             match output.status.code() {
-                Some(0) => HookCommandOutcome::Allow { message },
-                Some(2) => HookCommandOutcome::Deny { message },
+                Some(HOOK_EXIT_ALLOW) => HookCommandOutcome::Allow { message },
+                Some(HOOK_EXIT_DENY) => HookCommandOutcome::Deny { message },
                 Some(code) => HookCommandOutcome::Warn {
                     message: format_hook_warning(
                         command,

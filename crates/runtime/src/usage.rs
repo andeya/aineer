@@ -62,6 +62,7 @@ impl UsageCostEstimate {
     }
 }
 
+/// Approximate pricing as of 2025-Q2. Update periodically from provider pricing pages.
 #[must_use]
 pub fn pricing_for_model(model: &str) -> Option<ModelPricing> {
     let normalized = model.to_ascii_lowercase();

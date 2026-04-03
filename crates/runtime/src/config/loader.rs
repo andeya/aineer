@@ -78,8 +78,9 @@ impl ConfigLoader {
         let mut loaded_entries = Vec::new();
         let mut mcp_servers = BTreeMap::new();
 
+        let mut config_warnings = Vec::new();
         for entry in self.discover() {
-            let Some(value) = read_optional_json_object(&entry.path)? else {
+            let Some(value) = read_optional_json_object(&entry.path, &mut config_warnings)? else {
                 continue;
             };
             merge_mcp_servers(&mut mcp_servers, entry.source, &value, &entry.path)?;
@@ -101,12 +102,17 @@ impl ConfigLoader {
             sandbox: parse_optional_sandbox_config(&merged_value)?,
         };
 
+        for w in &config_warnings {
+            eprintln!("warning: {w}");
+        }
+
         Ok(RuntimeConfig::new(merged, loaded_entries, feature_config))
     }
 }
 
 fn read_optional_json_object(
     path: &Path,
+    warnings: &mut Vec<String>,
 ) -> Result<Option<BTreeMap<String, JsonValue>>, ConfigError> {
     let is_flat_config = path.file_name().and_then(|name| name.to_str()) == Some(".codineer.json");
     let contents = match fs::read_to_string(path) {
@@ -122,20 +128,20 @@ fn read_optional_json_object(
     let parsed = match JsonValue::parse(&contents) {
         Ok(parsed) => parsed,
         Err(error) if is_flat_config => {
-            eprintln!(
-                "warning: ignoring malformed config '{}': {error}",
+            warnings.push(format!(
+                "ignoring malformed config '{}': {error}",
                 path.display()
-            );
+            ));
             return Ok(None);
         }
         Err(error) => return Err(ConfigError::Parse(format!("{}: {error}", path.display()))),
     };
     let Some(object) = parsed.as_object() else {
         if is_flat_config {
-            eprintln!(
-                "warning: ignoring config '{}': expected JSON object at top level",
+            warnings.push(format!(
+                "ignoring config '{}': expected JSON object at top level",
                 path.display()
-            );
+            ));
             return Ok(None);
         }
         return Err(ConfigError::Parse(format!(
