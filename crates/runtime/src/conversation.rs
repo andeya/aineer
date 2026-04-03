@@ -617,7 +617,8 @@ mod tests {
             StaticToolExecutor::new().register("blocked", |_input| {
                 panic!("tool should not execute when hook denies")
             }),
-            PermissionPolicy::new(PermissionMode::DangerFullAccess),
+            PermissionPolicy::new(PermissionMode::DangerFullAccess)
+                .with_tool_requirement("blocked", PermissionMode::WorkspaceWrite),
             vec!["system".to_string()],
             &deny_config,
         );
@@ -686,7 +687,8 @@ mod tests {
             Session::new(),
             TwoCallApiClient { calls: 0 },
             StaticToolExecutor::new().register("add", |_input| Ok("4".to_string())),
-            PermissionPolicy::new(PermissionMode::DangerFullAccess),
+            PermissionPolicy::new(PermissionMode::DangerFullAccess)
+                .with_tool_requirement("add", PermissionMode::WorkspaceWrite),
             vec!["system".to_string()],
             &hook_config,
         );

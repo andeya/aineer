@@ -50,9 +50,9 @@ impl OpenAiCompatConfig {
     }
     #[must_use]
     pub fn credential_env_vars(self) -> &'static [&'static str] {
-        match self.provider_name {
-            "xAI" => XAI_ENV_VARS,
-            "OpenAI" => OPENAI_ENV_VARS,
+        match self.api_key_env {
+            "XAI_API_KEY" => XAI_ENV_VARS,
+            "OPENAI_API_KEY" => OPENAI_ENV_VARS,
             _ => &[],
         }
     }
@@ -259,6 +259,11 @@ impl OpenAiSseParser {
 
     fn push(&mut self, chunk: &[u8]) -> Result<Vec<ChatCompletionChunk>, ApiError> {
         self.buffer.extend_from_slice(chunk);
+        if self.buffer.len() > 16 * 1024 * 1024 {
+            return Err(ApiError::ResponsePayloadTooLarge {
+                limit: 16 * 1024 * 1024,
+            });
+        }
         let mut events = Vec::new();
 
         while let Some(frame) = next_sse_frame(&mut self.buffer) {
@@ -652,7 +657,7 @@ fn translate_message(message: &InputMessage) -> Vec<Value> {
                         "type": "function",
                         "function": {
                             "name": name,
-                            "arguments": input.to_string(),
+                            "arguments": serde_json::to_string(input).unwrap_or_default(),
                         }
                     })),
                     InputContentBlock::ToolResult { .. } => {}

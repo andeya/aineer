@@ -82,7 +82,7 @@ impl PermissionPolicy {
         self.tool_requirements
             .get(tool_name)
             .copied()
-            .unwrap_or(PermissionMode::DangerFullAccess)
+            .unwrap_or(PermissionMode::Prompt)
     }
 
     #[must_use]
@@ -125,8 +125,9 @@ impl PermissionPolicy {
             return PermissionOutcome::Allow;
         }
 
-        let needs_prompt = current_mode == PermissionMode::WorkspaceWrite
-            && required_mode == PermissionMode::DangerFullAccess;
+        let needs_prompt = required_mode == PermissionMode::Prompt
+            || (current_mode == PermissionMode::WorkspaceWrite
+                && required_mode == PermissionMode::DangerFullAccess);
 
         let request = PermissionRequest {
             tool_name: tool_name.to_string(),

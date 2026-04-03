@@ -27,13 +27,18 @@ pub(crate) fn execute_web_fetch(input: &WebFetchInput) -> Result<WebFetchOutput,
         .and_then(|value| value.to_str().ok())
         .unwrap_or_default()
         .to_string();
-    let body = response.text().map_err(|error| error.to_string())?;
-    let bytes = body.len();
-    let truncated = if body.len() > MAX_BODY_SIZE {
-        &body[..MAX_BODY_SIZE]
-    } else {
-        &body
-    };
+    let mut raw = Vec::new();
+    std::io::Read::read_to_end(
+        &mut std::io::Read::take(response, (MAX_BODY_SIZE + 1) as u64),
+        &mut raw,
+    )
+    .map_err(|error| error.to_string())?;
+    let bytes = raw.len();
+    if raw.len() > MAX_BODY_SIZE {
+        raw.truncate(MAX_BODY_SIZE);
+    }
+    let body = String::from_utf8_lossy(&raw).into_owned();
+    let truncated = body.as_str();
     let normalized = normalize_fetched_content(truncated, &content_type);
     let result = summarize_web_fetch(
         &final_url,
