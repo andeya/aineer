@@ -4,7 +4,8 @@ use serde_json::Value as JsonValue;
 
 use crate::config::{McpTransport, RuntimeConfig, ScopedMcpServerConfig};
 use crate::mcp::mcp_tool_name;
-use crate::mcp_client::McpClientBootstrap;
+use crate::mcp_client::{McpClientBootstrap, McpClientTransport};
+use crate::mcp_remote::McpRemoteClient;
 
 use super::process::{default_initialize_params, spawn_mcp_stdio_process, McpStdioProcess};
 use super::types::{
@@ -19,9 +20,15 @@ pub(crate) struct ToolRoute {
 }
 
 #[derive(Debug)]
+pub(crate) enum McpServerProcess {
+    Stdio(Box<McpStdioProcess>),
+    Remote(Box<McpRemoteClient>),
+}
+
+#[derive(Debug)]
 pub(crate) struct ManagedMcpServer {
     pub(crate) bootstrap: McpClientBootstrap,
-    pub(crate) process: Option<McpStdioProcess>,
+    pub(crate) process: Option<McpServerProcess>,
     pub(crate) initialized: bool,
 }
 
@@ -55,18 +62,22 @@ impl McpServerManager {
         let mut unsupported_servers = Vec::new();
 
         for (server_name, server_config) in servers {
-            if server_config.transport() == McpTransport::Stdio {
-                let bootstrap = McpClientBootstrap::from_scoped_config(server_name, server_config);
-                managed_servers.insert(server_name.clone(), ManagedMcpServer::new(bootstrap));
-            } else {
-                unsupported_servers.push(UnsupportedMcpServer {
-                    server_name: server_name.clone(),
-                    transport: server_config.transport(),
-                    reason: format!(
-                        "transport {:?} is not supported by McpServerManager",
-                        server_config.transport()
-                    ),
-                });
+            let transport = server_config.transport();
+            match transport {
+                McpTransport::Stdio | McpTransport::Sse | McpTransport::Http | McpTransport::Ws => {
+                    let bootstrap =
+                        McpClientBootstrap::from_scoped_config(server_name, server_config);
+                    managed_servers.insert(server_name.clone(), ManagedMcpServer::new(bootstrap));
+                }
+                McpTransport::Sdk | McpTransport::ManagedProxy => {
+                    unsupported_servers.push(UnsupportedMcpServer {
+                        server_name: server_name.clone(),
+                        transport,
+                        reason: format!(
+                            "transport {transport:?} is not supported by McpServerManager"
+                        ),
+                    });
+                }
             }
         }
 
@@ -103,14 +114,13 @@ impl McpServerManager {
                             details: "server process missing after initialization".to_string(),
                         }
                     })?;
-                    process
-                        .list_tools(
-                            request_id,
-                            Some(McpListToolsParams {
-                                cursor: cursor.clone(),
-                            }),
-                        )
-                        .await?
+                    let params = Some(McpListToolsParams {
+                        cursor: cursor.clone(),
+                    });
+                    match process {
+                        McpServerProcess::Stdio(p) => p.list_tools(request_id, params).await?,
+                        McpServerProcess::Remote(c) => c.list_tools(request_id, params).await?,
+                    }
                 };
 
                 if let Some(error) = response.error {
@@ -172,6 +182,11 @@ impl McpServerManager {
 
         self.ensure_server_ready(&route.server_name).await?;
         let request_id = self.take_request_id();
+        let params = McpToolCallParams {
+            name: route.raw_name,
+            arguments,
+            meta: None,
+        };
         let response =
             {
                 let server = self.server_mut(&route.server_name)?;
@@ -182,16 +197,10 @@ impl McpServerManager {
                         details: "server process missing after initialization".to_string(),
                     }
                 })?;
-                process
-                    .call_tool(
-                        request_id,
-                        McpToolCallParams {
-                            name: route.raw_name,
-                            arguments,
-                            meta: None,
-                        },
-                    )
-                    .await?
+                match process {
+                    McpServerProcess::Stdio(p) => p.call_tool(request_id, params).await?,
+                    McpServerProcess::Remote(c) => c.call_tool(request_id, params).await?,
+                }
             };
         Ok(response)
     }
@@ -201,7 +210,10 @@ impl McpServerManager {
         for server_name in server_names {
             let server = self.server_mut(&server_name)?;
             if let Some(process) = server.process.as_mut() {
-                process.shutdown().await?;
+                match process {
+                    McpServerProcess::Stdio(p) => p.shutdown().await?,
+                    McpServerProcess::Remote(c) => c.shutdown().await?,
+                }
             }
             server.process = None;
             server.initialized = false;
@@ -245,7 +257,29 @@ impl McpServerManager {
 
         if needs_spawn {
             let server = self.server_mut(server_name)?;
-            server.process = Some(spawn_mcp_stdio_process(&server.bootstrap)?);
+            let process = match &server.bootstrap.transport {
+                McpClientTransport::Stdio(_) => {
+                    McpServerProcess::Stdio(Box::new(spawn_mcp_stdio_process(&server.bootstrap)?))
+                }
+                McpClientTransport::Sse(_)
+                | McpClientTransport::Http(_)
+                | McpClientTransport::WebSocket(_) => McpServerProcess::Remote(Box::new(
+                    McpRemoteClient::connect(&server.bootstrap)
+                        .await
+                        .map_err(|e| McpServerManagerError::SpawnFailed {
+                            server_name: server_name.to_string(),
+                            source: e,
+                        })?,
+                )),
+                other => {
+                    return Err(McpServerManagerError::InvalidResponse {
+                        server_name: server_name.to_string(),
+                        method: "connect",
+                        details: format!("transport {other:?} not supported"),
+                    });
+                }
+            };
+            server.process = Some(process);
             server.initialized = false;
         }
 
@@ -259,6 +293,7 @@ impl McpServerManager {
 
         if needs_initialize {
             let request_id = self.take_request_id();
+            let params = default_initialize_params();
             let response = {
                 let server = self.server_mut(server_name)?;
                 let process = server.process.as_mut().ok_or_else(|| {
@@ -268,9 +303,10 @@ impl McpServerManager {
                         details: "server process missing before initialize".to_string(),
                     }
                 })?;
-                process
-                    .initialize(request_id, default_initialize_params())
-                    .await?
+                match process {
+                    McpServerProcess::Stdio(p) => p.initialize(request_id, params).await?,
+                    McpServerProcess::Remote(c) => c.initialize(request_id, params).await?,
+                }
             };
 
             if let Some(error) = response.error {

@@ -1,7 +1,7 @@
 use crate::config::{McpServerConfig, ScopedMcpServerConfig};
 
 const CLAUDEAI_SERVER_PREFIX: &str = "claude.ai ";
-const CCR_PROXY_PATH_MARKERS: [&str; 2] = ["/v2/session_ingress/shttp/mcp/", "/v2/ccr-sessions/"];
+const MCP_PROXY_PATH_MARKERS: [&str; 2] = ["/v2/session_ingress/shttp/mcp/", "/v2/ccr-sessions/"];
 
 #[must_use]
 pub fn normalize_name_for_mcp(name: &str) -> String {
@@ -37,8 +37,8 @@ pub fn mcp_tool_name(server_name: &str, tool_name: &str) -> String {
 }
 
 #[must_use]
-pub fn unwrap_ccr_proxy_url(url: &str) -> String {
-    if !CCR_PROXY_PATH_MARKERS
+pub fn unwrap_mcp_proxy_url(url: &str) -> String {
+    if !MCP_PROXY_PATH_MARKERS
         .iter()
         .any(|marker| url.contains(marker))
     {
@@ -70,11 +70,11 @@ pub fn mcp_server_signature(config: &McpServerConfig) -> Option<String> {
             Some(format!("stdio:{}", render_command_signature(&command)))
         }
         McpServerConfig::Sse(config) | McpServerConfig::Http(config) => {
-            Some(format!("url:{}", unwrap_ccr_proxy_url(&config.url)))
+            Some(format!("url:{}", unwrap_mcp_proxy_url(&config.url)))
         }
-        McpServerConfig::Ws(config) => Some(format!("url:{}", unwrap_ccr_proxy_url(&config.url))),
+        McpServerConfig::Ws(config) => Some(format!("url:{}", unwrap_mcp_proxy_url(&config.url))),
         McpServerConfig::ManagedProxy(config) => {
-            Some(format!("url:{}", unwrap_ccr_proxy_url(&config.url)))
+            Some(format!("url:{}", unwrap_mcp_proxy_url(&config.url)))
         }
         McpServerConfig::Sdk(_) => None,
     }
@@ -212,7 +212,7 @@ mod tests {
 
     use super::{
         mcp_server_signature, mcp_tool_name, normalize_name_for_mcp, scoped_mcp_config_hash,
-        unwrap_ccr_proxy_url,
+        unwrap_mcp_proxy_url,
     };
 
     #[test]
@@ -232,9 +232,9 @@ mod tests {
     #[test]
     fn unwraps_ccr_proxy_urls_for_signature_matching() {
         let wrapped = "https://api.anthropic.com/v2/session_ingress/shttp/mcp/123?mcp_url=https%3A%2F%2Fvendor.example%2Fmcp&other=1";
-        assert_eq!(unwrap_ccr_proxy_url(wrapped), "https://vendor.example/mcp");
+        assert_eq!(unwrap_mcp_proxy_url(wrapped), "https://vendor.example/mcp");
         assert_eq!(
-            unwrap_ccr_proxy_url("https://vendor.example/mcp"),
+            unwrap_mcp_proxy_url("https://vendor.example/mcp"),
             "https://vendor.example/mcp"
         );
     }
@@ -304,22 +304,22 @@ mod tests {
     }
 
     #[test]
-    fn unwrap_ccr_proxy_url_handles_ccr_sessions_marker() {
+    fn unwrap_mcp_proxy_url_handles_ccr_sessions_marker() {
         let url =
             "https://api.anthropic.com/v2/ccr-sessions/abc?mcp_url=https%3A%2F%2Fexample.com%2Fmcp";
-        assert_eq!(unwrap_ccr_proxy_url(url), "https://example.com/mcp");
+        assert_eq!(unwrap_mcp_proxy_url(url), "https://example.com/mcp");
     }
 
     #[test]
-    fn unwrap_ccr_proxy_url_no_query_returns_full_url() {
+    fn unwrap_mcp_proxy_url_no_query_returns_full_url() {
         let url = "https://api.anthropic.com/v2/session_ingress/shttp/mcp/123";
-        assert_eq!(unwrap_ccr_proxy_url(url), url);
+        assert_eq!(unwrap_mcp_proxy_url(url), url);
     }
 
     #[test]
-    fn unwrap_ccr_proxy_url_query_without_mcp_url_returns_original() {
+    fn unwrap_mcp_proxy_url_query_without_mcp_url_returns_original() {
         let url = "https://api.anthropic.com/v2/ccr-sessions/abc?other=val";
-        assert_eq!(unwrap_ccr_proxy_url(url), url);
+        assert_eq!(unwrap_mcp_proxy_url(url), url);
     }
 
     #[test]

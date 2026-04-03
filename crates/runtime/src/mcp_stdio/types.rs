@@ -214,6 +214,10 @@ pub struct UnsupportedMcpServer {
 #[derive(Debug)]
 pub enum McpServerManagerError {
     Io(io::Error),
+    SpawnFailed {
+        server_name: String,
+        source: io::Error,
+    },
     JsonRpc {
         server_name: String,
         method: &'static str,
@@ -236,6 +240,13 @@ impl std::fmt::Display for McpServerManagerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Io(error) => write!(f, "{error}"),
+            Self::SpawnFailed {
+                server_name,
+                source,
+            } => write!(
+                f,
+                "failed to connect to MCP server `{server_name}`: {source}"
+            ),
             Self::JsonRpc {
                 server_name,
                 method,
@@ -264,7 +275,7 @@ impl std::fmt::Display for McpServerManagerError {
 impl std::error::Error for McpServerManagerError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Io(error) => Some(error),
+            Self::Io(error) | Self::SpawnFailed { source: error, .. } => Some(error),
             Self::JsonRpc { .. }
             | Self::InvalidResponse { .. }
             | Self::UnknownTool { .. }
@@ -276,5 +287,76 @@ impl std::error::Error for McpServerManagerError {
 impl From<io::Error> for McpServerManagerError {
     fn from(value: io::Error) -> Self {
         Self::Io(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn error_display_covers_all_variants() {
+        let io_err = McpServerManagerError::Io(io::Error::new(io::ErrorKind::NotFound, "gone"));
+        assert!(io_err.to_string().contains("gone"));
+
+        let spawn_err = McpServerManagerError::SpawnFailed {
+            server_name: "test-srv".into(),
+            source: io::Error::new(io::ErrorKind::PermissionDenied, "denied"),
+        };
+        assert!(spawn_err.to_string().contains("test-srv"));
+        assert!(spawn_err.to_string().contains("denied"));
+
+        let rpc_err = McpServerManagerError::JsonRpc {
+            server_name: "rpc-srv".into(),
+            method: "initialize",
+            error: JsonRpcError {
+                code: -32600,
+                message: "bad request".into(),
+                data: None,
+            },
+        };
+        assert!(rpc_err.to_string().contains("rpc-srv"));
+        assert!(rpc_err.to_string().contains("bad request"));
+
+        let invalid = McpServerManagerError::InvalidResponse {
+            server_name: "inv-srv".into(),
+            method: "tools/list",
+            details: "missing tools".into(),
+        };
+        assert!(invalid.to_string().contains("inv-srv"));
+        assert!(invalid.to_string().contains("missing tools"));
+
+        let unknown_tool = McpServerManagerError::UnknownTool {
+            qualified_name: "srv__tool".into(),
+        };
+        assert!(unknown_tool.to_string().contains("srv__tool"));
+
+        let unknown_srv = McpServerManagerError::UnknownServer {
+            server_name: "missing".into(),
+        };
+        assert!(unknown_srv.to_string().contains("missing"));
+    }
+
+    #[test]
+    fn error_source_returns_io_for_io_and_spawn_variants() {
+        let io_err = McpServerManagerError::Io(io::Error::other("x"));
+        assert!(std::error::Error::source(&io_err).is_some());
+
+        let spawn_err = McpServerManagerError::SpawnFailed {
+            server_name: "s".into(),
+            source: io::Error::other("y"),
+        };
+        assert!(std::error::Error::source(&spawn_err).is_some());
+
+        let rpc_err = McpServerManagerError::JsonRpc {
+            server_name: "s".into(),
+            method: "m",
+            error: JsonRpcError {
+                code: 0,
+                message: String::new(),
+                data: None,
+            },
+        };
+        assert!(std::error::Error::source(&rpc_err).is_none());
     }
 }

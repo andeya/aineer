@@ -10,17 +10,18 @@ use serde_json::json;
 use tokio::runtime::Builder;
 
 use crate::config::{
-    ConfigSource, McpRemoteServerConfig, McpSdkServerConfig, McpServerConfig,
-    McpStdioServerConfig, McpWebSocketServerConfig, ScopedMcpServerConfig,
+    ConfigSource, McpRemoteServerConfig, McpSdkServerConfig, McpServerConfig, McpStdioServerConfig,
+    McpTransport, McpWebSocketServerConfig, ScopedMcpServerConfig,
 };
 use crate::mcp::mcp_tool_name;
 use crate::mcp_client::McpClientBootstrap;
 
-use super::{
-    spawn_mcp_stdio_process, JsonRpcId, JsonRpcRequest, JsonRpcResponse,
-    McpInitializeClientInfo, McpInitializeParams, McpInitializeResult, McpInitializeServerInfo,
-    McpListToolsResult, McpReadResourceParams, McpReadResourceResult, McpServerManager,
-    McpServerManagerError, McpStdioProcess, McpTool, McpToolCallParams,
+use super::manager::McpServerManager;
+use super::process::{spawn_mcp_stdio_process, McpStdioProcess};
+use super::types::{
+    JsonRpcId, JsonRpcRequest, JsonRpcResponse, McpInitializeClientInfo, McpInitializeParams,
+    McpInitializeResult, McpInitializeServerInfo, McpListToolsResult, McpReadResourceParams,
+    McpReadResourceResult, McpResourceContents, McpServerManagerError, McpTool, McpToolCallParams,
 };
 
 fn temp_dir() -> PathBuf {
@@ -616,7 +617,7 @@ fn lists_tools_calls_tool_and_reads_resources_over_jsonrpc() {
         assert_eq!(
             read.result,
             Some(McpReadResourceResult {
-                contents: vec![super::McpResourceContents {
+                contents: vec![McpResourceContents {
                     uri: "file://guide.txt".to_string(),
                     mime_type: Some("text/plain".to_string()),
                     text: Some("contents for file://guide.txt".to_string()),
@@ -765,7 +766,7 @@ fn manager_routes_tool_calls_to_correct_server() {
 fn manager_records_unsupported_non_stdio_servers_without_panicking() {
     let servers = BTreeMap::from([
         (
-            "http".to_string(),
+            "http-server".to_string(),
             ScopedMcpServerConfig {
                 scope: ConfigSource::Local,
                 config: McpServerConfig::Http(McpRemoteServerConfig {
@@ -786,7 +787,7 @@ fn manager_records_unsupported_non_stdio_servers_without_panicking() {
             },
         ),
         (
-            "ws".to_string(),
+            "ws-server".to_string(),
             ScopedMcpServerConfig {
                 scope: ConfigSource::Local,
                 config: McpServerConfig::Ws(McpWebSocketServerConfig {
@@ -801,10 +802,9 @@ fn manager_records_unsupported_non_stdio_servers_without_panicking() {
     let manager = McpServerManager::from_servers(&servers);
     let unsupported = manager.unsupported_servers();
 
-    assert_eq!(unsupported.len(), 3);
-    assert_eq!(unsupported[0].server_name, "http");
-    assert_eq!(unsupported[1].server_name, "sdk");
-    assert_eq!(unsupported[2].server_name, "ws");
+    assert_eq!(unsupported.len(), 1);
+    assert_eq!(unsupported[0].server_name, "sdk");
+    assert_eq!(unsupported[0].transport, McpTransport::Sdk);
 }
 
 #[test]
