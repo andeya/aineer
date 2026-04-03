@@ -295,7 +295,11 @@ pub fn load_oauth_credentials() -> io::Result<Option<OAuthTokenSet>> {
         return Ok(Some(token_set));
     }
 
-    let path = credentials_path()?;
+    let path = match credentials_path() {
+        Ok(path) => path,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
     let root = read_credentials_root(&path)?;
     let Some(oauth) = root.get("oauth") else {
         return Ok(None);
@@ -393,9 +397,15 @@ fn credentials_home_dir() -> io::Result<PathBuf> {
     if let Some(path) = std::env::var_os("CODINEER_CONFIG_HOME") {
         return Ok(PathBuf::from(path));
     }
-    let home = std::env::var_os("HOME")
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "HOME is not set"))?;
-    Ok(PathBuf::from(home).join(".codineer"))
+    for key in ["HOME", "USERPROFILE"] {
+        if let Some(home) = std::env::var_os(key) {
+            return Ok(PathBuf::from(home).join(".codineer"));
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        "home directory not found (neither HOME nor USERPROFILE is set)",
+    ))
 }
 
 fn read_credentials_root(path: &PathBuf) -> io::Result<Map<String, Value>> {
