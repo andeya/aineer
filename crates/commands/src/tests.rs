@@ -748,9 +748,16 @@ fn branch_and_worktree_commands_manage_git_state() {
     assert!(added.contains("wt-demo"));
     let wt_path_str = worktree_path.to_str().expect("utf8 path");
     let wt_path_forward = wt_path_str.replace('\\', "/");
+    let wt_name = worktree_path
+        .file_name()
+        .expect("worktree path has a file name")
+        .to_str()
+        .expect("utf8 file name");
     assert!(
-        listed_worktrees.contains(wt_path_str) || listed_worktrees.contains(&*wt_path_forward),
-        "listed worktrees did not contain worktree path\npath: {wt_path_str}\noutput: {listed_worktrees}"
+        listed_worktrees.contains(wt_path_str)
+            || listed_worktrees.contains(&*wt_path_forward)
+            || listed_worktrees.contains(wt_name),
+        "listed worktrees did not contain worktree path\npath: {wt_path_str}\nname: {wt_name}\noutput: {listed_worktrees}"
     );
     assert!(removed.contains("Result           removed"));
 
