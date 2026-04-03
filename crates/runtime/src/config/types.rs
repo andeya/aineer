@@ -181,11 +181,7 @@ impl RuntimeConfig {
 
     #[must_use]
     pub fn empty() -> Self {
-        Self::new(
-            BTreeMap::new(),
-            Vec::new(),
-            RuntimeFeatureConfig::default(),
-        )
+        Self::new(BTreeMap::new(), Vec::new(), RuntimeFeatureConfig::default())
     }
 
     #[must_use]

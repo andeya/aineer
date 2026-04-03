@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
-use std::fs::{self, File};
-use std::io::{self, Read};
+use std::fs;
+use std::io;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -371,7 +371,8 @@ fn generate_random_token(bytes: usize) -> io::Result<String> {
 
     #[cfg(unix)]
     {
-        File::open("/dev/urandom")?.read_exact(&mut buffer)?;
+        use std::io::Read as _;
+        std::fs::File::open("/dev/urandom")?.read_exact(&mut buffer)?;
     }
     #[cfg(not(unix))]
     {

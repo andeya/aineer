@@ -101,11 +101,7 @@ impl ConfigLoader {
             sandbox: parse_optional_sandbox_config(&merged_value)?,
         };
 
-        Ok(RuntimeConfig::new(
-            merged,
-            loaded_entries,
-            feature_config,
-        ))
+        Ok(RuntimeConfig::new(merged, loaded_entries, feature_config))
     }
 }
 

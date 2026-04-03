@@ -8,6 +8,7 @@ use tokio::process::Command as TokioCommand;
 use tokio::runtime::Builder;
 use tokio::time::timeout;
 
+use crate::remote::inherited_upstream_proxy_env;
 use crate::sandbox::{
     build_sandbox_command, resolve_sandbox_status_for_request, FilesystemIsolationMode,
     SandboxConfig, SandboxStatus,
@@ -199,6 +200,7 @@ fn prepare_command(
         prepared.args(launcher.args);
         prepared.current_dir(cwd);
         prepared.envs(launcher.env);
+        apply_proxy_env(&mut prepared);
         return prepared;
     }
 
@@ -206,6 +208,7 @@ fn prepare_command(
     {
         let mut prepared = Command::new("cmd");
         prepared.arg("/C").arg(command).current_dir(cwd);
+        apply_proxy_env(&mut prepared);
         prepared
     }
     #[cfg(not(windows))]
@@ -216,6 +219,7 @@ fn prepare_command(
             prepared.env("HOME", cwd.join(".sandbox-home"));
             prepared.env("TMPDIR", cwd.join(".sandbox-tmp"));
         }
+        apply_proxy_env(&mut prepared);
         prepared
     }
 }
@@ -235,6 +239,7 @@ fn prepare_tokio_command(
         prepared.args(launcher.args);
         prepared.current_dir(cwd);
         prepared.envs(launcher.env);
+        apply_tokio_proxy_env(&mut prepared);
         return prepared;
     }
 
@@ -242,6 +247,7 @@ fn prepare_tokio_command(
     {
         let mut prepared = TokioCommand::new("cmd");
         prepared.arg("/C").arg(command).current_dir(cwd);
+        apply_tokio_proxy_env(&mut prepared);
         prepared
     }
     #[cfg(not(windows))]
@@ -252,8 +258,21 @@ fn prepare_tokio_command(
             prepared.env("HOME", cwd.join(".sandbox-home"));
             prepared.env("TMPDIR", cwd.join(".sandbox-tmp"));
         }
+        apply_tokio_proxy_env(&mut prepared);
         prepared
     }
+}
+
+fn apply_proxy_env(cmd: &mut Command) {
+    let env_map = env::vars().collect();
+    let proxy_env = inherited_upstream_proxy_env(&env_map);
+    cmd.envs(proxy_env);
+}
+
+fn apply_tokio_proxy_env(cmd: &mut TokioCommand) {
+    let env_map = env::vars().collect();
+    let proxy_env = inherited_upstream_proxy_env(&env_map);
+    cmd.envs(proxy_env);
 }
 
 fn prepare_sandbox_dirs(cwd: &std::path::Path) {

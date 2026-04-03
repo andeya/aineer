@@ -7,11 +7,11 @@ mod hooks;
 mod json;
 mod mcp;
 mod mcp_client;
+mod mcp_remote;
 mod mcp_stdio;
 mod oauth;
 mod permissions;
 mod prompt;
-#[allow(dead_code)]
 mod remote;
 pub mod sandbox;
 mod session;
@@ -35,17 +35,17 @@ pub use conversation::{
 };
 pub use file_ops::{
     edit_file, glob_search, grep_search, read_file, write_file, EditFileOutput, GlobSearchOutput,
-    GrepSearchInput, GrepSearchOutput, ReadFileOutput, StructuredPatchHunk, TextFilePayload,
-    WriteFileOutput,
+    GrepOutputMode, GrepSearchInput, GrepSearchOutput, ReadFileOutput, StructuredPatchHunk,
+    TextFilePayload, WriteFileOutput,
 };
-pub use hooks::{HookEvent, HookRunResult, HookRunner};
+pub use hooks::{HookCommandSource, HookEvent, HookRunResult, HookRunner};
 pub use lsp::{
     FileDiagnostics, LspContextEnrichment, LspError, LspManager, LspServerConfig, SymbolLocation,
     WorkspaceDiagnostics,
 };
 pub use mcp::{
     mcp_server_signature, mcp_tool_name, mcp_tool_prefix, normalize_name_for_mcp,
-    scoped_mcp_config_hash, unwrap_ccr_proxy_url,
+    scoped_mcp_config_hash, unwrap_mcp_proxy_url,
 };
 pub use mcp_client::McpClientBootstrap;
 pub use mcp_stdio::{
@@ -65,6 +65,9 @@ pub use permissions::{
 pub use prompt::{
     load_system_prompt, load_system_prompt_with_lsp, ContextFile, ProjectContext,
     SystemPromptBuilder,
+};
+pub use remote::{
+    inherited_upstream_proxy_env, RemoteSessionContext, UpstreamProxyBootstrap, UpstreamProxyState,
 };
 pub use session::{ContentBlock, ConversationMessage, MessageRole, Session, SessionError};
 pub use usage::{format_usd, pricing_for_model, TokenUsage, UsageCostEstimate, UsageTracker};

@@ -4,10 +4,31 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use std::fmt;
+
 use glob::Pattern;
 use regex::RegexBuilder;
 use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GrepOutputMode {
+    #[default]
+    FilesWithMatches,
+    Content,
+    Count,
+}
+
+impl fmt::Display for GrepOutputMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::FilesWithMatches => f.write_str("files_with_matches"),
+            Self::Content => f.write_str("content"),
+            Self::Count => f.write_str("count"),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TextFilePayload {
@@ -93,7 +114,7 @@ pub struct GrepSearchInput {
     pub path: Option<String>,
     pub glob: Option<String>,
     #[serde(rename = "output_mode")]
-    pub output_mode: Option<String>,
+    pub output_mode: Option<GrepOutputMode>,
     #[serde(rename = "-B")]
     pub before: Option<usize>,
     #[serde(rename = "-A")]
@@ -114,7 +135,7 @@ pub struct GrepSearchInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GrepSearchOutput {
-    pub mode: Option<String>,
+    pub mode: Option<GrepOutputMode>,
     #[serde(rename = "numFiles")]
     pub num_files: usize,
     pub filenames: Vec<String>,
@@ -282,10 +303,7 @@ pub fn grep_search(input: &GrepSearchInput) -> io::Result<GrepSearchOutput> {
         .transpose()
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))?;
     let file_type = input.file_type.as_deref();
-    let output_mode = input
-        .output_mode
-        .clone()
-        .unwrap_or_else(|| String::from("files_with_matches"));
+    let output_mode = input.output_mode.unwrap_or_default();
     let context = input.context.or(input.context_short).unwrap_or(0);
 
     let mut filenames = Vec::new();
@@ -301,7 +319,7 @@ pub fn grep_search(input: &GrepSearchInput) -> io::Result<GrepSearchOutput> {
             continue;
         };
 
-        if output_mode == "count" {
+        if output_mode == GrepOutputMode::Count {
             let count = regex.find_iter(&file_contents).count();
             if count > 0 {
                 filenames.push(file_path.to_string_lossy().into_owned());
@@ -324,7 +342,7 @@ pub fn grep_search(input: &GrepSearchInput) -> io::Result<GrepSearchOutput> {
         }
 
         filenames.push(file_path.to_string_lossy().into_owned());
-        if output_mode == "content" {
+        if output_mode == GrepOutputMode::Content {
             let mut emitted = std::collections::BTreeSet::new();
             for index in matched_lines {
                 let start = index.saturating_sub(input.before.unwrap_or(context));
@@ -346,10 +364,10 @@ pub fn grep_search(input: &GrepSearchInput) -> io::Result<GrepSearchOutput> {
 
     let (filenames, applied_limit, applied_offset) =
         apply_limit(filenames, input.head_limit, input.offset);
-    let content_output = if output_mode == "content" {
+    let content_output = if output_mode == GrepOutputMode::Content {
         let (lines, limit, offset) = apply_limit(content_lines, input.head_limit, input.offset);
         return Ok(GrepSearchOutput {
-            mode: Some(output_mode),
+            mode: Some(GrepOutputMode::Content),
             num_files: filenames.len(),
             filenames,
             num_lines: Some(lines.len()),
@@ -363,12 +381,12 @@ pub fn grep_search(input: &GrepSearchInput) -> io::Result<GrepSearchOutput> {
     };
 
     Ok(GrepSearchOutput {
-        mode: Some(output_mode.clone()),
+        mode: Some(output_mode),
         num_files: filenames.len(),
         filenames,
         content: content_output,
         num_lines: None,
-        num_matches: (output_mode == "count").then_some(total_matches),
+        num_matches: (output_mode == GrepOutputMode::Count).then_some(total_matches),
         applied_limit,
         applied_offset,
     })
@@ -514,7 +532,9 @@ fn normalize_path_allow_missing(path: &str) -> io::Result<PathBuf> {
 mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use super::{edit_file, glob_search, grep_search, read_file, write_file, GrepSearchInput};
+    use super::{
+        edit_file, glob_search, grep_search, read_file, write_file, GrepOutputMode, GrepSearchInput,
+    };
 
     fn temp_path(name: &str) -> std::path::PathBuf {
         let unique = SystemTime::now()
@@ -575,7 +595,7 @@ mod tests {
             pattern: String::from("hello"),
             path: Some(dir.to_string_lossy().into_owned()),
             glob: Some(String::from("**/*.rs")),
-            output_mode: Some(String::from("content")),
+            output_mode: Some(GrepOutputMode::Content),
             before: None,
             after: None,
             context_short: None,
