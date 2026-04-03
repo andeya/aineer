@@ -193,16 +193,6 @@ pub(crate) fn append_repl_command_suggestions(lines: &mut Vec<String>, name: &st
     );
 }
 
-pub(crate) fn render_mode_unavailable(command: &str, label: &str) -> String {
-    [
-        "Command unavailable in this REPL mode".to_string(),
-        format!("  Command          /{command}"),
-        format!("  Feature          {label}"),
-        "  Tip              Use /help to find currently wired REPL commands".to_string(),
-    ]
-    .join("\n")
-}
-
 pub(crate) fn slash_command_completion_candidates() -> Vec<String> {
     let mut candidates = slash_command_specs()
         .iter()

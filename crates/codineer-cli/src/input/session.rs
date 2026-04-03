@@ -7,7 +7,8 @@ use crossterm::terminal::{Clear, ClearType};
 
 use super::text::{
     is_vim_toggle, line_end, line_start, move_vertical, next_boundary, previous_boundary,
-    previous_command_boundary, remove_previous_char, render_selected_text, selection_bounds, to_u16,
+    previous_command_boundary, remove_previous_char, render_selected_text, selection_bounds,
+    to_u16,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,10 +43,17 @@ impl EditorMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(super) enum YankShape {
+    #[default]
+    Charwise,
+    Linewise,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(super) struct YankBuffer {
     pub(super) text: String,
-    pub(super) linewise: bool,
+    pub(super) shape: YankShape,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

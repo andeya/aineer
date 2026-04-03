@@ -3,9 +3,7 @@ use std::io::{self, IsTerminal, Write};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crossterm::terminal;
 
-use super::session::{
-    EditSession, EditorMode, KeyAction, ReadOutcome, YankBuffer,
-};
+use super::session::{EditSession, EditorMode, KeyAction, ReadOutcome, YankBuffer, YankShape};
 use super::text::{
     current_line_delete_range, is_vim_toggle, line_end, next_boundary, slash_command_prefix,
 };
@@ -137,7 +135,11 @@ impl LineEditor {
         }
     }
 
-    pub(super) fn handle_key_event(&mut self, session: &mut EditSession, key: KeyEvent) -> KeyAction {
+    pub(super) fn handle_key_event(
+        &mut self,
+        session: &mut EditSession,
+        key: KeyEvent,
+    ) -> KeyAction {
         if key.code != KeyCode::Tab {
             self.completion_state = None;
         }
@@ -275,7 +277,7 @@ impl LineEditor {
         let (line_start_idx, line_end_idx, delete_start_idx) =
             current_line_delete_range(&session.text, session.cursor);
         self.yank_buffer.text = session.text[line_start_idx..line_end_idx].to_string();
-        self.yank_buffer.linewise = true;
+        self.yank_buffer.shape = YankShape::Linewise;
         session.text.drain(delete_start_idx..line_end_idx);
         session.cursor = delete_start_idx.min(session.text.len());
     }
@@ -284,7 +286,7 @@ impl LineEditor {
         let (line_start_idx, line_end_idx, _) =
             current_line_delete_range(&session.text, session.cursor);
         self.yank_buffer.text = session.text[line_start_idx..line_end_idx].to_string();
-        self.yank_buffer.linewise = true;
+        self.yank_buffer.shape = YankShape::Linewise;
     }
 
     fn paste_after(&mut self, session: &mut EditSession) {
@@ -292,7 +294,7 @@ impl LineEditor {
             return;
         }
 
-        if self.yank_buffer.linewise {
+        if self.yank_buffer.shape == YankShape::Linewise {
             let line_end_idx = line_end(&session.text, session.cursor);
             let insert_at = if line_end_idx < session.text.len() {
                 line_end_idx + 1

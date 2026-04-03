@@ -429,6 +429,26 @@ impl CliToolExecutor {
         }
     }
 
+    fn execute_tool_search(&self, input: &str) -> Result<String, ToolError> {
+        let search_input: tools::ToolSearchInput = serde_json::from_str(input)
+            .map_err(|e| ToolError::new(format!("invalid ToolSearch input: {e}")))?;
+        let pending = self
+            .mcp_manager
+            .lock()
+            .ok()
+            .map(|guard| {
+                guard
+                    .unsupported_servers()
+                    .iter()
+                    .map(|s| s.server_name.clone())
+                    .collect::<Vec<_>>()
+            })
+            .filter(|v| !v.is_empty());
+        let output = tools::execute_tool_search_with_context(search_input, pending);
+        serde_json::to_string_pretty(&output)
+            .map_err(|e| ToolError::new(format!("failed to serialize ToolSearch output: {e}")))
+    }
+
     fn execute_mcp_tool(&mut self, tool_name: &str, input: &str) -> Result<String, ToolError> {
         let arguments: Option<serde_json::Value> = if input.trim().is_empty() {
             None
@@ -507,6 +527,10 @@ impl ToolExecutor for CliToolExecutor {
                 _ => {}
             }
             return result;
+        }
+
+        if tool_name == "ToolSearch" {
+            return self.execute_tool_search(input);
         }
 
         let value = serde_json::from_str(input)

@@ -847,6 +847,7 @@ mod tests {
                 memory_file_count: 4,
                 project_root: Some(PathBuf::from("/tmp")),
                 git_branch: Some("main".to_string()),
+                remote_session: None,
             },
         );
         assert!(status.contains("Session"));

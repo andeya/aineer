@@ -7,12 +7,13 @@ use std::sync::Arc;
 use crate::input;
 use crate::render::{Spinner, TerminalRenderer};
 use commands::{
-    handle_agents_slash_command, handle_plugins_slash_command, handle_skills_slash_command,
-    SlashCommand,
+    handle_agents_slash_command, handle_branch_slash_command, handle_commit_push_pr_slash_command,
+    handle_plugins_slash_command, handle_skills_slash_command, handle_worktree_slash_command,
+    CommitPushPrRequest, SlashCommand,
 };
 use runtime::{
     CompactionConfig, ConfigLoader, ContentBlock, ConversationRuntime, LspContextEnrichment,
-    LspManager, PermissionMode, Session,
+    LspManager, LspServerConfig, PermissionMode, Session,
 };
 use serde_json::json;
 
@@ -21,8 +22,7 @@ use crate::cli::{
     CliOutputFormat, SharedMcpManager,
 };
 use crate::help::{
-    render_mode_unavailable, render_repl_help, render_unknown_repl_command,
-    slash_command_completion_candidates,
+    render_repl_help, render_unknown_repl_command, slash_command_completion_candidates,
 };
 use crate::progress::{InternalPromptProgressReporter, InternalPromptProgressRun};
 use crate::reports::{
@@ -40,8 +40,8 @@ use crate::session_store::{
     create_managed_session_handle, render_session_list, resolve_session_reference, SessionHandle,
 };
 use crate::workspace::{
-    command_exists, git_output, git_status_ok, parse_titled_body, recent_user_context,
-    sanitize_generated_message, truncate_for_prompt, write_temp_text_file,
+    command_exists, git_output, git_status_ok, parse_commit_push_pr_output, parse_titled_body,
+    recent_user_context, sanitize_generated_message, truncate_for_prompt, write_temp_text_file,
 };
 
 use crate::{
@@ -79,6 +79,9 @@ impl LiveCli {
             progress_reporter: None,
             mcp_manager: Arc::clone(&mcp_manager),
         })?;
+        let lsp_manager = env::current_dir()
+            .ok()
+            .and_then(|cwd| detect_lsp_servers(&cwd));
         let cli = Self {
             model,
             allowed_tools,
@@ -87,7 +90,7 @@ impl LiveCli {
             runtime,
             session,
             mcp_manager,
-            lsp_manager: None,
+            lsp_manager,
         };
         cli.persist_session()?;
         Ok(cli)
@@ -332,16 +335,34 @@ impl LiveCli {
             SlashCommand::Plugins { action, target } => {
                 self.handle_plugins_command(action.as_deref(), target.as_deref())?
             }
-            SlashCommand::Branch { .. }
-            | SlashCommand::Worktree { .. }
-            | SlashCommand::CommitPushPr { .. } => {
-                let (name, desc) = match &command {
-                    SlashCommand::Branch { .. } => ("branch", "git branch commands"),
-                    SlashCommand::Worktree { .. } => ("worktree", "git worktree commands"),
-                    _ => ("commit-push-pr", "commit + push + PR automation"),
-                };
-                eprintln!("{}", render_mode_unavailable(name, desc));
+            SlashCommand::Branch { action, target } => {
+                let cwd = env::current_dir()?;
+                println!(
+                    "{}",
+                    handle_branch_slash_command(action.as_deref(), target.as_deref(), &cwd)?
+                );
                 false
+            }
+            SlashCommand::Worktree {
+                action,
+                path,
+                branch,
+            } => {
+                let cwd = env::current_dir()?;
+                println!(
+                    "{}",
+                    handle_worktree_slash_command(
+                        action.as_deref(),
+                        path.as_deref(),
+                        branch.as_deref(),
+                        &cwd,
+                    )?
+                );
+                false
+            }
+            SlashCommand::CommitPushPr { context } => {
+                self.run_commit_push_pr(context.as_deref())?;
+                true
             }
             SlashCommand::Unknown(name) => {
                 eprintln!("{}", render_unknown_repl_command(&name));
@@ -671,7 +692,7 @@ impl LiveCli {
         let mut manager = build_plugin_manager(&cwd, &loader, &runtime_config);
         let result = handle_plugins_slash_command(action, target, &mut manager)?;
         println!("{}", result.message);
-        if result.reload_runtime {
+        if result.effect == commands::PluginEffect::ReloadRuntime {
             self.reload_runtime_features()?;
         }
         Ok(false)
@@ -858,6 +879,30 @@ impl LiveCli {
         Ok(())
     }
 
+    fn run_commit_push_pr(&self, context: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+        let diff = git_output(&["diff", "--stat"])?;
+        let prompt = format!(
+            "Generate a commit message, PR title, and PR body from this conversation and diff. Output plain text in this format exactly:\nCOMMIT: <commit message>\nTITLE: <pr title>\nBODY:\n<pr body markdown>\nBRANCH_HINT: <short branch name hint>\n\nContext hint: {}\n\nDiff summary:\n{}\n\nRecent conversation:\n{}",
+            context.unwrap_or("none"),
+            truncate_for_prompt(&diff, 8_000),
+            recent_user_context(self.runtime.session(), 6)
+        );
+        let draft = sanitize_generated_message(&self.run_internal_prompt_text(&prompt, false)?);
+        let (commit_msg, title, body, branch_hint) = parse_commit_push_pr_output(&draft)?;
+        let cwd = env::current_dir()?;
+        let report = handle_commit_push_pr_slash_command(
+            &CommitPushPrRequest {
+                commit_message: Some(commit_msg),
+                pr_title: title.clone(),
+                pr_body: body,
+                branch_name_hint: branch_hint.unwrap_or(title),
+            },
+            &cwd,
+        )?;
+        println!("{report}");
+        Ok(())
+    }
+
     fn run_issue(&self, context: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
         let prompt = format!(
             "Generate a GitHub issue title and body from this conversation. Output plain text in this format exactly:\nTITLE: <title>\nBODY:\n<body markdown>\n\nContext hint: {}\n\nConversation context:\n{}",
@@ -947,6 +992,100 @@ fn final_assistant_text(summary: &runtime::TurnSummary) -> String {
                 .join("")
         })
         .unwrap_or_default()
+}
+
+fn add_lsp_if_found(
+    configs: &mut Vec<LspServerConfig>,
+    workspace_root: &std::path::Path,
+    name: &str,
+    command: &str,
+    args: &[&str],
+    extensions: &[(&str, &str)],
+) {
+    use std::collections::BTreeMap;
+    if which_command(command) {
+        configs.push(LspServerConfig {
+            name: name.to_string(),
+            command: command.to_string(),
+            args: args.iter().map(|a| (*a).to_string()).collect(),
+            env: BTreeMap::new(),
+            workspace_root: workspace_root.to_path_buf(),
+            initialization_options: None,
+            extension_to_language: extensions
+                .iter()
+                .map(|(ext, lang)| ((*ext).to_string(), (*lang).to_string()))
+                .collect(),
+        });
+    }
+}
+
+fn detect_lsp_servers(workspace_root: &std::path::Path) -> Option<LspManager> {
+    let mut configs = Vec::new();
+
+    add_lsp_if_found(
+        &mut configs,
+        workspace_root,
+        "rust-analyzer",
+        "rust-analyzer",
+        &[],
+        &[(".rs", "rust")],
+    );
+    add_lsp_if_found(
+        &mut configs,
+        workspace_root,
+        "typescript-language-server",
+        "typescript-language-server",
+        &["--stdio"],
+        &[
+            (".ts", "typescript"),
+            (".tsx", "typescriptreact"),
+            (".js", "javascript"),
+            (".jsx", "javascriptreact"),
+        ],
+    );
+    add_lsp_if_found(
+        &mut configs,
+        workspace_root,
+        "pyright",
+        "pyright-langserver",
+        &["--stdio"],
+        &[(".py", "python")],
+    );
+    add_lsp_if_found(
+        &mut configs,
+        workspace_root,
+        "gopls",
+        "gopls",
+        &["serve"],
+        &[(".go", "go")],
+    );
+
+    if configs.is_empty() {
+        return None;
+    }
+    LspManager::new(configs).ok()
+}
+
+fn which_command(name: &str) -> bool {
+    #[cfg(windows)]
+    {
+        Command::new("where")
+            .arg(name)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    }
+    #[cfg(not(windows))]
+    {
+        Command::new("sh")
+            .arg("-c")
+            .arg(format!("command -v {name} >/dev/null 2>&1"))
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    }
 }
 
 fn collect_tool_uses(summary: &runtime::TurnSummary) -> Vec<serde_json::Value> {

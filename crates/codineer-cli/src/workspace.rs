@@ -128,3 +128,38 @@ pub(crate) fn parse_titled_body(value: &str) -> Option<(String, String)> {
     let body = normalized[body_start + "BODY:".len()..].trim();
     Some((title.to_string(), body.to_string()))
 }
+
+/// Parse the AI-generated output for `/commit-push-pr`.
+/// Expected format:
+///   COMMIT: <commit message>
+///   TITLE: <pr title>
+///   BODY:
+///   <pr body markdown>
+///   BRANCH_HINT: <branch name hint>
+pub(crate) fn parse_commit_push_pr_output(
+    value: &str,
+) -> Result<(String, String, String, Option<String>), String> {
+    let normalized = sanitize_generated_message(value);
+    let commit = normalized
+        .lines()
+        .find_map(|l| l.strip_prefix("COMMIT:").map(str::trim))
+        .ok_or("missing COMMIT: line")?
+        .to_string();
+    let title = normalized
+        .lines()
+        .find_map(|l| l.strip_prefix("TITLE:").map(str::trim))
+        .ok_or("missing TITLE: line")?
+        .to_string();
+    let body_start = normalized.find("BODY:").ok_or("missing BODY: section")?;
+    let after_body = &normalized[body_start + "BODY:".len()..];
+    let (body, branch_hint) = if let Some(hint_start) = after_body.find("BRANCH_HINT:") {
+        let body = after_body[..hint_start].trim().to_string();
+        let hint = after_body[hint_start + "BRANCH_HINT:".len()..]
+            .trim()
+            .to_string();
+        (body, Some(hint).filter(|h| !h.is_empty()))
+    } else {
+        (after_body.trim().to_string(), None)
+    };
+    Ok((commit, title, body, branch_hint))
+}

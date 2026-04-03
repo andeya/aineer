@@ -6,6 +6,8 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use runtime::RemoteSessionContext;
+
 use crate::workspace::{self, parse_git_status_metadata};
 use crate::{current_date, BUILD_TARGET, GIT_SHA, VERSION};
 
@@ -18,6 +20,7 @@ pub(crate) struct StatusContext {
     pub(crate) memory_file_count: usize,
     pub(crate) project_root: Option<PathBuf>,
     pub(crate) git_branch: Option<String>,
+    pub(crate) remote_session: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -187,6 +190,17 @@ pub(crate) fn status_context(
     let project_context = ProjectContext::discover_with_git(&cwd, &date)?;
     let (project_root, git_branch) =
         parse_git_status_metadata(project_context.git_status.as_deref());
+    let remote = RemoteSessionContext::from_env();
+    let remote_session = if remote.enabled {
+        Some(
+            remote
+                .session_id
+                .unwrap_or_else(|| "active (no session ID)".to_string()),
+        )
+    } else {
+        None
+    };
+
     Ok(StatusContext {
         cwd,
         session_path: session_path.map(Path::to_path_buf),
@@ -195,6 +209,7 @@ pub(crate) fn status_context(
         memory_file_count: project_context.instruction_files.len(),
         project_root,
         git_branch,
+        remote_session,
     })
 }
 
@@ -236,6 +251,7 @@ pub(crate) fn format_status_report(
   Session file     {}
   Config files     loaded {}/{}
   Memory files     {}
+  Remote session   {}
 
 Next
   /help            Browse commands
@@ -254,6 +270,7 @@ Next
             context.loaded_config_files,
             context.discovered_config_files,
             context.memory_file_count,
+            context.remote_session.as_deref().unwrap_or("off"),
         ),
     ]
     .join(
