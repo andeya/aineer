@@ -457,8 +457,37 @@ fn render_config_section(config: &RuntimeConfig) -> String {
             .collect(),
     ));
     lines.push(String::new());
-    lines.push(config.as_json().render());
+    lines.push(redact_config_json(&config.as_json()).render());
     lines.join("\n")
+}
+
+fn redact_config_json(value: &crate::json::JsonValue) -> crate::json::JsonValue {
+    use crate::json::JsonValue;
+    const SENSITIVE_KEYS: &[&str] = &[
+        "env", "token", "secret", "password", "key", "credential",
+        "authorization", "auth_token", "api_key", "refresh_token",
+    ];
+
+    match value {
+        JsonValue::Object(map) => {
+            let redacted = map
+                .iter()
+                .map(|(k, v)| {
+                    let lower = k.to_ascii_lowercase();
+                    if SENSITIVE_KEYS.iter().any(|s| lower.contains(s)) {
+                        (k.clone(), JsonValue::String("[REDACTED]".to_string()))
+                    } else {
+                        (k.clone(), redact_config_json(v))
+                    }
+                })
+                .collect();
+            JsonValue::Object(redacted)
+        }
+        JsonValue::Array(items) => {
+            JsonValue::Array(items.iter().map(redact_config_json).collect())
+        }
+        other => other.clone(),
+    }
 }
 
 fn get_simple_intro_section(has_output_style: bool) -> String {

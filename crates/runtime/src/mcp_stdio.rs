@@ -712,9 +712,20 @@ impl McpStdioProcess {
         method: impl Into<String>,
         params: Option<TParams>,
     ) -> io::Result<JsonRpcResponse<TResult>> {
-        let request = JsonRpcRequest::new(id, method, params);
+        let method = method.into();
+        let request = JsonRpcRequest::new(id.clone(), method.clone(), params);
         self.send_request(&request).await?;
-        self.read_response().await
+        let response: JsonRpcResponse<TResult> = self.read_response().await?;
+        if response.id != id {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "JSON-RPC response id mismatch for {method}: expected {:?}, got {:?}",
+                    id, response.id
+                ),
+            ));
+        }
+        Ok(response)
     }
 
     pub async fn initialize(

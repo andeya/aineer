@@ -325,10 +325,14 @@ pub fn grep_search(input: &GrepSearchInput) -> io::Result<GrepSearchOutput> {
 
         filenames.push(file_path.to_string_lossy().into_owned());
         if output_mode == "content" {
+            let mut emitted = std::collections::BTreeSet::new();
             for index in matched_lines {
                 let start = index.saturating_sub(input.before.unwrap_or(context));
                 let end = (index + input.after.unwrap_or(context) + 1).min(lines.len());
                 for (current, line) in lines.iter().enumerate().take(end).skip(start) {
+                    if !emitted.insert(current) {
+                        continue;
+                    }
                     let prefix = if input.line_numbers.unwrap_or(true) {
                         format!("{}:{}:", file_path.to_string_lossy(), current + 1)
                     } else {
@@ -350,7 +354,7 @@ pub fn grep_search(input: &GrepSearchInput) -> io::Result<GrepSearchOutput> {
             filenames,
             num_lines: Some(lines.len()),
             content: Some(lines.join("\n")),
-            num_matches: None,
+            num_matches: Some(total_matches),
             applied_limit: limit,
             applied_offset: offset,
         });
