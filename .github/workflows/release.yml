@@ -119,14 +119,40 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Publish crates (dependency order)
+      - name: Publish crates (dependency order with retry)
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
+          publish_crate() {
+            local crate="$1"
+            local max_retries=3
+            local delay=60
+            for attempt in $(seq 1 "$max_retries"); do
+              echo "Publishing $crate (attempt $attempt/$max_retries)..."
+              if cargo publish -p "$crate" --locked 2>&1; then
+                echo "$crate published successfully."
+                return 0
+              else
+                local output
+                output=$(cargo publish -p "$crate" --locked 2>&1 || true)
+                if echo "$output" | grep -q "already uploaded"; then
+                  echo "$crate already exists on crates.io, skipping."
+                  return 0
+                fi
+                if [ "$attempt" -lt "$max_retries" ]; then
+                  echo "Retrying $crate in ${delay}s..."
+                  sleep "$delay"
+                  delay=$((delay * 2))
+                fi
+              fi
+            done
+            echo "WARNING: Failed to publish $crate after $max_retries attempts"
+            return 1
+          }
+
           for crate in codineer-lsp codineer-runtime codineer-api codineer-plugins codineer-tools codineer-commands codineer-cli; do
-            echo "Publishing $crate..."
-            cargo publish -p "$crate" --locked || true
-            sleep 30
+            publish_crate "$crate" || true
+            sleep 60
           done
 
   update-homebrew:
