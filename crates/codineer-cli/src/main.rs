@@ -84,14 +84,29 @@ const GIT_SHA: Option<&str> = option_env!("GIT_SHA");
 
 fn logo_ascii(color: bool) -> String {
     if color {
+        let b = "\x1b[38;5;33m";
+        let g = "\x1b[1;38;5;34m";
+        let o = "\x1b[38;5;208m";
+        let w = "\x1b[1;38;5;45m";
+        let d = "\x1b[2m";
+        let r = "\x1b[0m";
         [
-            "\x1b[38;5;33m   ⬡⬡⬡\x1b[0m",
-            "\x1b[38;5;33m  ⬡\x1b[0m \x1b[38;5;34m>\x1b[0m \x1b[38;5;33m⬡\x1b[0m  \x1b[1;38;5;45mCodineer\x1b[0m",
-            "\x1b[38;5;33m   ⬡⬡⬡\x1b[0m",
+            format!("{b}      ╱▔▔▔▔▔▔╲{r}"),
+            format!("{b}    ╱          ╲{r}"),
+            format!("{b}   │{r}  {g}❯{r}  {o}▮{r}    {b}│{r}   {w}C O D I N E E R{r}"),
+            format!("{b}    ╲          ╱{r}   {d}Your local AI coding agent{r}"),
+            format!("{b}      ╲▁▁▁▁▁▁╱{r}"),
         ]
         .join("\n")
     } else {
-        ["   ⬡⬡⬡", "  ⬡ > ⬡  Codineer", "   ⬡⬡⬡"].join("\n")
+        [
+            "      ╱▔▔▔▔▔▔╲",
+            "    ╱          ╲",
+            "   │  ❯  ▮    │   C O D I N E E R",
+            "    ╲          ╱   Your local AI coding agent",
+            "      ╲▁▁▁▁▁▁╱",
+        ]
+        .join("\n")
     }
 }
 
@@ -4258,7 +4273,7 @@ fn print_help_section(out: &mut impl Write, title: &str, entries: &[&str]) -> io
 fn print_help_to(out: &mut impl Write) -> io::Result<()> {
     let color = io::stdout().is_terminal();
     writeln!(out, "{}", logo_ascii(color))?;
-    writeln!(out, "  v{VERSION} — Your local AI coding agent.")?;
+    writeln!(out, "  v{VERSION}")?;
     writeln!(out)?;
     print_help_section(
         out,
