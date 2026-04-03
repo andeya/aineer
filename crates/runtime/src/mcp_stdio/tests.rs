@@ -331,30 +331,38 @@ fn sample_bootstrap(script_path: &Path) -> McpClientBootstrap {
     McpClientBootstrap::from_scoped_config("stdio server", &config)
 }
 
+fn has_python() -> bool {
+    python_command().is_some()
+}
+
 fn script_transport(script_path: &Path) -> crate::mcp_client::McpStdioTransport {
     crate::mcp_client::McpStdioTransport {
-        command: python_command(),
+        command: python_command().expect("python guard should be checked before calling"),
         args: vec![script_path.to_string_lossy().into_owned()],
         env: BTreeMap::new(),
     }
 }
 
-fn python_command() -> String {
+fn python_command() -> Option<String> {
     for key in ["MCP_TEST_PYTHON", "PYTHON3", "PYTHON"] {
         if let Ok(value) = std::env::var(key) {
             if !value.trim().is_empty() {
-                return value;
+                return Some(value);
             }
         }
     }
 
     for candidate in ["python3", "python"] {
-        if Command::new(candidate).arg("--version").output().is_ok() {
-            return candidate.to_string();
+        if Command::new(candidate)
+            .arg("--version")
+            .output()
+            .is_ok_and(|o| o.status.success())
+        {
+            return Some(candidate.to_string());
         }
     }
 
-    panic!("expected a Python interpreter for MCP stdio tests")
+    None
 }
 
 fn cleanup_script(script_path: &Path) {
@@ -374,7 +382,7 @@ fn manager_server_config(
     ScopedMcpServerConfig {
         scope: ConfigSource::Local,
         config: McpServerConfig::Stdio(McpStdioServerConfig {
-            command: python_command(),
+            command: python_command().expect("python guard should be checked before calling"),
             args: vec![script_path.to_string_lossy().into_owned()],
             env: BTreeMap::from([
                 ("MCP_SERVER_LABEL".to_string(), label.to_string()),
@@ -389,6 +397,9 @@ fn manager_server_config(
 
 #[test]
 fn spawns_stdio_process_and_round_trips_io() {
+    if !has_python() {
+        return;
+    }
     let runtime = Builder::new_current_thread()
         .enable_all()
         .build()
@@ -431,6 +442,9 @@ fn rejects_non_stdio_bootstrap() {
 
 #[test]
 fn round_trips_initialize_request_and_response_over_stdio_frames() {
+    if !has_python() {
+        return;
+    }
     let runtime = Builder::new_current_thread()
         .enable_all()
         .build()
@@ -478,6 +492,9 @@ fn round_trips_initialize_request_and_response_over_stdio_frames() {
 
 #[test]
 fn write_jsonrpc_request_emits_content_length_frame() {
+    if !has_python() {
+        return;
+    }
     let runtime = Builder::new_current_thread()
         .enable_all()
         .build()
@@ -512,6 +529,9 @@ fn write_jsonrpc_request_emits_content_length_frame() {
 
 #[test]
 fn direct_spawn_uses_transport_env() {
+    if !has_python() {
+        return;
+    }
     let runtime = Builder::new_current_thread()
         .enable_all()
         .build()
@@ -535,6 +555,9 @@ fn direct_spawn_uses_transport_env() {
 
 #[test]
 fn lists_tools_calls_tool_and_reads_resources_over_jsonrpc() {
+    if !has_python() {
+        return;
+    }
     let runtime = Builder::new_current_thread()
         .enable_all()
         .build()
@@ -635,6 +658,9 @@ fn lists_tools_calls_tool_and_reads_resources_over_jsonrpc() {
 
 #[test]
 fn surfaces_jsonrpc_errors_from_tool_calls() {
+    if !has_python() {
+        return;
+    }
     let runtime = Builder::new_current_thread()
         .enable_all()
         .build()
@@ -672,6 +698,9 @@ fn surfaces_jsonrpc_errors_from_tool_calls() {
 
 #[test]
 fn manager_discovers_tools_from_stdio_config() {
+    if !has_python() {
+        return;
+    }
     let runtime = Builder::new_current_thread()
         .enable_all()
         .build()
@@ -702,6 +731,9 @@ fn manager_discovers_tools_from_stdio_config() {
 
 #[test]
 fn manager_routes_tool_calls_to_correct_server() {
+    if !has_python() {
+        return;
+    }
     let runtime = Builder::new_current_thread()
         .enable_all()
         .build()
@@ -809,6 +841,9 @@ fn manager_records_unsupported_non_stdio_servers_without_panicking() {
 
 #[test]
 fn manager_shutdown_terminates_spawned_children_and_is_idempotent() {
+    if !has_python() {
+        return;
+    }
     let runtime = Builder::new_current_thread()
         .enable_all()
         .build()
@@ -833,6 +868,9 @@ fn manager_shutdown_terminates_spawned_children_and_is_idempotent() {
 
 #[test]
 fn manager_reuses_spawned_server_between_discovery_and_call() {
+    if !has_python() {
+        return;
+    }
     let runtime = Builder::new_current_thread()
         .enable_all()
         .build()
@@ -879,6 +917,9 @@ fn manager_reuses_spawned_server_between_discovery_and_call() {
 
 #[test]
 fn manager_reports_unknown_qualified_tool_name() {
+    if !has_python() {
+        return;
+    }
     let runtime = Builder::new_current_thread()
         .enable_all()
         .build()
