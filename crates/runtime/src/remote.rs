@@ -4,8 +4,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-pub const DEFAULT_REMOTE_BASE_URL: &str = "https://api.anthropic.com";
-pub const DEFAULT_SESSION_TOKEN_PATH: &str = "/run/ccr/session_token";
+pub const DEFAULT_REMOTE_BASE_URL: &str = "https://api.codineer.dev";
+pub const DEFAULT_SESSION_TOKEN_PATH: &str = "/run/codineer/session_token";
 pub const DEFAULT_SYSTEM_CA_BUNDLE: &str = "/etc/ssl/certs/ca-certificates.crt";
 
 pub const UPSTREAM_PROXY_ENV_KEYS: [&str; 8] = [
@@ -27,9 +27,9 @@ pub const NO_PROXY_HOSTS: [&str; 16] = [
     "10.0.0.0/8",
     "172.16.0.0/12",
     "192.168.0.0/16",
-    "anthropic.com",
-    ".anthropic.com",
-    "*.anthropic.com",
+    "codineer.dev",
+    ".codineer.dev",
+    "*.codineer.dev",
     "github.com",
     "api.github.com",
     "*.github.com",
@@ -78,7 +78,7 @@ impl RemoteSessionContext {
                 .filter(|value| !value.is_empty())
                 .cloned(),
             base_url: env_map
-                .get("ANTHROPIC_BASE_URL")
+                .get("CODINEER_REMOTE_BASE_URL")
                 .filter(|value| !value.is_empty())
                 .cloned()
                 .unwrap_or_else(|| DEFAULT_REMOTE_BASE_URL.to_string()),
@@ -96,22 +96,22 @@ impl UpstreamProxyBootstrap {
     pub fn from_env_map(env_map: &BTreeMap<String, String>) -> Self {
         let remote = RemoteSessionContext::from_env_map(env_map);
         let token_path = env_map
-            .get("CCR_SESSION_TOKEN_PATH")
+            .get("CODINEER_SESSION_TOKEN_PATH")
             .filter(|value| !value.is_empty())
             .map_or_else(|| PathBuf::from(DEFAULT_SESSION_TOKEN_PATH), PathBuf::from);
         let system_ca_path = env_map
-            .get("CCR_SYSTEM_CA_BUNDLE")
+            .get("CODINEER_SYSTEM_CA_BUNDLE")
             .filter(|value| !value.is_empty())
             .map_or_else(|| PathBuf::from(DEFAULT_SYSTEM_CA_BUNDLE), PathBuf::from);
         let ca_bundle_path = env_map
-            .get("CCR_CA_BUNDLE_PATH")
+            .get("CODINEER_CA_BUNDLE_PATH")
             .filter(|value| !value.is_empty())
             .map_or_else(default_ca_bundle_path, PathBuf::from);
         let token = read_token(&token_path).ok().flatten();
 
         Self {
             remote,
-            upstream_proxy_enabled: env_truthy(env_map.get("CCR_UPSTREAM_PROXY_ENABLED")),
+            upstream_proxy_enabled: env_truthy(env_map.get("CODINEER_UPSTREAM_PROXY_ENABLED")),
             token_path,
             ca_bundle_path,
             system_ca_path,
@@ -237,7 +237,7 @@ pub fn inherited_upstream_proxy_env(
 fn default_ca_bundle_path() -> PathBuf {
     env::var_os("HOME")
         .map_or_else(|| PathBuf::from("."), PathBuf::from)
-        .join(".ccr")
+        .join(".codineer")
         .join("ca-bundle.crt")
 }
 
@@ -278,7 +278,7 @@ mod tests {
                 "session-123".to_string(),
             ),
             (
-                "ANTHROPIC_BASE_URL".to_string(),
+                "CODINEER_REMOTE_BASE_URL".to_string(),
                 "https://remote.test".to_string(),
             ),
         ]);
@@ -292,7 +292,10 @@ mod tests {
     fn bootstrap_fails_open_when_token_or_session_is_missing() {
         let env = BTreeMap::from([
             ("CODINEER_REMOTE".to_string(), "1".to_string()),
-            ("CCR_UPSTREAM_PROXY_ENABLED".to_string(), "true".to_string()),
+            (
+                "CODINEER_UPSTREAM_PROXY_ENABLED".to_string(),
+                "true".to_string(),
+            ),
         ]);
         let bootstrap = UpstreamProxyBootstrap::from_env_map(&env);
         assert!(!bootstrap.should_enable());
@@ -308,21 +311,24 @@ mod tests {
 
         let env = BTreeMap::from([
             ("CODINEER_REMOTE".to_string(), "1".to_string()),
-            ("CCR_UPSTREAM_PROXY_ENABLED".to_string(), "true".to_string()),
+            (
+                "CODINEER_UPSTREAM_PROXY_ENABLED".to_string(),
+                "true".to_string(),
+            ),
             (
                 "CODINEER_REMOTE_SESSION_ID".to_string(),
                 "session-123".to_string(),
             ),
             (
-                "ANTHROPIC_BASE_URL".to_string(),
+                "CODINEER_REMOTE_BASE_URL".to_string(),
                 "https://remote.test".to_string(),
             ),
             (
-                "CCR_SESSION_TOKEN_PATH".to_string(),
+                "CODINEER_SESSION_TOKEN_PATH".to_string(),
                 token_path.to_string_lossy().into_owned(),
             ),
             (
-                "CCR_CA_BUNDLE_PATH".to_string(),
+                "CODINEER_CA_BUNDLE_PATH".to_string(),
                 root.join("ca-bundle.crt").to_string_lossy().into_owned(),
             ),
         ]);
@@ -395,7 +401,7 @@ mod tests {
             upstream_proxy_ws_url("http://localhost:3000/"),
             "ws://localhost:3000/v1/code/upstreamproxy/ws"
         );
-        assert!(no_proxy_list().contains("anthropic.com"));
+        assert!(no_proxy_list().contains("codineer.dev"));
         assert!(no_proxy_list().contains("github.com"));
     }
 }
