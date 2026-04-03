@@ -448,6 +448,9 @@ fn resolve_model_alias(model: &str) -> String {
 }
 
 fn normalize_allowed_tools(values: &[String]) -> Result<Option<AllowedToolSet>, String> {
+    if values.is_empty() {
+        return Ok(None);
+    }
     current_tool_registry()?.normalize_allowed_tools(values)
 }
 
@@ -4401,8 +4404,14 @@ mod tests {
     use runtime::{AssistantEvent, ContentBlock, ConversationMessage, MessageRole, PermissionMode};
     use serde_json::json;
     use std::path::PathBuf;
+    use std::sync::{Mutex, OnceLock};
     use std::time::Duration;
     use tools::GlobalToolRegistry;
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     fn registry_with_plugin_tool() -> GlobalToolRegistry {
         GlobalToolRegistry::with_plugin_tools(vec![PluginTool::new(
@@ -4537,13 +4546,30 @@ mod tests {
 
     #[test]
     fn parses_allowed_tools_flags_with_aliases_and_lists() {
+        let _guard = env_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let tmp = std::env::temp_dir().join("codineer-test-allowed-tools");
+        let _ = std::fs::create_dir_all(&tmp);
+        let prev = std::env::var("CODINEER_CONFIG_HOME").ok();
+        std::env::set_var("CODINEER_CONFIG_HOME", &tmp);
+
         let args = vec![
             "--allowedTools".to_string(),
             "read,glob".to_string(),
             "--allowed-tools=write_file".to_string(),
         ];
+        let result = parse_args(&args);
+
+        if let Some(v) = prev {
+            std::env::set_var("CODINEER_CONFIG_HOME", v);
+        } else {
+            std::env::remove_var("CODINEER_CONFIG_HOME");
+        }
+        let _ = std::fs::remove_dir_all(tmp);
+
         assert_eq!(
-            parse_args(&args).expect("args should parse"),
+            result.expect("args should parse"),
             CliAction::Repl {
                 model: default_model(),
                 allowed_tools: Some(
@@ -4559,8 +4585,24 @@ mod tests {
 
     #[test]
     fn rejects_unknown_allowed_tools() {
-        let error = parse_args(&["--allowedTools".to_string(), "teleport".to_string()])
-            .expect_err("tool should be rejected");
+        let _guard = env_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let tmp = std::env::temp_dir().join("codineer-test-unknown-tools");
+        let _ = std::fs::create_dir_all(&tmp);
+        let prev = std::env::var("CODINEER_CONFIG_HOME").ok();
+        std::env::set_var("CODINEER_CONFIG_HOME", &tmp);
+
+        let result = parse_args(&["--allowedTools".to_string(), "teleport".to_string()]);
+
+        if let Some(v) = prev {
+            std::env::set_var("CODINEER_CONFIG_HOME", v);
+        } else {
+            std::env::remove_var("CODINEER_CONFIG_HOME");
+        }
+        let _ = std::fs::remove_dir_all(tmp);
+
+        let error = result.expect_err("tool should be rejected");
         assert!(error.contains("unsupported tool in --allowedTools: teleport"));
     }
 

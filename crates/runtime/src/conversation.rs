@@ -580,6 +580,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn denies_tool_use_when_pre_tool_hook_blocks() {
         struct SingleCallApiClient;
         impl ApiClient for SingleCallApiClient {
@@ -642,6 +643,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn appends_post_tool_hook_feedback_to_tool_result() {
         struct TwoCallApiClient {
             calls: usize,

@@ -2829,6 +2829,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn plugin_registry_runs_initialize_and_shutdown_for_enabled_plugins() {
         let config_home = temp_dir("lifecycle-home");
         let source_root = temp_dir("lifecycle-source");
@@ -2852,6 +2853,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn aggregates_and_executes_plugin_tools() {
         let config_home = temp_dir("tool-home");
         let source_root = temp_dir("tool-source");

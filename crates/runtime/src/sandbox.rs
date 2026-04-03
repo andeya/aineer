@@ -422,6 +422,7 @@ fn command_exists(command: &str) -> bool {
 }
 
 #[cfg(test)]
+#[cfg(unix)]
 mod tests {
     use super::{
         build_sandbox_command, detect_container_environment_from, generate_seatbelt_profile,

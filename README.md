@@ -9,14 +9,18 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
   <a href="https://github.com/andeya/codineer/releases"><img src="https://img.shields.io/github/v/release/andeya/codineer" alt="Release"></a>
   <br>
+  <img src="https://img.shields.io/badge/macOS-supported-blue?logo=apple&logoColor=white" alt="macOS">
+  <img src="https://img.shields.io/badge/Linux-supported-blue?logo=linux&logoColor=white" alt="Linux">
+  <img src="https://img.shields.io/badge/Windows-supported-blue?logo=windows&logoColor=white" alt="Windows">
+  <br>
   <a href="README_CN.md">中文文档</a>
 </p>
 
 ---
 
-Codineer is a **local-first coding agent** that runs entirely in your terminal. It reads your workspace, understands your project, and helps you write, refactor, debug, and ship code — interactively or in one-shot mode.
+**Codineer** turns your terminal into an AI-powered coding companion. It reads your workspace, understands your project context, and helps you write, refactor, debug, and ship code — all without leaving the command line.
 
-Built in safe Rust. Ships as a single, self-contained binary. No daemon, no cloud dependency (bring your own API key).
+Built in safe Rust. Ships as a **single, self-contained binary**. No daemon, no cloud dependency — bring your own API key and start coding.
 
 ## Why Codineer?
 
@@ -25,23 +29,40 @@ Built in safe Rust. Ships as a single, self-contained binary. No daemon, no clou
 - **Tool-rich** — shell execution, file read/write/edit, glob/grep search, web fetch, todo tracking, notebook editing, and more
 - **Extensible** — MCP servers, local plugins, custom agents and skills via `.codineer/` directories
 - **Sandboxed** — optional process isolation via Linux namespaces or macOS Seatbelt profiles
-- **Multi-provider** — Anthropic (Claude), xAI (Grok), and any OpenAI-compatible API
+- **Multi-provider** — Anthropic (Claude), xAI (Grok), OpenAI, and any OpenAI-compatible API (Ollama, etc.)
+- **Cross-platform** — native binaries for macOS, Linux, and Windows
+
+## Install
+
+### Download prebuilt binaries
+
+Head to the **[Releases](https://github.com/andeya/codineer/releases)** page and download the binary for your platform:
+
+| Platform | File |
+|----------|------|
+| macOS (Apple Silicon) | `codineer-*-aarch64-apple-darwin.tar.gz` |
+| macOS (Intel) | `codineer-*-x86_64-apple-darwin.tar.gz` |
+| Linux (x86_64) | `codineer-*-x86_64-unknown-linux-gnu.tar.gz` |
+| Linux (ARM64) | `codineer-*-aarch64-unknown-linux-gnu.tar.gz` |
+| Windows (x86_64) | `codineer-*-x86_64-pc-windows-msvc.zip` |
+
+Extract and place the `codineer` binary in your `PATH`.
+
+### Install from source
+
+```bash
+cargo install --path crates/codineer-cli --locked
+```
+
+### Homebrew (macOS/Linux)
+
+```bash
+brew install andeya/tap/codineer
+```
 
 ## Quick Start
 
-### Install
-
-```bash
-# From source
-cargo install --path crates/codineer-cli --locked
-
-# Or via Homebrew (macOS/Linux)
-brew install andeya/tap/codineer
-
-# Or download a prebuilt binary from GitHub Releases
-```
-
-### Authenticate
+### 1. Set up your API key
 
 ```bash
 # Anthropic (Claude)
@@ -57,7 +78,9 @@ export OPENAI_API_KEY="sk-..."
 codineer login
 ```
 
-### Run
+Codineer auto-detects which provider to use based on available credentials. No configuration needed.
+
+### 2. Start coding
 
 ```bash
 # Interactive REPL
@@ -94,7 +117,7 @@ Codineer loads configuration from multiple sources (in precedence order):
 
 Key settings: `model`, `permissionMode`, `mcpServers`, `sandbox`, `hooks`, `enabledPlugins`.
 
-See `codineer help` for full documentation of environment variables and configuration files.
+Run `codineer help` for full documentation of environment variables and configuration files.
 
 ## Project Structure
 
