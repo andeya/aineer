@@ -10,13 +10,10 @@
 
 <p align="center">
   <a href="https://github.com/andeya/codineer/actions"><img src="https://github.com/andeya/codineer/workflows/CI/badge.svg" alt="CI"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
   <a href="https://github.com/andeya/codineer/releases"><img src="https://img.shields.io/github/v/release/andeya/codineer" alt="Release"></a>
   <a href="https://crates.io/crates/codineer-cli"><img src="https://img.shields.io/crates/v/codineer-cli.svg" alt="crates.io"></a>
   <br>
-  <img src="https://img.shields.io/badge/macOS-supported-blue?logo=apple&logoColor=white" alt="macOS">
-  <img src="https://img.shields.io/badge/Linux-supported-blue?logo=linux&logoColor=white" alt="Linux">
-  <img src="https://img.shields.io/badge/Windows-supported-blue?logo=windows&logoColor=white" alt="Windows">
+  <img src="assets/badge-platforms.svg" alt="macOS | Linux | Windows">
   <br>
   <a href="README.md">English</a>
 </p>
