@@ -391,4 +391,3 @@ fn parse_pr_json_url(stdout: &str) -> Option<String> {
         .as_str()
         .map(ToOwned::to_owned)
 }
-

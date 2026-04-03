@@ -18,6 +18,65 @@ impl DefinitionSource {
     }
 }
 
+pub(crate) trait ShadowableItem {
+    fn name(&self) -> &str;
+    fn source(&self) -> DefinitionSource;
+    fn shadowed_by(&self) -> Option<DefinitionSource>;
+    fn set_shadowed_by(&mut self, winner: DefinitionSource);
+    fn detail_line(&self) -> String;
+}
+
+fn apply_shadowing<T: ShadowableItem>(items: &mut [T]) {
+    let mut active_sources = BTreeMap::<String, DefinitionSource>::new();
+    for item in items.iter_mut() {
+        let key = item.name().to_ascii_lowercase();
+        if let Some(existing) = active_sources.get(&key) {
+            item.set_shadowed_by(*existing);
+        } else {
+            active_sources.insert(key, item.source());
+        }
+    }
+}
+
+fn render_shadowed_report<T: ShadowableItem>(
+    title: &str,
+    count_label: &str,
+    items: &[T],
+) -> String {
+    if items.is_empty() {
+        return format!("No {title} found.");
+    }
+
+    let total_active = items.iter().filter(|i| i.shadowed_by().is_none()).count();
+    let mut lines = vec![
+        title.to_string(),
+        format!("  {total_active} {count_label}"),
+        String::new(),
+    ];
+
+    for source in [DefinitionSource::Project, DefinitionSource::User] {
+        let group = items
+            .iter()
+            .filter(|i| i.source() == source)
+            .collect::<Vec<_>>();
+        if group.is_empty() {
+            continue;
+        }
+
+        lines.push(format!("{}:", source.label()));
+        for item in group {
+            let detail = item.detail_line();
+            match item.shadowed_by() {
+                Some(winner) => lines.push(format!("  (shadowed by {}) {detail}", winner.label())),
+                None => lines.push(format!("  {detail}")),
+            }
+        }
+        lines.push(String::new());
+    }
+
+    lines.join("\n").trim_end().to_string()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AgentSummary {
     name: String,
@@ -28,6 +87,34 @@ pub(crate) struct AgentSummary {
     shadowed_by: Option<DefinitionSource>,
 }
 
+impl ShadowableItem for AgentSummary {
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn source(&self) -> DefinitionSource {
+        self.source
+    }
+    fn shadowed_by(&self) -> Option<DefinitionSource> {
+        self.shadowed_by
+    }
+    fn set_shadowed_by(&mut self, winner: DefinitionSource) {
+        self.shadowed_by = Some(winner);
+    }
+    fn detail_line(&self) -> String {
+        let mut parts = vec![self.name.clone()];
+        if let Some(description) = &self.description {
+            parts.push(description.clone());
+        }
+        if let Some(model) = &self.model {
+            parts.push(model.clone());
+        }
+        if let Some(reasoning) = &self.reasoning_effort {
+            parts.push(reasoning.clone());
+        }
+        parts.join(" · ")
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SkillSummary {
     name: String,
@@ -36,12 +123,33 @@ pub(crate) struct SkillSummary {
     shadowed_by: Option<DefinitionSource>,
 }
 
+impl ShadowableItem for SkillSummary {
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn source(&self) -> DefinitionSource {
+        self.source
+    }
+    fn shadowed_by(&self) -> Option<DefinitionSource> {
+        self.shadowed_by
+    }
+    fn set_shadowed_by(&mut self, winner: DefinitionSource) {
+        self.shadowed_by = Some(winner);
+    }
+    fn detail_line(&self) -> String {
+        let mut parts = vec![self.name.clone()];
+        if let Some(description) = &self.description {
+            parts.push(description.clone());
+        }
+        parts.join(" · ")
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SkillRoot {
     pub(crate) source: DefinitionSource,
     pub(crate) path: PathBuf,
 }
-
 
 fn discover_definition_roots(cwd: &Path, leaf: &str) -> Vec<(DefinitionSource, PathBuf)> {
     let mut roots = Vec::new();
@@ -109,7 +217,6 @@ pub(crate) fn load_agents_from_roots(
     roots: &[(DefinitionSource, PathBuf)],
 ) -> std::io::Result<Vec<AgentSummary>> {
     let mut agents = Vec::new();
-    let mut active_sources = BTreeMap::<String, DefinitionSource>::new();
 
     for (source, root) in roots {
         let mut root_agents = Vec::new();
@@ -133,24 +240,15 @@ pub(crate) fn load_agents_from_roots(
             });
         }
         root_agents.sort_by(|left, right| left.name.cmp(&right.name));
-
-        for mut agent in root_agents {
-            let key = agent.name.to_ascii_lowercase();
-            if let Some(existing) = active_sources.get(&key) {
-                agent.shadowed_by = Some(*existing);
-            } else {
-                active_sources.insert(key, agent.source);
-            }
-            agents.push(agent);
-        }
+        agents.extend(root_agents);
     }
 
+    apply_shadowing(&mut agents);
     Ok(agents)
 }
 
 pub(crate) fn load_skills_from_roots(roots: &[SkillRoot]) -> std::io::Result<Vec<SkillSummary>> {
     let mut skills = Vec::new();
-    let mut active_sources = BTreeMap::<String, DefinitionSource>::new();
 
     for root in roots {
         let mut root_skills = Vec::new();
@@ -173,18 +271,10 @@ pub(crate) fn load_skills_from_roots(roots: &[SkillRoot]) -> std::io::Result<Vec
             });
         }
         root_skills.sort_by(|left, right| left.name.cmp(&right.name));
-
-        for mut skill in root_skills {
-            let key = skill.name.to_ascii_lowercase();
-            if let Some(existing) = active_sources.get(&key) {
-                skill.shadowed_by = Some(*existing);
-            } else {
-                active_sources.insert(key, skill.source);
-            }
-            skills.push(skill);
-        }
+        skills.extend(root_skills);
     }
 
+    apply_shadowing(&mut skills);
     Ok(skills)
 }
 
@@ -258,97 +348,11 @@ fn unquote_frontmatter_value(value: &str) -> String {
 }
 
 pub(crate) fn render_agents_report(agents: &[AgentSummary]) -> String {
-    if agents.is_empty() {
-        return "No agents found.".to_string();
-    }
-
-    let total_active = agents
-        .iter()
-        .filter(|agent| agent.shadowed_by.is_none())
-        .count();
-    let mut lines = vec![
-        "Agents".to_string(),
-        format!("  {total_active} active agents"),
-        String::new(),
-    ];
-
-    for source in [DefinitionSource::Project, DefinitionSource::User] {
-        let group = agents
-            .iter()
-            .filter(|agent| agent.source == source)
-            .collect::<Vec<_>>();
-        if group.is_empty() {
-            continue;
-        }
-
-        lines.push(format!("{}:", source.label()));
-        for agent in group {
-            let detail = agent_detail(agent);
-            match agent.shadowed_by {
-                Some(winner) => lines.push(format!("  (shadowed by {}) {detail}", winner.label())),
-                None => lines.push(format!("  {detail}")),
-            }
-        }
-        lines.push(String::new());
-    }
-
-    lines.join("\n").trim_end().to_string()
-}
-
-fn agent_detail(agent: &AgentSummary) -> String {
-    let mut parts = vec![agent.name.clone()];
-    if let Some(description) = &agent.description {
-        parts.push(description.clone());
-    }
-    if let Some(model) = &agent.model {
-        parts.push(model.clone());
-    }
-    if let Some(reasoning) = &agent.reasoning_effort {
-        parts.push(reasoning.clone());
-    }
-    parts.join(" · ")
+    render_shadowed_report("Agents", "active agents", agents)
 }
 
 pub(crate) fn render_skills_report(skills: &[SkillSummary]) -> String {
-    if skills.is_empty() {
-        return "No skills found.".to_string();
-    }
-
-    let total_active = skills
-        .iter()
-        .filter(|skill| skill.shadowed_by.is_none())
-        .count();
-    let mut lines = vec![
-        "Skills".to_string(),
-        format!("  {total_active} available skills"),
-        String::new(),
-    ];
-
-    for source in [DefinitionSource::Project, DefinitionSource::User] {
-        let group = skills
-            .iter()
-            .filter(|skill| skill.source == source)
-            .collect::<Vec<_>>();
-        if group.is_empty() {
-            continue;
-        }
-
-        lines.push(format!("{}:", source.label()));
-        for skill in group {
-            let mut parts = vec![skill.name.clone()];
-            if let Some(description) = &skill.description {
-                parts.push(description.clone());
-            }
-            let detail = parts.join(" · ");
-            match skill.shadowed_by {
-                Some(winner) => lines.push(format!("  (shadowed by {}) {detail}", winner.label())),
-                None => lines.push(format!("  {detail}")),
-            }
-        }
-        lines.push(String::new());
-    }
-
-    lines.join("\n").trim_end().to_string()
+    render_shadowed_report("Skills", "available skills", skills)
 }
 
 pub(crate) fn normalize_optional_args(args: Option<&str>) -> Option<&str> {

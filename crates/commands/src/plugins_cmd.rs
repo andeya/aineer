@@ -1,6 +1,6 @@
 use plugins::{PluginError, PluginManager, PluginSummary};
 
-use crate::PluginsCommandResult;
+use crate::{PluginEffect, PluginsCommandResult};
 
 #[allow(clippy::too_many_lines)]
 pub fn handle_plugins_slash_command(
@@ -11,13 +11,13 @@ pub fn handle_plugins_slash_command(
     match action {
         None | Some("list") => Ok(PluginsCommandResult {
             message: render_plugins_report(&manager.list_installed_plugins()?),
-            reload_runtime: false,
+            effect: PluginEffect::None,
         }),
         Some("install") => {
             let Some(target) = target else {
                 return Ok(PluginsCommandResult {
                     message: "Usage: /plugins install <path>".to_string(),
-                    reload_runtime: false,
+                    effect: PluginEffect::None,
                 });
             };
             let install = manager.install(target)?;
@@ -27,14 +27,14 @@ pub fn handle_plugins_slash_command(
                 .find(|plugin| plugin.metadata.id == install.plugin_id);
             Ok(PluginsCommandResult {
                 message: render_plugin_install_report(&install.plugin_id, plugin.as_ref()),
-                reload_runtime: true,
+                effect: PluginEffect::ReloadRuntime,
             })
         }
         Some("enable") => {
             let Some(target) = target else {
                 return Ok(PluginsCommandResult {
                     message: "Usage: /plugins enable <name>".to_string(),
-                    reload_runtime: false,
+                    effect: PluginEffect::None,
                 });
             };
             let plugin = resolve_plugin_target(manager, target)?;
@@ -44,14 +44,14 @@ pub fn handle_plugins_slash_command(
                     "Plugins\n  Result           enabled {}\n  Name             {}\n  Version          {}\n  Status           enabled",
                     plugin.metadata.id, plugin.metadata.name, plugin.metadata.version
                 ),
-                reload_runtime: true,
+                effect: PluginEffect::ReloadRuntime,
             })
         }
         Some("disable") => {
             let Some(target) = target else {
                 return Ok(PluginsCommandResult {
                     message: "Usage: /plugins disable <name>".to_string(),
-                    reload_runtime: false,
+                    effect: PluginEffect::None,
                 });
             };
             let plugin = resolve_plugin_target(manager, target)?;
@@ -61,27 +61,27 @@ pub fn handle_plugins_slash_command(
                     "Plugins\n  Result           disabled {}\n  Name             {}\n  Version          {}\n  Status           disabled",
                     plugin.metadata.id, plugin.metadata.name, plugin.metadata.version
                 ),
-                reload_runtime: true,
+                effect: PluginEffect::ReloadRuntime,
             })
         }
         Some("uninstall") => {
             let Some(target) = target else {
                 return Ok(PluginsCommandResult {
                     message: "Usage: /plugins uninstall <plugin-id>".to_string(),
-                    reload_runtime: false,
+                    effect: PluginEffect::None,
                 });
             };
             manager.uninstall(target)?;
             Ok(PluginsCommandResult {
                 message: format!("Plugins\n  Result           uninstalled {target}"),
-                reload_runtime: true,
+                effect: PluginEffect::ReloadRuntime,
             })
         }
         Some("update") => {
             let Some(target) = target else {
                 return Ok(PluginsCommandResult {
                     message: "Usage: /plugins update <plugin-id>".to_string(),
-                    reload_runtime: false,
+                    effect: PluginEffect::None,
                 });
             };
             let update = manager.update(target)?;
@@ -102,14 +102,14 @@ pub fn handle_plugins_slash_command(
                         .as_ref()
                         .map_or("unknown", |plugin| if plugin.enabled { "enabled" } else { "disabled" }),
                 ),
-                reload_runtime: true,
+                effect: PluginEffect::ReloadRuntime,
             })
         }
         Some(other) => Ok(PluginsCommandResult {
             message: format!(
                 "Unknown /plugins action '{other}'. Use list, install, enable, disable, uninstall, or update."
             ),
-            reload_runtime: false,
+            effect: PluginEffect::None,
         }),
     }
 }

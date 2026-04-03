@@ -1,13 +1,13 @@
 use crate::discovery::{
-    load_agents_from_roots, load_skills_from_roots, parse_skill_frontmatter,
-    render_agents_report, render_skills_report, DefinitionSource, SkillRoot,
+    load_agents_from_roots, load_skills_from_roots, parse_skill_frontmatter, render_agents_report,
+    render_skills_report, DefinitionSource, SkillRoot,
 };
 use crate::slash_spec::SlashCommand;
 use crate::{
     handle_branch_slash_command, handle_commit_push_pr_slash_command, handle_commit_slash_command,
     handle_plugins_slash_command, handle_slash_command, handle_worktree_slash_command,
     render_plugins_report, render_slash_command_help, resume_supported_slash_commands,
-    slash_command_specs, suggest_slash_commands, CommitPushPrRequest,
+    slash_command_specs, suggest_slash_commands, CommitPushPrRequest, PluginEffect,
 };
 use plugins::{PluginKind, PluginManager, PluginManagerConfig, PluginMetadata, PluginSummary};
 use runtime::{CompactionConfig, ContentBlock, ConversationMessage, MessageRole, Session};
@@ -406,12 +406,8 @@ fn ignores_unknown_or_runtime_bound_slash_commands() {
     let session = Session::new();
     assert!(handle_slash_command("/unknown", &session, CompactionConfig::default()).is_none());
     assert!(handle_slash_command("/status", &session, CompactionConfig::default()).is_none());
-    assert!(
-        handle_slash_command("/branch list", &session, CompactionConfig::default()).is_none()
-    );
-    assert!(
-        handle_slash_command("/bughunter", &session, CompactionConfig::default()).is_none()
-    );
+    assert!(handle_slash_command("/branch list", &session, CompactionConfig::default()).is_none());
+    assert!(handle_slash_command("/bughunter", &session, CompactionConfig::default()).is_none());
     assert!(
         handle_slash_command("/worktree list", &session, CompactionConfig::default()).is_none()
     );
@@ -424,19 +420,12 @@ fn ignores_unknown_or_runtime_bound_slash_commands() {
     .is_none());
     assert!(handle_slash_command("/pr", &session, CompactionConfig::default()).is_none());
     assert!(handle_slash_command("/issue", &session, CompactionConfig::default()).is_none());
+    assert!(handle_slash_command("/ultraplan", &session, CompactionConfig::default()).is_none());
+    assert!(handle_slash_command("/teleport foo", &session, CompactionConfig::default()).is_none());
     assert!(
-        handle_slash_command("/ultraplan", &session, CompactionConfig::default()).is_none()
+        handle_slash_command("/debug-tool-call", &session, CompactionConfig::default()).is_none()
     );
-    assert!(
-        handle_slash_command("/teleport foo", &session, CompactionConfig::default()).is_none()
-    );
-    assert!(
-        handle_slash_command("/debug-tool-call", &session, CompactionConfig::default())
-            .is_none()
-    );
-    assert!(
-        handle_slash_command("/model sonnet", &session, CompactionConfig::default()).is_none()
-    );
+    assert!(handle_slash_command("/model sonnet", &session, CompactionConfig::default()).is_none());
     assert!(handle_slash_command(
         "/permissions read-only",
         &session,
@@ -445,8 +434,7 @@ fn ignores_unknown_or_runtime_bound_slash_commands() {
     .is_none());
     assert!(handle_slash_command("/clear", &session, CompactionConfig::default()).is_none());
     assert!(
-        handle_slash_command("/clear --confirm", &session, CompactionConfig::default())
-            .is_none()
+        handle_slash_command("/clear --confirm", &session, CompactionConfig::default()).is_none()
     );
     assert!(handle_slash_command("/cost", &session, CompactionConfig::default()).is_none());
     assert!(handle_slash_command(
@@ -456,21 +444,14 @@ fn ignores_unknown_or_runtime_bound_slash_commands() {
     )
     .is_none());
     assert!(handle_slash_command("/config", &session, CompactionConfig::default()).is_none());
-    assert!(
-        handle_slash_command("/config env", &session, CompactionConfig::default()).is_none()
-    );
+    assert!(handle_slash_command("/config env", &session, CompactionConfig::default()).is_none());
     assert!(handle_slash_command("/diff", &session, CompactionConfig::default()).is_none());
     assert!(handle_slash_command("/version", &session, CompactionConfig::default()).is_none());
     assert!(
-        handle_slash_command("/export note.txt", &session, CompactionConfig::default())
-            .is_none()
+        handle_slash_command("/export note.txt", &session, CompactionConfig::default()).is_none()
     );
-    assert!(
-        handle_slash_command("/session list", &session, CompactionConfig::default()).is_none()
-    );
-    assert!(
-        handle_slash_command("/plugins list", &session, CompactionConfig::default()).is_none()
-    );
+    assert!(handle_slash_command("/session list", &session, CompactionConfig::default()).is_none());
+    assert!(handle_slash_command("/plugins list", &session, CompactionConfig::default()).is_none());
 }
 
 #[test]
@@ -600,8 +581,7 @@ fn lists_skills_from_project_and_user_roots() {
 fn agents_and_skills_usage_support_help_and_unexpected_args() {
     let cwd = temp_dir("slash-usage");
 
-    let agents_help =
-        crate::handle_agents_slash_command(Some("help"), &cwd).expect("agents help");
+    let agents_help = crate::handle_agents_slash_command(Some("help"), &cwd).expect("agents help");
     assert!(agents_help.contains("Usage            /agents"));
     assert!(agents_help.contains("Direct CLI       codineer agents"));
 
@@ -642,7 +622,7 @@ fn installs_plugin_from_path_and_lists_it() {
         &mut manager,
     )
     .expect("install command should succeed");
-    assert!(install.reload_runtime);
+    assert_eq!(install.effect, PluginEffect::ReloadRuntime);
     assert!(install.message.contains("installed demo@external"));
     assert!(install.message.contains("Name             demo"));
     assert!(install.message.contains("Version          1.0.0"));
@@ -650,7 +630,7 @@ fn installs_plugin_from_path_and_lists_it() {
 
     let list = handle_plugins_slash_command(Some("list"), None, &mut manager)
         .expect("list command should succeed");
-    assert!(!list.reload_runtime);
+    assert_eq!(list.effect, PluginEffect::None);
     assert!(list.message.contains("demo"));
     assert!(list.message.contains("v1.0.0"));
     assert!(list.message.contains("enabled"));
@@ -675,7 +655,7 @@ fn enables_and_disables_plugin_by_name() {
 
     let disable = handle_plugins_slash_command(Some("disable"), Some("demo"), &mut manager)
         .expect("disable command should succeed");
-    assert!(disable.reload_runtime);
+    assert_eq!(disable.effect, PluginEffect::ReloadRuntime);
     assert!(disable.message.contains("disabled demo@external"));
     assert!(disable.message.contains("Name             demo"));
     assert!(disable.message.contains("Status           disabled"));
@@ -687,7 +667,7 @@ fn enables_and_disables_plugin_by_name() {
 
     let enable = handle_plugins_slash_command(Some("enable"), Some("demo"), &mut manager)
         .expect("enable command should succeed");
-    assert!(enable.reload_runtime);
+    assert_eq!(enable.effect, PluginEffect::ReloadRuntime);
     assert!(enable.message.contains("enabled demo@external"));
     assert!(enable.message.contains("Name             demo"));
     assert!(enable.message.contains("Status           enabled"));
@@ -714,7 +694,7 @@ fn lists_auto_installed_bundled_plugins_with_status() {
 
     let list = handle_plugins_slash_command(Some("list"), None, &mut manager)
         .expect("list command should succeed");
-    assert!(!list.reload_runtime);
+    assert_eq!(list.effect, PluginEffect::None);
     assert!(list.message.contains("starter"));
     assert!(list.message.contains("v0.1.0"));
     assert!(list.message.contains("disabled"));
@@ -775,8 +755,7 @@ fn commit_command_stages_and_commits_changes() {
     fs::write(repo.join("notes.txt"), "hello\n").expect("write notes");
 
     // when
-    let report =
-        handle_commit_slash_command("feat: add notes", &repo).expect("commit succeeds");
+    let report = handle_commit_slash_command("feat: add notes", &repo).expect("commit succeeds");
     let status = run_command(&repo, "git", &["status", "--short"]);
     let message = run_command(&repo, "git", &["log", "-1", "--pretty=%B"]);
 

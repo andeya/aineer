@@ -28,10 +28,16 @@ pub struct SlashCommandResult {
     pub session: Session,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PluginEffect {
+    None,
+    ReloadRuntime,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PluginsCommandResult {
     pub message: String,
-    pub reload_runtime: bool,
+    pub effect: PluginEffect,
 }
 
 #[must_use]
