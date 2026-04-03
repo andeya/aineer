@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="assets/logo.svg" width="80" alt="">
-  <br><br>
-  <strong>C O D I N E E R</strong>
-  <br>
+  <img src="assets/logo.svg" width="96" alt="">
+</p>
+<h1 align="center">codineer</h1>
+<p align="center">
   <em>你的本地 AI 编程助手 — 单一二进制，零云端锁定。</em>
 </p>
 
