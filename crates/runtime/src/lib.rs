@@ -11,6 +11,7 @@ mod mcp_stdio;
 mod oauth;
 mod permissions;
 mod prompt;
+#[allow(dead_code)]
 mod remote;
 pub mod sandbox;
 mod session;
@@ -64,10 +65,6 @@ pub use permissions::{
 pub use prompt::{
     load_system_prompt, load_system_prompt_with_lsp, ContextFile, ProjectContext,
     SystemPromptBuilder,
-};
-pub use remote::{
-    inherited_upstream_proxy_env, no_proxy_list, read_token, upstream_proxy_ws_url,
-    RemoteSessionContext, UpstreamProxyBootstrap, UpstreamProxyState,
 };
 pub use session::{ContentBlock, ConversationMessage, MessageRole, Session, SessionError};
 pub use usage::{format_usd, pricing_for_model, TokenUsage, UsageCostEstimate, UsageTracker};

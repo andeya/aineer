@@ -336,11 +336,6 @@ impl TerminalRenderer {
         output.trim_end().to_string()
     }
 
-    #[must_use]
-    pub fn markdown_to_ansi(&self, markdown: &str) -> String {
-        self.render_markdown(markdown)
-    }
-
     #[allow(clippy::too_many_lines)]
     fn render_event(
         &self,
@@ -408,7 +403,8 @@ impl TerminalRenderer {
                 self.push_text(text.as_ref(), state, output, code_buffer, *in_code_block);
             }
             Event::Html(html) | Event::InlineHtml(html) => {
-                state.append_raw(output, &html);
+                let sanitized: String = html.chars().filter(|c| !c.is_control() || *c == '\n').collect();
+                state.append_raw(output, &sanitized);
             }
             Event::FootnoteReference(reference) => {
                 state.append_raw(output, &format!("[{reference}]"));
@@ -650,7 +646,7 @@ impl TerminalRenderer {
     }
 
     pub fn stream_markdown(&self, markdown: &str, out: &mut impl Write) -> io::Result<()> {
-        let rendered_markdown = self.markdown_to_ansi(markdown);
+        let rendered_markdown = self.render_markdown(markdown);
         write!(out, "{rendered_markdown}")?;
         if !rendered_markdown.ends_with('\n') {
             writeln!(out)?;
@@ -671,7 +667,7 @@ impl MarkdownStreamState {
         let split = find_stream_safe_boundary(&self.pending)?;
         let ready = self.pending[..split].to_string();
         self.pending.drain(..split);
-        Some(renderer.markdown_to_ansi(&ready))
+        Some(renderer.render_markdown(&ready))
     }
 
     #[must_use]
@@ -681,7 +677,7 @@ impl MarkdownStreamState {
             None
         } else {
             let pending = std::mem::take(&mut self.pending);
-            Some(renderer.markdown_to_ansi(&pending))
+            Some(renderer.render_markdown(&pending))
         }
     }
 }
@@ -788,7 +784,7 @@ mod tests {
     fn highlights_fenced_code_blocks() {
         let terminal_renderer = TerminalRenderer::new();
         let markdown_output =
-            terminal_renderer.markdown_to_ansi("```rust\nfn hi() { println!(\"hi\"); }\n```");
+            terminal_renderer.render_markdown("```rust\nfn hi() { println!(\"hi\"); }\n```");
         let plain_text = strip_ansi(&markdown_output);
 
         assert!(plain_text.contains("╭─ rust"));

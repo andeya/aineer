@@ -1,27 +1,5 @@
-use std::future::Future;
-use std::pin::Pin;
-
-use crate::error::ApiError;
-use crate::types::{MessageRequest, MessageResponse};
-
 pub mod codineer_provider;
 pub mod openai_compat;
-
-pub type ProviderFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, ApiError>> + Send + 'a>>;
-
-pub trait Provider {
-    type Stream;
-
-    fn send_message<'a>(
-        &'a self,
-        request: &'a MessageRequest,
-    ) -> ProviderFuture<'a, MessageResponse>;
-
-    fn stream_message<'a>(
-        &'a self,
-        request: &'a MessageRequest,
-    ) -> ProviderFuture<'a, Self::Stream>;
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProviderKind {
@@ -255,7 +233,7 @@ pub fn auto_detect_default_model() -> Option<&'static str> {
 #[must_use]
 pub fn max_tokens_for_model(model: &str) -> u32 {
     let canonical = resolve_model_alias(model);
-    if canonical.contains("opus") {
+    if canonical.starts_with("claude-opus") || canonical == "opus" {
         32_000
     } else {
         64_000

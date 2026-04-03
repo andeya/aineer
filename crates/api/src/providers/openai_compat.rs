@@ -12,7 +12,6 @@ use crate::types::{
     ToolChoice, ToolDefinition, ToolResultContentBlock, Usage,
 };
 
-use super::{Provider, ProviderFuture};
 
 pub const DEFAULT_XAI_BASE_URL: &str = "https://api.x.ai/v1";
 pub const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
@@ -207,24 +206,6 @@ impl OpenAiCompatClient {
             .initial_backoff
             .checked_mul(multiplier)
             .map_or(self.max_backoff, |delay| delay.min(self.max_backoff)))
-    }
-}
-
-impl Provider for OpenAiCompatClient {
-    type Stream = MessageStream;
-
-    fn send_message<'a>(
-        &'a self,
-        request: &'a MessageRequest,
-    ) -> ProviderFuture<'a, MessageResponse> {
-        Box::pin(async move { self.send_message(request).await })
-    }
-
-    fn stream_message<'a>(
-        &'a self,
-        request: &'a MessageRequest,
-    ) -> ProviderFuture<'a, Self::Stream> {
-        Box::pin(async move { self.stream_message(request).await })
     }
 }
 

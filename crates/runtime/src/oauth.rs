@@ -368,7 +368,23 @@ pub fn parse_oauth_callback_query(query: &str) -> Result<OAuthCallbackParams, St
 
 fn generate_random_token(bytes: usize) -> io::Result<String> {
     let mut buffer = vec![0_u8; bytes];
-    File::open("/dev/urandom")?.read_exact(&mut buffer)?;
+
+    #[cfg(unix)]
+    {
+        File::open("/dev/urandom")?.read_exact(&mut buffer)?;
+    }
+    #[cfg(not(unix))]
+    {
+        use std::hash::{BuildHasher, Hasher};
+        for chunk in buffer.chunks_mut(8) {
+            let random_u64 = std::collections::hash_map::RandomState::new()
+                .build_hasher()
+                .finish();
+            for (dst, src) in chunk.iter_mut().zip(random_u64.to_ne_bytes().iter()) {
+                *dst = *src;
+            }
+        }
+    }
     Ok(base64url_encode(&buffer))
 }
 

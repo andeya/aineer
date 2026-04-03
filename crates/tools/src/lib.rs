@@ -213,9 +213,9 @@ fn normalize_tool_name(value: &str) -> String {
 
 fn permission_mode_from_plugin(value: &str) -> PermissionMode {
     match value {
-        "read-only" => PermissionMode::ReadOnly,
+        "danger-full-access" => PermissionMode::DangerFullAccess,
         "workspace-write" => PermissionMode::WorkspaceWrite,
-        _ => PermissionMode::DangerFullAccess,
+        _ => PermissionMode::ReadOnly,
     }
 }
 

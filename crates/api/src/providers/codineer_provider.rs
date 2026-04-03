@@ -9,7 +9,6 @@ use serde::Deserialize;
 
 use crate::error::ApiError;
 
-use super::{Provider, ProviderFuture};
 use crate::sse::SseParser;
 use crate::types::{MessageRequest, MessageResponse, StreamEvent};
 
@@ -543,24 +542,6 @@ fn request_id_from_headers(headers: &reqwest::header::HeaderMap) -> Option<Strin
         .or_else(|| headers.get(ALT_REQUEST_ID_HEADER))
         .and_then(|value| value.to_str().ok())
         .map(ToOwned::to_owned)
-}
-
-impl Provider for CodineerApiClient {
-    type Stream = MessageStream;
-
-    fn send_message<'a>(
-        &'a self,
-        request: &'a MessageRequest,
-    ) -> ProviderFuture<'a, MessageResponse> {
-        Box::pin(async move { self.send_message(request).await })
-    }
-
-    fn stream_message<'a>(
-        &'a self,
-        request: &'a MessageRequest,
-    ) -> ProviderFuture<'a, Self::Stream> {
-        Box::pin(async move { self.stream_message(request).await })
-    }
 }
 
 #[derive(Debug)]

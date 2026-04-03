@@ -1208,7 +1208,6 @@ dependencies = [
  "glob",
  "keyring",
  "lsp",
- "plugins",
  "regex",
  "serde",
  "serde_json",

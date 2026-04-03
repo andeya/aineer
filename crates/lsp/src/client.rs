@@ -369,8 +369,9 @@ impl LspClient {
             return Err(error);
         }
 
-        let response = receiver
+        let response = tokio::time::timeout(std::time::Duration::from_secs(30), receiver)
             .await
+            .map_err(|_| LspError::Protocol(format!("{method} request timed out after 30s")))?
             .map_err(|_| LspError::Protocol(format!("request channel closed for {method}")))??;
         Ok(serde_json::from_value(response)?)
     }

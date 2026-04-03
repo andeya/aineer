@@ -224,6 +224,7 @@ pub fn glob_search(pattern: &str, path: Option<&str>) -> io::Result<GlobSearchOu
         .transpose()?
         .unwrap_or(std::env::current_dir()?);
     let search_pattern = if Path::new(pattern).is_absolute() {
+        enforce_workspace_boundary(Path::new(pattern))?;
         pattern.to_owned()
     } else {
         base_dir.join(pattern).to_string_lossy().into_owned()

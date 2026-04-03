@@ -1,22 +1,8 @@
 use crate::error::ApiError;
 use crate::providers::codineer_provider::{self, AuthSource, CodineerApiClient};
 use crate::providers::openai_compat::{self, OpenAiCompatClient, OpenAiCompatConfig};
-use crate::providers::{self, Provider, ProviderKind};
+use crate::providers::{self, ProviderKind};
 use crate::types::{MessageRequest, MessageResponse, StreamEvent};
-
-async fn send_via_provider<P: Provider>(
-    provider: &P,
-    request: &MessageRequest,
-) -> Result<MessageResponse, ApiError> {
-    provider.send_message(request).await
-}
-
-async fn stream_via_provider<P: Provider>(
-    provider: &P,
-    request: &MessageRequest,
-) -> Result<P::Stream, ApiError> {
-    provider.stream_message(request).await
-}
 
 #[derive(Debug, Clone)]
 pub enum ProviderClient {
@@ -63,8 +49,8 @@ impl ProviderClient {
         request: &MessageRequest,
     ) -> Result<MessageResponse, ApiError> {
         match self {
-            Self::CodineerApi(client) => send_via_provider(client, request).await,
-            Self::Xai(client) | Self::OpenAi(client) => send_via_provider(client, request).await,
+            Self::CodineerApi(client) => client.send_message(request).await,
+            Self::Xai(client) | Self::OpenAi(client) => client.send_message(request).await,
         }
     }
 
@@ -73,12 +59,12 @@ impl ProviderClient {
         request: &MessageRequest,
     ) -> Result<MessageStream, ApiError> {
         match self {
-            Self::CodineerApi(client) => stream_via_provider(client, request)
-                .await
-                .map(MessageStream::CodineerApi),
-            Self::Xai(client) | Self::OpenAi(client) => stream_via_provider(client, request)
-                .await
-                .map(MessageStream::OpenAiCompat),
+            Self::CodineerApi(client) => {
+                client.stream_message(request).await.map(MessageStream::CodineerApi)
+            }
+            Self::Xai(client) | Self::OpenAi(client) => {
+                client.stream_message(request).await.map(MessageStream::OpenAiCompat)
+            }
         }
     }
 }

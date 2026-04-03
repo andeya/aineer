@@ -320,7 +320,11 @@ fn sandbox_env(cwd: &Path, status: &SandboxStatus) -> Vec<(String, String)> {
 
 #[must_use]
 pub fn generate_seatbelt_profile(cwd: &Path, status: &SandboxStatus) -> String {
-    let cwd_str = cwd.display();
+    fn escape_seatbelt_path(path: &str) -> String {
+        path.replace('\\', "\\\\").replace('"', "\\\"")
+    }
+
+    let cwd_str = escape_seatbelt_path(&cwd.display().to_string());
     let sandbox_home = cwd.join(".sandbox-home");
     let sandbox_tmp = cwd.join(".sandbox-tmp");
 
@@ -348,7 +352,7 @@ pub fn generate_seatbelt_profile(cwd: &Path, status: &SandboxStatus) -> String {
     ];
 
     if let Some(home) = env::var_os("HOME") {
-        let home_str = home.to_string_lossy();
+        let home_str = home.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
         rules.push(format!(
             "(allow file-read* (subpath \"{home_str}/.cargo\"))"
         ));
@@ -363,30 +367,23 @@ pub fn generate_seatbelt_profile(cwd: &Path, status: &SandboxStatus) -> String {
             rules.push("(allow file-write*)".to_string());
         }
         FilesystemIsolationMode::WorkspaceOnly => {
+            let sh = escape_seatbelt_path(&sandbox_home.display().to_string());
+            let st = escape_seatbelt_path(&sandbox_tmp.display().to_string());
             rules.push(format!("(allow file-read* (subpath \"{cwd_str}\"))"));
             rules.push(format!("(allow file-write* (subpath \"{cwd_str}\"))"));
-            rules.push(format!(
-                "(allow file-write* (subpath \"{}\"))",
-                sandbox_home.display()
-            ));
-            rules.push(format!(
-                "(allow file-write* (subpath \"{}\"))",
-                sandbox_tmp.display()
-            ));
+            rules.push(format!("(allow file-write* (subpath \"{sh}\"))"));
+            rules.push(format!("(allow file-write* (subpath \"{st}\"))"));
         }
         FilesystemIsolationMode::AllowList => {
+            let sh = escape_seatbelt_path(&sandbox_home.display().to_string());
+            let st = escape_seatbelt_path(&sandbox_tmp.display().to_string());
             rules.push(format!("(allow file-read* (subpath \"{cwd_str}\"))"));
-            rules.push(format!(
-                "(allow file-write* (subpath \"{}\"))",
-                sandbox_home.display()
-            ));
-            rules.push(format!(
-                "(allow file-write* (subpath \"{}\"))",
-                sandbox_tmp.display()
-            ));
+            rules.push(format!("(allow file-write* (subpath \"{sh}\"))"));
+            rules.push(format!("(allow file-write* (subpath \"{st}\"))"));
             for mount in &status.allowed_mounts {
-                rules.push(format!("(allow file-read* (subpath \"{mount}\"))"));
-                rules.push(format!("(allow file-write* (subpath \"{mount}\"))"));
+                let escaped = escape_seatbelt_path(mount);
+                rules.push(format!("(allow file-read* (subpath \"{escaped}\"))"));
+                rules.push(format!("(allow file-write* (subpath \"{escaped}\"))"));
             }
         }
     }
