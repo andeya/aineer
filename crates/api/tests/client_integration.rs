@@ -5,7 +5,7 @@ use std::time::Duration;
 use api::{
     ApiError, AuthSource, CodineerApiClient, ContentBlockDelta, ContentBlockDeltaEvent,
     ContentBlockStartEvent, InputContentBlock, InputMessage, MessageDeltaEvent, MessageRequest,
-    OutputContentBlock, ProviderClient, StreamEvent, ToolChoice, ToolDefinition,
+    OutputContentBlock, ProviderClient, RetryPolicy, StreamEvent, ToolChoice, ToolDefinition,
 };
 use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -184,7 +184,11 @@ async fn retries_retryable_failures_before_succeeding() {
 
     let client = CodineerApiClient::new("test-key")
         .with_base_url(server.base_url())
-        .with_retry_policy(2, Duration::from_millis(1), Duration::from_millis(2));
+        .with_retry_policy(RetryPolicy {
+            max_retries: 2,
+            initial_backoff: Duration::from_millis(1),
+            max_backoff: Duration::from_millis(2),
+        });
 
     let response = client
         .send_message(&sample_request(false))
@@ -258,7 +262,11 @@ async fn surfaces_retry_exhaustion_for_persistent_retryable_errors() {
 
     let client = CodineerApiClient::new("test-key")
         .with_base_url(server.base_url())
-        .with_retry_policy(1, Duration::from_millis(1), Duration::from_millis(2));
+        .with_retry_policy(RetryPolicy {
+            max_retries: 1,
+            initial_backoff: Duration::from_millis(1),
+            max_backoff: Duration::from_millis(2),
+        });
 
     let error = client
         .send_message(&sample_request(false))

@@ -11,6 +11,7 @@ use super::{
     now_unix_timestamp, oauth_token_is_expired, resolve_saved_oauth_token,
     resolve_startup_auth_source, AuthSource, CodineerApiClient, OAuthTokenSet,
 };
+use crate::providers::RetryPolicy;
 use crate::types::{ContentBlockDelta, MessageRequest};
 
 fn env_lock() -> std::sync::MutexGuard<'static, ()> {
@@ -250,8 +251,7 @@ fn resolve_startup_auth_source_errors_when_refreshable_token_lacks_config() {
     })
     .expect("save expired oauth credentials");
 
-    let error =
-        resolve_startup_auth_source(|| Ok(None)).expect_err("missing config should error");
+    let error = resolve_startup_auth_source(|| Ok(None)).expect_err("missing config should error");
     assert!(
         matches!(error, crate::error::ApiError::Auth(message) if message.contains("runtime OAuth config is missing"))
     );
@@ -317,11 +317,11 @@ fn message_request_stream_helper_sets_stream_true() {
 
 #[test]
 fn backoff_doubles_until_maximum() {
-    let client = CodineerApiClient::new("test-key").with_retry_policy(
-        3,
-        Duration::from_millis(10),
-        Duration::from_millis(25),
-    );
+    let client = CodineerApiClient::new("test-key").with_retry_policy(RetryPolicy {
+        max_retries: 3,
+        initial_backoff: Duration::from_millis(10),
+        max_backoff: Duration::from_millis(25),
+    });
     assert_eq!(
         client.backoff_for_attempt(1).expect("attempt 1"),
         Duration::from_millis(10)

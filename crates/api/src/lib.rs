@@ -13,7 +13,7 @@ pub use providers::codineer_provider::{AuthSource, CodineerApiClient};
 pub use providers::openai_compat::{OpenAiCompatClient, OpenAiCompatConfig};
 pub use providers::{
     auto_detect_default_model, detect_provider_kind, max_tokens_for_model, resolve_model_alias,
-    ProviderKind,
+    ProviderKind, RetryPolicy,
 };
 pub use sse::{parse_frame, SseParser};
 pub use types::{

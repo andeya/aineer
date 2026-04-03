@@ -71,7 +71,8 @@ fn parses_tool_arguments_fallback() {
 fn missing_xai_api_key_is_provider_specific() {
     let _lock = env_lock();
     std::env::remove_var("XAI_API_KEY");
-    let error = OpenAiCompatClient::from_env(OpenAiCompatConfig::xai()).expect_err("missing key should error");
+    let error = OpenAiCompatClient::from_env(OpenAiCompatConfig::xai())
+        .expect_err("missing key should error");
     assert!(matches!(
         error,
         ApiError::MissingCredentials {

@@ -1,10 +1,10 @@
 use std::collections::{BTreeMap, VecDeque};
-use std::time::Duration;
 
 use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::error::ApiError;
+use crate::providers::RetryPolicy;
 use crate::types::{
     ContentBlockDelta, ContentBlockDeltaEvent, ContentBlockStartEvent, ContentBlockStopEvent,
     InputContentBlock, InputMessage, MessageDelta, MessageDeltaEvent, MessageRequest,
@@ -16,9 +16,6 @@ pub const DEFAULT_XAI_BASE_URL: &str = "https://api.x.ai/v1";
 pub const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
 const REQUEST_ID_HEADER: &str = "request-id";
 const ALT_REQUEST_ID_HEADER: &str = "x-request-id";
-const DEFAULT_INITIAL_BACKOFF: Duration = Duration::from_millis(200);
-const DEFAULT_MAX_BACKOFF: Duration = Duration::from_secs(2);
-const DEFAULT_MAX_RETRIES: u32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OpenAiCompatConfig {
@@ -66,9 +63,7 @@ pub struct OpenAiCompatClient {
     http: reqwest::Client,
     api_key: String,
     base_url: String,
-    max_retries: u32,
-    initial_backoff: Duration,
-    max_backoff: Duration,
+    retry: RetryPolicy,
 }
 
 impl OpenAiCompatClient {
@@ -78,9 +73,7 @@ impl OpenAiCompatClient {
             http: reqwest::Client::new(),
             api_key: api_key.into(),
             base_url: read_base_url(config),
-            max_retries: DEFAULT_MAX_RETRIES,
-            initial_backoff: DEFAULT_INITIAL_BACKOFF,
-            max_backoff: DEFAULT_MAX_BACKOFF,
+            retry: RetryPolicy::default(),
         }
     }
 
@@ -101,15 +94,8 @@ impl OpenAiCompatClient {
     }
 
     #[must_use]
-    pub fn with_retry_policy(
-        mut self,
-        max_retries: u32,
-        initial_backoff: Duration,
-        max_backoff: Duration,
-    ) -> Self {
-        self.max_retries = max_retries;
-        self.initial_backoff = initial_backoff;
-        self.max_backoff = max_backoff;
+    pub fn with_retry_policy(mut self, retry: RetryPolicy) -> Self {
+        self.retry = retry;
         self
     }
 
@@ -159,14 +145,20 @@ impl OpenAiCompatClient {
             let retryable_error = match self.send_raw_request(request).await {
                 Ok(response) => match expect_success(response).await {
                     Ok(response) => return Ok(response),
-                    Err(error) if error.is_retryable() && attempts <= self.max_retries + 1 => error,
+                    Err(error)
+                        if error.is_retryable() && attempts <= self.retry.max_retries + 1 =>
+                    {
+                        error
+                    }
                     Err(error) => return Err(error),
                 },
-                Err(error) if error.is_retryable() && attempts <= self.max_retries + 1 => error,
+                Err(error) if error.is_retryable() && attempts <= self.retry.max_retries + 1 => {
+                    error
+                }
                 Err(error) => return Err(error),
             };
 
-            if attempts > self.max_retries {
+            if attempts > self.retry.max_retries {
                 break retryable_error;
             }
 
@@ -194,17 +186,20 @@ impl OpenAiCompatClient {
             .map_err(ApiError::from)
     }
 
-    fn backoff_for_attempt(&self, attempt: u32) -> Result<Duration, ApiError> {
+    fn backoff_for_attempt(&self, attempt: u32) -> Result<std::time::Duration, ApiError> {
         let Some(multiplier) = 1_u32.checked_shl(attempt.saturating_sub(1)) else {
             return Err(ApiError::BackoffOverflow {
                 attempt,
-                base_delay: self.initial_backoff,
+                base_delay: self.retry.initial_backoff,
             });
         };
         Ok(self
+            .retry
             .initial_backoff
             .checked_mul(multiplier)
-            .map_or(self.max_backoff, |delay| delay.min(self.max_backoff)))
+            .map_or(self.retry.max_backoff, |delay| {
+                delay.min(self.retry.max_backoff)
+            }))
     }
 }
 

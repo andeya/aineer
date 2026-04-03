@@ -1,5 +1,5 @@
 use std::collections::VecDeque;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use runtime::{
     load_oauth_credentials, save_oauth_credentials, OAuthConfig, OAuthRefreshRequest,
@@ -8,7 +8,7 @@ use runtime::{
 use serde::Deserialize;
 
 use crate::error::ApiError;
-
+use crate::providers::RetryPolicy;
 use crate::sse::SseParser;
 use crate::types::{MessageRequest, MessageResponse, StreamEvent};
 
@@ -16,9 +16,6 @@ pub const DEFAULT_BASE_URL: &str = "https://api.anthropic.com";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 const REQUEST_ID_HEADER: &str = "request-id";
 const ALT_REQUEST_ID_HEADER: &str = "x-request-id";
-const DEFAULT_INITIAL_BACKOFF: Duration = Duration::from_millis(200);
-const DEFAULT_MAX_BACKOFF: Duration = Duration::from_secs(2);
-const DEFAULT_MAX_RETRIES: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthSource {
@@ -109,9 +106,7 @@ pub struct CodineerApiClient {
     http: reqwest::Client,
     auth: AuthSource,
     base_url: String,
-    max_retries: u32,
-    initial_backoff: Duration,
-    max_backoff: Duration,
+    retry: RetryPolicy,
 }
 
 impl CodineerApiClient {
@@ -121,9 +116,7 @@ impl CodineerApiClient {
             http: reqwest::Client::new(),
             auth: AuthSource::ApiKey(api_key.into()),
             base_url: DEFAULT_BASE_URL.to_string(),
-            max_retries: DEFAULT_MAX_RETRIES,
-            initial_backoff: DEFAULT_INITIAL_BACKOFF,
-            max_backoff: DEFAULT_MAX_BACKOFF,
+            retry: RetryPolicy::default(),
         }
     }
 
@@ -133,9 +126,7 @@ impl CodineerApiClient {
             http: reqwest::Client::new(),
             auth,
             base_url: DEFAULT_BASE_URL.to_string(),
-            max_retries: DEFAULT_MAX_RETRIES,
-            initial_backoff: DEFAULT_INITIAL_BACKOFF,
-            max_backoff: DEFAULT_MAX_BACKOFF,
+            retry: RetryPolicy::default(),
         }
     }
 
@@ -181,15 +172,8 @@ impl CodineerApiClient {
     }
 
     #[must_use]
-    pub fn with_retry_policy(
-        mut self,
-        max_retries: u32,
-        initial_backoff: Duration,
-        max_backoff: Duration,
-    ) -> Self {
-        self.max_retries = max_retries;
-        self.initial_backoff = initial_backoff;
-        self.max_backoff = max_backoff;
+    pub fn with_retry_policy(mut self, retry: RetryPolicy) -> Self {
+        self.retry = retry;
         self
     }
 
@@ -286,18 +270,20 @@ impl CodineerApiClient {
             match self.send_raw_request(request).await {
                 Ok(response) => match expect_success(response).await {
                     Ok(response) => return Ok(response),
-                    Err(error) if error.is_retryable() && attempts <= self.max_retries + 1 => {
+                    Err(error)
+                        if error.is_retryable() && attempts <= self.retry.max_retries + 1 =>
+                    {
                         last_error = Some(error);
                     }
                     Err(error) => return Err(error),
                 },
-                Err(error) if error.is_retryable() && attempts <= self.max_retries + 1 => {
+                Err(error) if error.is_retryable() && attempts <= self.retry.max_retries + 1 => {
                     last_error = Some(error);
                 }
                 Err(error) => return Err(error),
             }
 
-            if attempts > self.max_retries {
+            if attempts > self.retry.max_retries {
                 break;
             }
 
@@ -328,17 +314,20 @@ impl CodineerApiClient {
         request_builder.send().await.map_err(ApiError::from)
     }
 
-    fn backoff_for_attempt(&self, attempt: u32) -> Result<Duration, ApiError> {
+    fn backoff_for_attempt(&self, attempt: u32) -> Result<std::time::Duration, ApiError> {
         let Some(multiplier) = 1_u32.checked_shl(attempt.saturating_sub(1)) else {
             return Err(ApiError::BackoffOverflow {
                 attempt,
-                base_delay: self.initial_backoff,
+                base_delay: self.retry.initial_backoff,
             });
         };
         Ok(self
+            .retry
             .initial_backoff
             .checked_mul(multiplier)
-            .map_or(self.max_backoff, |delay| delay.min(self.max_backoff)))
+            .map_or(self.retry.max_backoff, |delay| {
+                delay.min(self.retry.max_backoff)
+            }))
     }
 }
 
