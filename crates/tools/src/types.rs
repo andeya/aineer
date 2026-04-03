@@ -80,9 +80,9 @@ pub(crate) struct AgentInput {
 }
 
 #[derive(Debug, Deserialize)]
-pub(crate) struct ToolSearchInput {
-    pub(crate) query: String,
-    pub(crate) max_results: Option<usize>,
+pub struct ToolSearchInput {
+    pub query: String,
+    pub max_results: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -251,14 +251,14 @@ pub(crate) struct AgentJob {
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct ToolSearchOutput {
-    pub(crate) matches: Vec<String>,
-    pub(crate) query: String,
-    pub(crate) normalized_query: String,
+pub struct ToolSearchOutput {
+    pub matches: Vec<String>,
+    pub query: String,
+    pub normalized_query: String,
     #[serde(rename = "total_deferred_tools")]
-    pub(crate) total_deferred_tools: usize,
+    pub total_deferred_tools: usize,
     #[serde(rename = "pending_mcp_servers")]
-    pub(crate) pending_mcp_servers: Option<Vec<String>>,
+    pub pending_mcp_servers: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize)]

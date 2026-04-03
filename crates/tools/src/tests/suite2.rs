@@ -588,6 +588,7 @@ fn structured_output_echoes_input_payload() {
 }
 
 #[test]
+#[cfg(unix)]
 fn repl_executes_python_code() {
     let result = execute_tool(
         "REPL",

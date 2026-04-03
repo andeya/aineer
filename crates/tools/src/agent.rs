@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 
 use crate::canonical_tool_token;
 use crate::execute_tool;
@@ -16,9 +17,134 @@ use runtime::{
     TokenUsage, ToolError, ToolExecutor,
 };
 
-const DEFAULT_AGENT_MODEL: &str = "claude-opus-4-6";
+fn default_agent_model() -> String {
+    api::auto_detect_default_model()
+        .unwrap_or("claude-sonnet-4-6")
+        .to_string()
+}
 const DEFAULT_AGENT_SYSTEM_DATE: &str = "2026-03-31";
 const DEFAULT_AGENT_MAX_ITERATIONS: usize = 32;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SubagentKind {
+    Explore,
+    Plan,
+    Verification,
+    CodineerGuide,
+    StatuslineSetup,
+    General,
+}
+
+impl SubagentKind {
+    pub(crate) fn from_str(value: &str) -> Self {
+        match value {
+            "Explore" => Self::Explore,
+            "Plan" => Self::Plan,
+            "Verification" => Self::Verification,
+            "codineer-guide" => Self::CodineerGuide,
+            "statusline-setup" => Self::StatuslineSetup,
+            _ => Self::General,
+        }
+    }
+
+    pub(crate) fn allowed_tools(self) -> BTreeSet<String> {
+        let tools: &[&str] = match self {
+            Self::Explore => &[
+                "read_file",
+                "glob_search",
+                "grep_search",
+                "WebFetch",
+                "WebSearch",
+                "ToolSearch",
+                "Skill",
+                "StructuredOutput",
+            ],
+            Self::Plan => &[
+                "read_file",
+                "glob_search",
+                "grep_search",
+                "WebFetch",
+                "WebSearch",
+                "ToolSearch",
+                "Skill",
+                "TodoWrite",
+                "StructuredOutput",
+                "SendUserMessage",
+            ],
+            Self::Verification => &[
+                "bash",
+                "read_file",
+                "glob_search",
+                "grep_search",
+                "WebFetch",
+                "WebSearch",
+                "ToolSearch",
+                "TodoWrite",
+                "StructuredOutput",
+                "SendUserMessage",
+                "PowerShell",
+            ],
+            Self::CodineerGuide => &[
+                "read_file",
+                "glob_search",
+                "grep_search",
+                "WebFetch",
+                "WebSearch",
+                "ToolSearch",
+                "Skill",
+                "StructuredOutput",
+                "SendUserMessage",
+            ],
+            Self::StatuslineSetup => &[
+                "bash",
+                "read_file",
+                "write_file",
+                "edit_file",
+                "glob_search",
+                "grep_search",
+                "ToolSearch",
+            ],
+            Self::General => &[
+                "bash",
+                "read_file",
+                "write_file",
+                "edit_file",
+                "glob_search",
+                "grep_search",
+                "WebFetch",
+                "WebSearch",
+                "TodoWrite",
+                "Skill",
+                "ToolSearch",
+                "NotebookEdit",
+                "Sleep",
+                "SendUserMessage",
+                "Config",
+                "StructuredOutput",
+                "REPL",
+                "PowerShell",
+            ],
+        };
+        tools.iter().map(|s| (*s).to_string()).collect()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AgentRunStatus {
+    Running,
+    Completed,
+    Failed,
+}
+
+impl fmt::Display for AgentRunStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Running => f.write_str("running"),
+            Self::Completed => f.write_str("completed"),
+            Self::Failed => f.write_str("failed"),
+        }
+    }
+}
 
 pub(crate) fn execute_agent(input: AgentInput) -> Result<AgentOutput, String> {
     execute_agent_with_spawn(input, spawn_agent_job)
@@ -78,7 +204,7 @@ where
         description: input.description,
         subagent_type: Some(normalized_subagent_type),
         model: Some(model),
-        status: String::from("running"),
+        status: AgentRunStatus::Running.to_string(),
         output_file: output_file.display().to_string(),
         manifest_file: manifest_file.display().to_string(),
         created_at: created_at.clone(),
@@ -97,7 +223,7 @@ where
     };
     if let Err(error) = spawn_fn(job) {
         let error = format!("failed to spawn sub-agent: {error}");
-        persist_agent_terminal_state(&manifest, "failed", None, Some(error.clone()))?;
+        persist_agent_terminal_state(&manifest, AgentRunStatus::Failed, None, Some(error.clone()))?;
         return Err(error);
     }
 
@@ -114,13 +240,17 @@ fn spawn_agent_job(job: AgentJob) -> Result<(), String> {
             match result {
                 Ok(Ok(())) => {}
                 Ok(Err(error)) => {
-                    let _ =
-                        persist_agent_terminal_state(&job.manifest, "failed", None, Some(error));
+                    let _ = persist_agent_terminal_state(
+                        &job.manifest,
+                        AgentRunStatus::Failed,
+                        None,
+                        Some(error),
+                    );
                 }
                 Err(_) => {
                     let _ = persist_agent_terminal_state(
                         &job.manifest,
-                        "failed",
+                        AgentRunStatus::Failed,
                         None,
                         Some(String::from("sub-agent thread panicked")),
                     );
@@ -137,7 +267,12 @@ fn run_agent_job(job: &AgentJob) -> Result<(), String> {
         .run_turn(job.prompt.clone(), None)
         .map_err(|error| error.to_string())?;
     let final_text = final_assistant_text(&summary);
-    persist_agent_terminal_state(&job.manifest, "completed", Some(final_text.as_str()), None)
+    persist_agent_terminal_state(
+        &job.manifest,
+        AgentRunStatus::Completed,
+        Some(final_text.as_str()),
+        None,
+    )
 }
 
 fn build_agent_runtime(
@@ -147,7 +282,7 @@ fn build_agent_runtime(
         .manifest
         .model
         .clone()
-        .unwrap_or_else(|| DEFAULT_AGENT_MODEL.to_string());
+        .unwrap_or_else(default_agent_model);
     let allowed_tools = job.allowed_tools.clone();
     let api_client = ProviderRuntimeClient::new(&model, allowed_tools.clone())?;
     let tool_executor = SubagentToolExecutor::new(allowed_tools);
@@ -179,89 +314,12 @@ fn resolve_agent_model(model: Option<&str>) -> String {
     model
         .map(str::trim)
         .filter(|model| !model.is_empty())
-        .unwrap_or(DEFAULT_AGENT_MODEL)
-        .to_string()
+        .map(str::to_string)
+        .unwrap_or_else(default_agent_model)
 }
 
 pub(crate) fn allowed_tools_for_subagent(subagent_type: &str) -> BTreeSet<String> {
-    let tools = match subagent_type {
-        "Explore" => vec![
-            "read_file",
-            "glob_search",
-            "grep_search",
-            "WebFetch",
-            "WebSearch",
-            "ToolSearch",
-            "Skill",
-            "StructuredOutput",
-        ],
-        "Plan" => vec![
-            "read_file",
-            "glob_search",
-            "grep_search",
-            "WebFetch",
-            "WebSearch",
-            "ToolSearch",
-            "Skill",
-            "TodoWrite",
-            "StructuredOutput",
-            "SendUserMessage",
-        ],
-        "Verification" => vec![
-            "bash",
-            "read_file",
-            "glob_search",
-            "grep_search",
-            "WebFetch",
-            "WebSearch",
-            "ToolSearch",
-            "TodoWrite",
-            "StructuredOutput",
-            "SendUserMessage",
-            "PowerShell",
-        ],
-        "codineer-guide" => vec![
-            "read_file",
-            "glob_search",
-            "grep_search",
-            "WebFetch",
-            "WebSearch",
-            "ToolSearch",
-            "Skill",
-            "StructuredOutput",
-            "SendUserMessage",
-        ],
-        "statusline-setup" => vec![
-            "bash",
-            "read_file",
-            "write_file",
-            "edit_file",
-            "glob_search",
-            "grep_search",
-            "ToolSearch",
-        ],
-        _ => vec![
-            "bash",
-            "read_file",
-            "write_file",
-            "edit_file",
-            "glob_search",
-            "grep_search",
-            "WebFetch",
-            "WebSearch",
-            "TodoWrite",
-            "Skill",
-            "ToolSearch",
-            "NotebookEdit",
-            "Sleep",
-            "SendUserMessage",
-            "Config",
-            "StructuredOutput",
-            "REPL",
-            "PowerShell",
-        ],
-    };
-    tools.into_iter().map(str::to_string).collect()
+    SubagentKind::from_str(subagent_type).allowed_tools()
 }
 
 pub(crate) fn agent_permission_policy() -> PermissionPolicy {
@@ -281,16 +339,17 @@ fn write_agent_manifest(manifest: &AgentOutput) -> Result<(), String> {
 
 pub(crate) fn persist_agent_terminal_state(
     manifest: &AgentOutput,
-    status: &str,
+    status: AgentRunStatus,
     result: Option<&str>,
     error: Option<String>,
 ) -> Result<(), String> {
+    let status_str = status.to_string();
     append_agent_output(
         &manifest.output_file,
-        &format_agent_terminal_output(status, result, error.as_deref()),
+        &format_agent_terminal_output(&status_str, result, error.as_deref()),
     )?;
     let mut next_manifest = manifest.clone();
-    next_manifest.status = status.to_string();
+    next_manifest.status = status_str;
     next_manifest.completed_at = Some(iso8601_now());
     next_manifest.error = error;
     write_agent_manifest(&next_manifest)

@@ -21,6 +21,7 @@ mod web;
 
 pub use registry::{GlobalToolRegistry, ToolManifestEntry, ToolRegistry, ToolSource, ToolSpec};
 pub use specs::mvp_tool_specs;
+pub use types::ToolSearchInput;
 
 #[cfg(test)]
 pub(crate) use agent::{
@@ -35,7 +36,7 @@ use crate::types::{
     BriefInput, BriefOutput, BriefStatus, ConfigInput, EditFileInput, GlobSearchInputValue,
     NotebookEditInput, PowerShellInput, ReadFileInput, ReplInput, ReplOutput, ResolvedAttachment,
     SkillInput, SkillOutput, SleepInput, SleepOutput, StructuredOutputInput,
-    StructuredOutputResult, TodoItem, TodoStatus, TodoWriteInput, TodoWriteOutput, ToolSearchInput,
+    StructuredOutputResult, TodoItem, TodoStatus, TodoWriteInput, TodoWriteOutput,
     ToolSearchOutput, WebFetchInput, WebSearchInput, WriteFileInput,
 };
 
@@ -299,6 +300,13 @@ fn resolve_skill_path(skill: &str) -> Result<std::path::PathBuf, String> {
 }
 
 fn execute_tool_search(input: ToolSearchInput) -> ToolSearchOutput {
+    execute_tool_search_with_context(input, None)
+}
+
+pub fn execute_tool_search_with_context(
+    input: ToolSearchInput,
+    pending_mcp_servers: Option<Vec<String>>,
+) -> ToolSearchOutput {
     let deferred = deferred_tool_specs();
     let max_results = input.max_results.unwrap_or(5).max(1);
     let query = input.query.trim().to_string();
@@ -310,7 +318,7 @@ fn execute_tool_search(input: ToolSearchInput) -> ToolSearchOutput {
         query,
         normalized_query,
         total_deferred_tools: deferred.len(),
-        pending_mcp_servers: None,
+        pending_mcp_servers: pending_mcp_servers.filter(|servers| !servers.is_empty()),
     }
 }
 
@@ -500,22 +508,74 @@ fn execute_repl(input: ReplInput) -> Result<ReplOutput, String> {
     if input.code.trim().is_empty() {
         return Err(String::from("code must not be empty"));
     }
-    let _ = input.timeout_ms;
+    let timeout_ms = input.timeout_ms.unwrap_or(30_000).max(1_000);
     let runtime = resolve_repl_runtime(&input.language)?;
     let started = Instant::now();
-    let output = Command::new(runtime.program)
+    let child = Command::new(runtime.program)
         .args(runtime.args)
         .arg(&input.code)
-        .output()
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
         .map_err(|error| error.to_string())?;
 
-    Ok(ReplOutput {
-        language: input.language,
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        exit_code: output.status.code().unwrap_or(1),
-        duration_ms: started.elapsed().as_millis(),
-    })
+    let timeout = Duration::from_millis(timeout_ms);
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(child.wait_with_output());
+    });
+
+    match rx.recv_timeout(timeout) {
+        Ok(Ok(output)) => Ok(ReplOutput {
+            language: input.language,
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            exit_code: output.status.code().unwrap_or(1),
+            duration_ms: started.elapsed().as_millis(),
+        }),
+        Ok(Err(error)) => Err(error.to_string()),
+        Err(_) => Ok(ReplOutput {
+            language: input.language,
+            stdout: String::new(),
+            stderr: format!("REPL execution timed out after {timeout_ms}ms"),
+            exit_code: 124,
+            duration_ms: started.elapsed().as_millis(),
+        }),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReplLanguage {
+    Python,
+    JavaScript,
+    Shell,
+}
+
+impl ReplLanguage {
+    fn parse(input: &str) -> Result<Self, String> {
+        match input.trim().to_ascii_lowercase().as_str() {
+            "python" | "py" => Ok(Self::Python),
+            "javascript" | "js" | "node" => Ok(Self::JavaScript),
+            "sh" | "shell" | "bash" => Ok(Self::Shell),
+            other => Err(format!("unsupported REPL language: {other}")),
+        }
+    }
+
+    fn command_candidates(self) -> &'static [&'static str] {
+        match self {
+            Self::Python => &["python3", "python"],
+            Self::JavaScript => &["node"],
+            Self::Shell => &["bash", "sh"],
+        }
+    }
+
+    fn eval_args(self) -> &'static [&'static str] {
+        match self {
+            Self::Python => &["-c"],
+            Self::JavaScript => &["-e"],
+            Self::Shell => &["-lc"],
+        }
+    }
 }
 
 struct ReplRuntime {
@@ -524,24 +584,13 @@ struct ReplRuntime {
 }
 
 fn resolve_repl_runtime(language: &str) -> Result<ReplRuntime, String> {
-    match language.trim().to_ascii_lowercase().as_str() {
-        "python" | "py" => Ok(ReplRuntime {
-            program: detect_first_command(&["python3", "python"])
-                .ok_or_else(|| String::from("python runtime not found"))?,
-            args: &["-c"],
-        }),
-        "javascript" | "js" | "node" => Ok(ReplRuntime {
-            program: detect_first_command(&["node"])
-                .ok_or_else(|| String::from("node runtime not found"))?,
-            args: &["-e"],
-        }),
-        "sh" | "shell" | "bash" => Ok(ReplRuntime {
-            program: detect_first_command(&["bash", "sh"])
-                .ok_or_else(|| String::from("shell runtime not found"))?,
-            args: &["-lc"],
-        }),
-        other => Err(format!("unsupported REPL language: {other}")),
-    }
+    let lang = ReplLanguage::parse(language)?;
+    let program = detect_first_command(lang.command_candidates())
+        .ok_or_else(|| format!("{language} runtime not found"))?;
+    Ok(ReplRuntime {
+        program,
+        args: lang.eval_args(),
+    })
 }
 
 fn detect_first_command(commands: &[&'static str]) -> Option<&'static str> {

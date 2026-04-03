@@ -538,7 +538,7 @@ fn agent_fake_runner_can_persist_completion_and_failure() {
         |job| {
             persist_agent_terminal_state(
                 &job.manifest,
-                "completed",
+                AgentRunStatus::Completed,
                 Some("Finished successfully"),
                 None,
             )
@@ -564,7 +564,7 @@ fn agent_fake_runner_can_persist_completion_and_failure() {
         |job| {
             persist_agent_terminal_state(
                 &job.manifest,
-                "failed",
+                AgentRunStatus::Failed,
                 None,
                 Some(String::from("simulated failure")),
             )
