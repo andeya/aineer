@@ -36,3 +36,7 @@ codineer.log
 *.key
 
 test-write.txt
+
+# Sandbox artifacts
+sandbox-home/
+.sandbox-tmp/
