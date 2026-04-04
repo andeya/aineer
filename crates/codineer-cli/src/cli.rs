@@ -209,28 +209,61 @@ pub(crate) fn parse_args(args: &[String]) -> Result<CliAction, String> {
     }
 
     const SUBCOMMAND_HELP: &[(&str, &str, &str)] = &[
-        ("agents", "List configured agents. Pass an optional query to filter.", "codineer agents [query]"),
-        ("skills", "List available skills. Pass an optional query to filter.", "codineer skills [query]"),
-        ("system-prompt", "Print the system prompt that would be sent to the model.", "codineer system-prompt [--cwd PATH] [--date YYYY-MM-DD]"),
-        ("login", "Start the OAuth login flow and save credentials.", "codineer login"),
-        ("logout", "Clear saved OAuth credentials.", "codineer logout"),
-        ("init", "Scaffold a CODINEER.md project context file in the current directory.", "codineer init"),
+        (
+            "agents",
+            "List configured agents. Pass an optional query to filter.",
+            "codineer agents [query]",
+        ),
+        (
+            "skills",
+            "List available skills. Pass an optional query to filter.",
+            "codineer skills [query]",
+        ),
+        (
+            "system-prompt",
+            "Print the system prompt that would be sent to the model.",
+            "codineer system-prompt [--cwd PATH] [--date YYYY-MM-DD]",
+        ),
+        (
+            "login",
+            "Start the OAuth login flow and save credentials.",
+            "codineer login",
+        ),
+        (
+            "logout",
+            "Clear saved OAuth credentials.",
+            "codineer logout",
+        ),
+        (
+            "init",
+            "Scaffold a CODINEER.md project context file in the current directory.",
+            "codineer init",
+        ),
     ];
 
     let has_help_flag = |args: &[String]| args.iter().any(|a| a == "--help" || a == "-h");
 
-    if let Some(&(name, summary, usage)) =
-        SUBCOMMAND_HELP.iter().find(|(n, _, _)| *n == rest[0].as_str())
+    if let Some(&(name, summary, usage)) = SUBCOMMAND_HELP
+        .iter()
+        .find(|(n, _, _)| *n == rest[0].as_str())
     {
         if has_help_flag(&rest[1..]) {
-            return Ok(CliAction::SubcommandHelp { name, summary, usage });
+            return Ok(CliAction::SubcommandHelp {
+                name,
+                summary,
+                usage,
+            });
         }
     }
 
     match rest[0].as_str() {
         "help" => Ok(CliAction::Help),
-        "agents" => Ok(CliAction::Agents { args: join_optional_args(&rest[1..]) }),
-        "skills" => Ok(CliAction::Skills { args: join_optional_args(&rest[1..]) }),
+        "agents" => Ok(CliAction::Agents {
+            args: join_optional_args(&rest[1..]),
+        }),
+        "skills" => Ok(CliAction::Skills {
+            args: join_optional_args(&rest[1..]),
+        }),
         "system-prompt" => parse_system_prompt_args(&rest[1..]),
         "login" => Ok(CliAction::Login),
         "logout" => Ok(CliAction::Logout),

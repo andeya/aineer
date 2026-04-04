@@ -129,7 +129,11 @@ fn render_cli_error(problem: &str) -> String {
     let mut lines = problem.lines();
 
     if let Some(summary) = lines.next() {
-        let _ = writeln!(out, "  {}✖ Error:{} {}{}{}", p.bold_red, p.r, p.bold_white, summary, p.r);
+        let _ = writeln!(
+            out,
+            "  {}✖ Error:{} {}{}{}",
+            p.bold_red, p.r, p.bold_white, summary, p.r
+        );
     }
     for line in lines {
         if line.is_empty() {

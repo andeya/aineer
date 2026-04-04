@@ -54,9 +54,20 @@ impl Palette {
     }
 
     const PLAIN: Self = Self {
-        dim: "", r: "", bold_cyan: "", bold_green: "", bold_yellow: "",
-        bold_red: "", bold_white: "", gray: "", red_fg: "", green_fg: "",
-        violet: "", cyan_fg: "", amber: "", bash_bg: "",
+        dim: "",
+        r: "",
+        bold_cyan: "",
+        bold_green: "",
+        bold_yellow: "",
+        bold_red: "",
+        bold_white: "",
+        gray: "",
+        red_fg: "",
+        green_fg: "",
+        violet: "",
+        cyan_fg: "",
+        amber: "",
+        bash_bg: "",
     };
 
     pub(crate) fn new(color: bool) -> Self {

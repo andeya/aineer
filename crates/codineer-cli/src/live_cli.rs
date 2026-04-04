@@ -526,7 +526,10 @@ impl LiveCli {
         println!("{}", format_cost_report(cumulative));
     }
 
-    fn activate_session(&mut self, handle: SessionHandle) -> Result<usize, Box<dyn std::error::Error>> {
+    fn activate_session(
+        &mut self,
+        handle: SessionHandle,
+    ) -> Result<usize, Box<dyn std::error::Error>> {
         let session = Session::load_from_path(&handle.path)?;
         let count = session.messages.len();
         self.runtime = build_runtime(self.runtime_params(session, true))?;
