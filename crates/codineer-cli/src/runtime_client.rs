@@ -869,6 +869,12 @@ pub(crate) fn convert_messages(messages: &[ConversationMessage]) -> Vec<InputMes
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     fn empty_providers() -> BTreeMap<String, CustomProviderConfig> {
         BTreeMap::new()
@@ -1113,6 +1119,9 @@ mod tests {
 
     #[test]
     fn ollama_base_url_defaults_to_localhost() {
+        let _guard = env_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         std::env::remove_var("OLLAMA_HOST");
         let providers = empty_providers();
         assert_eq!(
@@ -1123,6 +1132,9 @@ mod tests {
 
     #[test]
     fn ollama_base_url_from_config_takes_priority() {
+        let _guard = env_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         std::env::set_var("OLLAMA_HOST", "http://env-host:9999");
         let mut providers = BTreeMap::new();
         providers.insert(
@@ -1136,6 +1148,9 @@ mod tests {
 
     #[test]
     fn ollama_base_url_from_env_var() {
+        let _guard = env_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         std::env::set_var("OLLAMA_HOST", "http://remote-host:11434");
         let providers = empty_providers();
         let url = resolve_ollama_base_url(&providers);
@@ -1145,6 +1160,9 @@ mod tests {
 
     #[test]
     fn ollama_base_url_from_env_var_bare_host_port() {
+        let _guard = env_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         std::env::set_var("OLLAMA_HOST", "192.168.1.100:11434");
         let providers = empty_providers();
         let url = resolve_ollama_base_url(&providers);
@@ -1154,6 +1172,9 @@ mod tests {
 
     #[test]
     fn ollama_base_url_from_env_var_strips_trailing_slash() {
+        let _guard = env_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         std::env::set_var("OLLAMA_HOST", "http://my-server:11434/");
         let providers = empty_providers();
         let url = resolve_ollama_base_url(&providers);

@@ -625,6 +625,10 @@ fn repl_executes_python_code() {
 fn powershell_runs_via_stub_shell() {
     use crate::powershell::execute_shell_command;
 
+    let _guard = env_lock()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+
     let dir = std::env::temp_dir().join(format!(
         "codineer-pwsh-bin-{}",
         std::time::SystemTime::now()
