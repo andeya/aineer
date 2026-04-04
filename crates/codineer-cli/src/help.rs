@@ -64,6 +64,7 @@ pub(crate) fn print_help_to(out: &mut impl io::Write) -> io::Result<()> {
         out,
         "Flags",
         &[
+            "  -p TEXT                               Run a one-shot prompt (rest of line is the prompt)",
             "  --model MODEL                         Override the active model",
             "  --output-format FORMAT                Non-interactive output: text or json",
             "  --permission-mode MODE                Set read-only, workspace-write, or danger-full-access",
@@ -77,21 +78,25 @@ pub(crate) fn print_help_to(out: &mut impl io::Write) -> io::Result<()> {
         "Environment variables",
         &[
             "  ANTHROPIC_API_KEY                     API key for Anthropic (Claude) models",
-            "  ANTHROPIC_AUTH_TOKEN                  Bearer token (alternative to API key)",
+            "  ANTHROPIC_AUTH_TOKEN                   Bearer token (alternative to API key)",
             "  XAI_API_KEY                           API key for xAI (Grok) models",
             "  OPENAI_API_KEY                        API key for OpenAI-compatible models",
             "  CODINEER_WORKSPACE_ROOT               Override workspace root directory",
             "  CODINEER_CONFIG_HOME                  Override config directory (default: ~/.codineer)",
+            "  CODINEER_PERMISSION_MODE              Default permission mode",
             "  NO_COLOR                              Disable colored output (no-color.org)",
             "  CLICOLOR=0                            Disable colored output (alternative)",
         ],
     )?;
     print_help_section(
         out,
-        "Configuration files (merged in order)",
+        "Configuration files (highest to lowest precedence)",
         &[
+            "  .codineer/settings.local.json         Local overrides (gitignored)",
+            "  .codineer/settings.json               Project settings",
+            "  .codineer.json                        Project flat config",
             "  ~/.codineer/settings.json             Global settings",
-            "  .codineer.json                        Project-local settings",
+            "  ~/.codineer.json                      Global flat config",
             "  CODINEER.md                           Project context and instructions",
         ],
     )?;

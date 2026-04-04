@@ -192,14 +192,17 @@ codineer prompt "列出所有 TODO 注释" --output-format json
 codineer -p "概括 Cargo.toml 的内容" --model sonnet
 ```
 
-提示模式可用的参数：
+可用参数：
 
 | 参数 | 说明 |
 |---|---|
+| `-p <文本>` | 一次性提问（后续内容为提示文本） |
 | `--model <名称>` | 指定模型（见[模型选择](#模型选择)） |
 | `--output-format text\|json` | 输出格式（默认 `text`） |
-| `--allowedTools <列表>` | 逗号分隔的工具白名单 |
+| `--allowedTools <列表>` | 逗号分隔的工具白名单（可重复指定） |
 | `--permission-mode <模式>` | 权限级别（见[权限模式](#权限模式)） |
+| `--dangerously-skip-permissions` | 跳过所有权限检查 |
+| `--version`、`-V` | 显示版本和构建信息 |
 
 ### 会话管理
 
@@ -332,12 +335,15 @@ Codineer 会从工作区根目录向上逐级查找匹配的指令文件：
 | 变量 | 用途 |
 |---|---|
 | `ANTHROPIC_API_KEY` | Claude API Key |
+| `ANTHROPIC_AUTH_TOKEN` | Bearer Token（API Key 的替代方式） |
 | `XAI_API_KEY` | xAI / Grok API Key |
 | `OPENAI_API_KEY` | OpenAI API Key |
 | `CODINEER_WORKSPACE_ROOT` | 覆盖工作区根路径 |
 | `CODINEER_CONFIG_HOME` | 覆盖配置目录（默认 `~/.codineer`） |
 | `CODINEER_PERMISSION_MODE` | 默认权限模式 |
 | `NO_COLOR` | 禁用 ANSI 颜色输出 |
+
+> **注意：** API 密钥通过环境变量或 OAuth 凭证（`codineer login` / `codineer logout`）配置，不支持在配置文件中设置。
 
 ---
 

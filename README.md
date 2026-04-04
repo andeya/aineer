@@ -192,14 +192,17 @@ codineer prompt "list all TODO comments" --output-format json
 codineer -p "summarize Cargo.toml" --model sonnet
 ```
 
-Flags available in prompt mode:
+Flags:
 
-| Flag                         | Description                                                  |
-| ---------------------------- | ------------------------------------------------------------ |
-| `--model <name>`             | Choose model (see [Model Selection](#model-selection))       |
-| `--output-format text\|json` | Output format (default: `text`)                              |
-| `--allowedTools <list>`      | Comma-separated tool allowlist                               |
-| `--permission-mode <mode>`   | Permission level (see [Permission Modes](#permission-modes)) |
+| Flag                              | Description                                                  |
+| --------------------------------- | ------------------------------------------------------------ |
+| `-p <text>`                       | One-shot prompt (rest of line is the prompt)                 |
+| `--model <name>`                  | Choose model (see [Model Selection](#model-selection))       |
+| `--output-format text\|json`      | Output format (default: `text`)                              |
+| `--allowedTools <list>`           | Comma-separated tool allowlist (repeatable)                  |
+| `--permission-mode <mode>`        | Permission level (see [Permission Modes](#permission-modes)) |
+| `--dangerously-skip-permissions`  | Skip all permission checks                                   |
+| `--version`, `-V`                 | Print version and build info                                 |
 
 ### Session Management
 
@@ -332,15 +335,18 @@ Inspect the merged configuration at any time:
 
 **Useful environment variables:**
 
-| Variable                    | Purpose                              |
-| --------------------------- | ------------------------------------ |
-| `ANTHROPIC_API_KEY`         | Claude API key                       |
-| `XAI_API_KEY`               | xAI / Grok API key                   |
-| `OPENAI_API_KEY`            | OpenAI API key                       |
-| `CODINEER_WORKSPACE_ROOT`   | Override workspace root path         |
-| `CODINEER_CONFIG_HOME`      | Override config directory (`~/.codineer`) |
-| `CODINEER_PERMISSION_MODE`  | Default permission mode              |
-| `NO_COLOR`                  | Disable ANSI color output            |
+| Variable                    | Purpose                                    |
+| --------------------------- | ------------------------------------------ |
+| `ANTHROPIC_API_KEY`         | Claude API key                             |
+| `ANTHROPIC_AUTH_TOKEN`      | Bearer token (alternative to API key)      |
+| `XAI_API_KEY`               | xAI / Grok API key                         |
+| `OPENAI_API_KEY`            | OpenAI API key                             |
+| `CODINEER_WORKSPACE_ROOT`   | Override workspace root path               |
+| `CODINEER_CONFIG_HOME`      | Override config directory (`~/.codineer`)  |
+| `CODINEER_PERMISSION_MODE`  | Default permission mode                    |
+| `NO_COLOR`                  | Disable ANSI color output                  |
+
+> **Note:** API keys are read from environment variables or OAuth credentials (`codineer login` / `codineer logout`). They cannot be set in configuration files.
 
 ---
 
