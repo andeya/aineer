@@ -27,22 +27,22 @@
 
 | | Codineer | Claude Code | Codex CLI | Aider |
 |---|:---:|:---:|:---:|:---:|
-| **多 Provider**（Anthropic、OpenAI、xAI、Ollama…） | **支持** | 仅 Anthropic | 仅 OpenAI | 支持 |
-| **零配置本地 AI**（自动检测 Ollama） | **支持** | 不支持 | 不支持 | 需手动配置 |
+| **多 Provider**（Anthropic、OpenAI、xAI、Ollama…） | **全部内置** | 仅 Anthropic | OpenAI + Ollama | 支持 |
+| **零配置本地 AI**（自动检测 Ollama） | **支持** | 不支持 | `--oss` 参数 | 需手动配置 |
 | **单一二进制**（无运行时依赖） | **Rust** | Node.js | Node.js | Python |
-| **MCP 协议**（外部工具集成） | **支持** | 支持 | 支持 | 不支持 |
-| **插件系统** + Agent + Skill | **支持** | 部分 | 不支持 | 不支持 |
-| **权限模式**（只读 → 完全访问） | **支持** | 支持 | 支持 | 不支持 |
+| **MCP 协议**（外部工具集成） | **支持** | 支持 | 支持 | 支持 |
+| **插件系统** + Agent + Skill | **支持** | 支持 | 不支持 | 不支持 |
+| **权限模式**（只读 → 完全访问） | **支持** | 支持 | 支持 | 部分 |
 | **工具调用降级**（优雅降级） | **支持** | 不适用 | 不适用 | 不适用 |
 | **Git 工作流**（/commit、/pr、/diff、/branch） | **内置** | 通过工具 | 通过工具 | 自动提交 |
 | **Vim 模式** | **支持** | 不支持 | 不支持 | 不支持 |
-| **CI/CD 就绪**（JSON 输出、工具白名单） | **支持** | 有限 | 支持 | 不支持 |
+| **CI/CD 就绪**（JSON 输出、工具白名单） | **支持** | 支持 | 支持 | 有限 |
 
 **核心优势：**
 
-- **Provider 自由** — 用一个参数在 Claude、GPT、Grok、Ollama 或任何 OpenAI 兼容 API 间切换。零厂商锁定。
-- **免费本地 AI** — 启动 Ollama，运行 `codineer`。零 API Key，零成本。Codineer 自动检测本地模型并选择最适合编程的那个。
-- **即刻启动** — 一条 `cargo install` 或 `brew install`。无需 Node.js、Python、Docker。一个约 15 MB 的二进制文件即可运行。
+- **Provider 自由** — 用一个 `--model` 参数在 Claude、GPT、Grok、Ollama、LM Studio、OpenRouter、Groq 或任何 OpenAI 兼容 API 间切换。零厂商锁定。
+- **零配置本地 AI** — 启动 Ollama，运行 `codineer`。无需 API Key，无需参数，无需配置。Codineer 自动检测本地模型并选择最适合编程的那个。
+- **即刻启动** — 一条 `cargo install` 或 `brew install`。无需 Node.js、Python、Docker。一个约 15 MB 的 Rust 二进制文件即可运行。
 - **优雅降级** — 不支持 function calling 的模型自动降级为纯文本模式。任何模型都能工作。
 - **项目记忆** — `CODINEER.md` 让 AI 拥有关于代码库、规范和工作流的持久上下文。提交到仓库，与团队共享。
 

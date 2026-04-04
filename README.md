@@ -27,22 +27,22 @@ Most AI coding CLIs lock you into a single provider. Claude Code requires Anthro
 
 | | Codineer | Claude Code | Codex CLI | Aider |
 |---|:---:|:---:|:---:|:---:|
-| **Multi-provider** (Anthropic, OpenAI, xAI, Ollama, …) | **Yes** | Anthropic only | OpenAI only | Yes |
-| **Zero-config local AI** (auto-detect Ollama) | **Yes** | No | No | Manual setup |
+| **Multi-provider** (Anthropic, OpenAI, xAI, Ollama, …) | **All built-in** | Anthropic only | OpenAI + Ollama | Yes |
+| **Zero-config local AI** (auto-detect Ollama) | **Yes** | No | `--oss` flag | Manual setup |
 | **Single binary** (no runtime deps) | **Rust** | Node.js | Node.js | Python |
-| **MCP protocol** (external tool integration) | **Yes** | Yes | Yes | No |
-| **Plugin system** + agents + skills | **Yes** | Partial | No | No |
-| **Permission modes** (read-only → full access) | **Yes** | Yes | Yes | No |
+| **MCP protocol** (external tool integration) | **Yes** | Yes | Yes | Yes |
+| **Plugin system** + agents + skills | **Yes** | Yes | No | No |
+| **Permission modes** (read-only → full access) | **Yes** | Yes | Yes | Partial |
 | **Tool-use fallback** (graceful degradation) | **Yes** | N/A | N/A | N/A |
 | **Git workflow** (/commit, /pr, /diff, /branch) | **Built-in** | Via tools | Via tools | Auto-commit |
 | **Vim mode** in REPL | **Yes** | No | No | No |
-| **CI/CD ready** (JSON output, tool allowlists) | **Yes** | Limited | Yes | No |
+| **CI/CD ready** (JSON output, tool allowlists) | **Yes** | Yes | Yes | Limited |
 
 **Key advantages:**
 
-- **Provider freedom** — switch between Claude, GPT, Grok, Ollama, or any OpenAI-compatible API with a single flag. No vendor lock-in.
-- **Free local AI** — start Ollama, run `codineer`. Zero API keys, zero cost. Codineer auto-detects your local models and picks the best one for coding.
-- **Instant setup** — one `cargo install` or `brew install`. No Node.js, no Python, no Docker. A single ~15 MB binary that runs anywhere.
+- **Provider freedom** — switch between Claude, GPT, Grok, Ollama, LM Studio, OpenRouter, Groq, or any OpenAI-compatible API with a single `--model` flag. No vendor lock-in.
+- **Zero-config local AI** — start Ollama, run `codineer`. No API keys, no flags, no config. Codineer auto-detects your local models and picks the best one for coding.
+- **Instant setup** — one `cargo install` or `brew install`. No Node.js, no Python, no Docker. A single ~15 MB Rust binary that runs anywhere.
 - **Graceful degradation** — models without function calling automatically fall back to text-only mode. Every model works, even simple ones.
 - **Project memory** — `CODINEER.md` gives the AI persistent context about your codebase, conventions, and workflows. Commit it to share with your team.
 
