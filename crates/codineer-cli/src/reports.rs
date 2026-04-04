@@ -8,6 +8,7 @@ use std::process::Command;
 
 use runtime::RemoteSessionContext;
 
+use crate::style::Palette;
 use crate::workspace::{self, parse_git_status_metadata};
 use crate::{current_date, BUILD_TARGET, GIT_SHA, VERSION};
 
@@ -33,24 +34,31 @@ pub(crate) struct StatusUsage {
 }
 
 pub(crate) fn format_model_report(model: &str, message_count: usize, turns: u32) -> String {
+    let p = Palette::for_stdout();
     format!(
-        "Model
+        "{}
   Current          {model}
   Session          {message_count} messages · {turns} turns
 
-Aliases
-  opus             claude-opus-4-6      (Anthropic)
-  sonnet           claude-sonnet-4-6    (Anthropic)
-  haiku            claude-haiku-4-5-20251213 (Anthropic)
-  grok             grok-3               (xAI)
-  grok-mini        grok-3-mini          (xAI)
-  gpt              gpt-4o               (OpenAI)
-  mini             gpt-4o-mini          (OpenAI)
-  o3               o3                   (OpenAI)
+{}
+  opus             claude-opus-4-6      {a}
+  sonnet           claude-sonnet-4-6    {a}
+  haiku            claude-haiku-4-5-20251213 {a}
+  grok             grok-3               {x}
+  grok-mini        grok-3-mini          {x}
+  gpt              gpt-4o               {o}
+  mini             gpt-4o-mini          {o}
+  o3               o3                   {o}
 
-Next
+{}
   /model           Show the current model
-  /model <name>    Switch models for this REPL session"
+  /model <name>    Switch models for this REPL session",
+        p.title("Model"),
+        p.title("Aliases"),
+        p.dim_text("Next"),
+        a = p.dim_text("(Anthropic)"),
+        x = p.dim_text("(xAI)"),
+        o = p.dim_text("(OpenAI)"),
     )
 }
 
@@ -69,6 +77,7 @@ pub(crate) fn format_model_switch_report(
 }
 
 pub(crate) fn format_permissions_report(mode: &str) -> String {
+    let p = Palette::for_stdout();
     let modes = [
         ("read-only", "Read/search tools only", mode == "read-only"),
         (
@@ -105,16 +114,19 @@ pub(crate) fn format_permissions_report(mode: &str) -> String {
     };
 
     format!(
-        "Permissions
+        "{}
   Active mode      {mode}
   Effect           {effect}
 
-Modes
+{}
 {modes}
 
-Next
+{}
   /permissions              Show the current mode
-  /permissions <mode>       Switch modes for subsequent tool calls"
+  /permissions <mode>       Switch modes for subsequent tool calls",
+        p.title("Permissions"),
+        p.title("Modes"),
+        p.dim_text("Next"),
     )
 }
 
@@ -129,22 +141,25 @@ pub(crate) fn format_permissions_switch_report(previous: &str, next: &str) -> St
 }
 
 pub(crate) fn format_cost_report(usage: TokenUsage) -> String {
+    let p = Palette::for_stdout();
     format!(
-        "Cost
+        "{}
   Input tokens     {}
   Output tokens    {}
   Cache create     {}
   Cache read       {}
   Total tokens     {}
 
-Next
+{}
   /status          See session + workspace context
   /compact         Trim local history if the session is getting large",
+        p.title("Cost"),
         usage.input_tokens,
         usage.output_tokens,
         usage.cache_creation_input_tokens,
         usage.cache_read_input_tokens,
         usage.total_tokens(),
+        p.dim_text("Next"),
     )
 }
 
@@ -220,13 +235,15 @@ pub(crate) fn format_status_report(
     permission_mode: &str,
     context: &StatusContext,
 ) -> String {
+    let p = Palette::for_stdout();
     [
         format!(
-            "Session
+            "{}
   Model            {model}
   Permissions      {permission_mode}
   Activity         {} messages · {} turns
   Tokens           est {} · latest {} · total {}",
+            p.title("Session"),
             usage.message_count,
             usage.turns,
             usage.estimated_tokens,
@@ -234,18 +251,19 @@ pub(crate) fn format_status_report(
             usage.cumulative.total_tokens(),
         ),
         format!(
-            "Usage
+            "{}
   Cumulative input {}
   Cumulative output {}
   Cache create     {}
   Cache read       {}",
+            p.title("Usage"),
             usage.cumulative.input_tokens,
             usage.cumulative.output_tokens,
             usage.cumulative.cache_creation_input_tokens,
             usage.cumulative.cache_read_input_tokens,
         ),
         format!(
-            "Workspace
+            "{}
   Folder           {}
   Project root     {}
   Git branch       {}
@@ -254,10 +272,11 @@ pub(crate) fn format_status_report(
   Memory files     {}
   Remote session   {}
 
-Next
+{}
   /help            Browse commands
   /session list    Inspect saved sessions
   /diff            Review current workspace changes",
+            p.title("Workspace"),
             context.cwd.display(),
             context
                 .project_root
@@ -272,6 +291,7 @@ Next
             context.discovered_config_files,
             context.memory_file_count,
             context.remote_session.as_deref().unwrap_or("off"),
+            p.dim_text("Next"),
         ),
     ]
     .join(
@@ -284,6 +304,7 @@ Next
 pub(crate) fn render_config_report(
     section: Option<&str>,
 ) -> Result<String, Box<dyn std::error::Error>> {
+    let p = Palette::for_stdout();
     let cwd = env::current_dir()?;
     let loader = ConfigLoader::default_for(&cwd);
     let discovered = loader.discover();
@@ -291,15 +312,16 @@ pub(crate) fn render_config_report(
 
     let mut lines = vec![
         format!(
-            "Config
+            "{}
   Working directory {}
   Loaded files      {}
   Merged keys       {}",
+            p.title("Config"),
             cwd.display(),
             runtime_config.loaded_entries().len(),
             runtime_config.merged().len()
         ),
-        "Discovered files".to_string(),
+        p.title("Discovered files"),
     ];
     for entry in discovered {
         let source = match entry.source {
@@ -363,24 +385,26 @@ pub(crate) fn render_config_report(
 }
 
 pub(crate) fn render_memory_report() -> Result<String, Box<dyn std::error::Error>> {
+    let p = Palette::for_stdout();
     let cwd = env::current_dir()?;
     let date = current_date();
     let project_context = ProjectContext::discover(&cwd, &date)?;
     let mut lines = vec![format!(
-        "Memory
+        "{}
   Working directory {}
   Instruction files {}",
+        p.title("Memory"),
         cwd.display(),
         project_context.instruction_files.len()
     )];
     if project_context.instruction_files.is_empty() {
-        lines.push("Discovered files".to_string());
+        lines.push(p.title("Discovered files"));
         lines.push(
             "  No CODINEER instruction files discovered in the current directory ancestry."
                 .to_string(),
         );
     } else {
-        lines.push("Discovered files".to_string());
+        lines.push(p.title("Discovered files"));
         for (index, file) in project_context.instruction_files.iter().enumerate() {
             let preview = file.content.lines().next().unwrap_or("").trim();
             let preview = if preview.is_empty() {
@@ -412,6 +436,7 @@ pub(crate) fn normalize_permission_mode(mode: &str) -> Option<&'static str> {
 }
 
 pub(crate) fn render_diff_report() -> Result<String, Box<dyn std::error::Error>> {
+    let p = Palette::for_stdout();
     let output = std::process::Command::new("git")
         .args(["diff", "--", ":(exclude).omx"])
         .current_dir(env::current_dir()?)
@@ -421,13 +446,13 @@ pub(crate) fn render_diff_report() -> Result<String, Box<dyn std::error::Error>>
         return Err(format!("git diff failed: {stderr}").into());
     }
     let diff = String::from_utf8(output.stdout)?;
+    let title = p.title("Diff");
     if diff.trim().is_empty() {
-        return Ok(
-            "Diff\n  Result           clean working tree\n  Detail           no current changes"
-                .to_string(),
-        );
+        return Ok(format!(
+            "{title}\n  Result           clean working tree\n  Detail           no current changes"
+        ));
     }
-    Ok(format!("Diff\n\n{}", diff.trim_end()))
+    Ok(format!("{title}\n\n{}", diff.trim_end()))
 }
 
 pub(crate) fn render_teleport_report(target: &str) -> Result<String, Box<dyn std::error::Error>> {
@@ -545,11 +570,14 @@ pub(crate) fn indent_block(value: &str, spaces: usize) -> String {
 }
 
 pub(crate) fn render_version_report() -> String {
+    let p = Palette::for_stdout();
     let git_sha = GIT_SHA.unwrap_or("unknown");
     let target = BUILD_TARGET.unwrap_or("unknown");
     let date = current_date();
     format!(
-        "Codineer\n  Version          {VERSION}\n  Git SHA          {git_sha}\n  Target           {target}\n  Date             {date}\n\nSupport\n  Help             codineer --help\n  REPL             /help"
+        "{}\n  Version          {VERSION}\n  Git SHA          {git_sha}\n  Target           {target}\n  Date             {date}\n\n{}\n  Help             codineer --help\n  REPL             /help",
+        p.title("Codineer"),
+        p.dim_text("Support"),
     )
 }
 
