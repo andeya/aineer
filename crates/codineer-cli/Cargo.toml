@@ -20,6 +20,7 @@ api.workspace = true
 commands.workspace = true
 crossterm = "0.28"
 pulldown-cmark = "0.13"
+reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "rustls-tls"] }
 rustyline = "15"
 runtime.workspace = true
 plugins.workspace = true

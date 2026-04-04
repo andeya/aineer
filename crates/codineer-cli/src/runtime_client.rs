@@ -1,14 +1,16 @@
+use std::collections::BTreeMap;
 use std::io::Write;
 use std::sync::Arc;
 
 use api::{
     ContentBlockDelta, InputContentBlock, InputMessage, MessageRequest, MessageResponse,
-    OutputContentBlock, ProviderClient, ProviderKind, StreamEvent as ApiStreamEvent, ToolChoice,
-    ToolResultContentBlock,
+    OpenAiCompatClient, OutputContentBlock, ProviderClient, ProviderKind,
+    StreamEvent as ApiStreamEvent, ToolChoice, ToolResultContentBlock,
 };
 use runtime::{
-    ApiClient, ApiRequest, AssistantEvent, ConversationMessage, ConversationRuntime, MessageRole,
-    PermissionMode, PermissionPolicy, RuntimeError, TokenUsage, ToolError, ToolExecutor,
+    ApiClient, ApiRequest, AssistantEvent, ConversationMessage, ConversationRuntime,
+    CustomProviderConfig, MessageRole, PermissionMode, PermissionPolicy, RuntimeError, TokenUsage,
+    ToolError, ToolExecutor,
 };
 use tools::GlobalToolRegistry;
 
@@ -55,17 +57,22 @@ pub(crate) fn build_runtime(
     } else {
         model
     };
+    let resolver = ModelResolver::new(feature_config.providers());
+    let resolved = resolver.resolve(&model)?;
     Ok(ConversationRuntime::new_with_features(
         session,
-        DefaultRuntimeClient::new(
-            model,
+        DefaultRuntimeClient {
+            runtime: tokio::runtime::Runtime::new()?,
+            client: resolved.client,
+            model: resolved.model,
             enable_tools,
             emit_output,
-            allowed_tools.clone(),
-            tool_registry.clone(),
+            allowed_tools: allowed_tools.clone(),
+            tool_registry: tool_registry.clone(),
             progress_reporter,
-            Arc::clone(&mcp_manager),
-        )?,
+            mcp_manager: Arc::clone(&mcp_manager),
+            tools_disabled_by_provider: false,
+        },
         CliToolExecutor::new(
             allowed_tools.clone(),
             emit_output,
@@ -76,6 +83,163 @@ pub(crate) fn build_runtime(
         system_prompt,
         &feature_config,
     ))
+}
+
+// ---------------------------------------------------------------------------
+// Model resolution pipeline
+// ---------------------------------------------------------------------------
+
+#[derive(Debug)]
+pub(crate) struct ResolvedModel {
+    pub model: String,
+    pub client: ProviderClient,
+}
+
+/// Single-responsibility resolver: model string → (canonical model, provider client).
+///
+/// Pipeline:  input → expand_shorthand → resolve_alias → build_client
+pub(crate) struct ModelResolver<'a> {
+    providers: &'a BTreeMap<String, CustomProviderConfig>,
+}
+
+impl<'a> ModelResolver<'a> {
+    pub fn new(providers: &'a BTreeMap<String, CustomProviderConfig>) -> Self {
+        Self { providers }
+    }
+
+    pub fn resolve(&self, input: &str) -> Result<ResolvedModel, Box<dyn std::error::Error>> {
+        let expanded = self.expand_shorthand(input)?;
+        let canonical = api::resolve_model_alias(&expanded);
+        self.build_client(&canonical)
+    }
+
+    /// Expand bare provider names ("ollama") and "auto" into full model specs.
+    fn expand_shorthand(&self, input: &str) -> Result<String, Box<dyn std::error::Error>> {
+        match input {
+            "auto" => self.auto_detect_model(),
+            "ollama" => detect_ollama_model(self.providers)
+                .ok_or_else(|| "Ollama is not running. Start it with: ollama serve".into()),
+            bare if api::builtin_preset(bare).is_some()
+                && api::parse_custom_provider_prefix(bare).is_none() =>
+            {
+                self.expand_bare_provider(bare)
+            }
+            other => Ok(other.to_string()),
+        }
+    }
+
+    fn auto_detect_model(&self) -> Result<String, Box<dyn std::error::Error>> {
+        if let Some(builtin) = api::auto_detect_default_model() {
+            return Ok(builtin.to_string());
+        }
+        if let Some(ollama) = detect_ollama_model(self.providers) {
+            return Ok(ollama);
+        }
+        Err(no_credentials_error().into())
+    }
+
+    fn expand_bare_provider(&self, name: &str) -> Result<String, Box<dyn std::error::Error>> {
+        let lower = name.to_ascii_lowercase();
+        if let Some(config) = self.providers.get(&lower) {
+            if let Some(default) = &config.default_model {
+                return Ok(format!("{name}/{default}"));
+            }
+        }
+        Err(format!(
+            "provider '{name}' requires a model name.\n\
+             Use: codineer --model {name}/<model-name>"
+        )
+        .into())
+    }
+
+    fn build_client(&self, model: &str) -> Result<ResolvedModel, Box<dyn std::error::Error>> {
+        if let Some((provider_name, _)) = api::parse_custom_provider_prefix(model) {
+            return self.build_custom_client(model, provider_name);
+        }
+        self.build_builtin_client(model)
+    }
+
+    fn build_custom_client(
+        &self,
+        model: &str,
+        provider_name: &str,
+    ) -> Result<ResolvedModel, Box<dyn std::error::Error>> {
+        let lower = provider_name.to_ascii_lowercase();
+
+        let client = if let Some(config) = self.providers.get(&lower) {
+            let api_key = resolve_custom_api_key(config)?;
+            OpenAiCompatClient::new_custom(&config.base_url, api_key)
+        } else if let Some(preset) = api::builtin_preset(&lower) {
+            let api_key = resolve_preset_api_key(preset)?;
+            OpenAiCompatClient::new_custom(preset.base_url, api_key)
+        } else {
+            return Err(format!(
+                "unknown provider '{provider_name}'\n\n\
+                 Built-in providers: ollama, lmstudio, openrouter, groq\n\
+                 Or configure in settings.json: \
+                 {{\"providers\": {{\"{provider_name}\": {{\"baseUrl\": \"...\"}}}}}}"
+            )
+            .into());
+        };
+
+        Ok(ResolvedModel {
+            model: model.to_string(),
+            client: ProviderClient::from_custom(client),
+        })
+    }
+
+    fn build_builtin_client(
+        &self,
+        model: &str,
+    ) -> Result<ResolvedModel, Box<dyn std::error::Error>> {
+        let kind = api::detect_provider_kind(model);
+        let auth = if kind == ProviderKind::CodineerApi {
+            Some(resolve_cli_auth_source().map_err(|err| provider_hint(model, &err))?)
+        } else {
+            None
+        };
+        let client = ProviderClient::from_model_with_default_auth(model, auth)
+            .map_err(|err| provider_hint(model, &err))?;
+        Ok(ResolvedModel {
+            model: model.to_string(),
+            client,
+        })
+    }
+}
+
+fn resolve_custom_api_key(
+    config: &CustomProviderConfig,
+) -> Result<String, Box<dyn std::error::Error>> {
+    if let Some(key) = &config.api_key {
+        return Ok(key.clone());
+    }
+    if let Some(env_name) = &config.api_key_env {
+        let key = std::env::var(env_name).unwrap_or_default();
+        if key.is_empty() {
+            return Err(
+                format!("provider config references env var {env_name} but it is not set").into(),
+            );
+        }
+        return Ok(key);
+    }
+    Ok(String::new())
+}
+
+fn resolve_preset_api_key(
+    preset: &api::BuiltinProviderPreset,
+) -> Result<String, Box<dyn std::error::Error>> {
+    if preset.api_key_env.is_empty() {
+        return Ok(String::new());
+    }
+    let key = std::env::var(preset.api_key_env).unwrap_or_default();
+    if key.is_empty() {
+        return Err(format!(
+            "provider '{}' requires {} to be set",
+            preset.name, preset.api_key_env
+        )
+        .into());
+    }
+    Ok(key)
 }
 
 pub(crate) struct CliPermissionPrompter {
@@ -134,62 +298,88 @@ pub(crate) struct DefaultRuntimeClient {
     tool_registry: GlobalToolRegistry,
     progress_reporter: Option<InternalPromptProgressReporter>,
     mcp_manager: SharedMcpManager,
+    tools_disabled_by_provider: bool,
 }
 
 impl DefaultRuntimeClient {
-    pub(crate) fn new(
-        model: String,
-        enable_tools: bool,
-        emit_output: bool,
-        allowed_tools: Option<AllowedToolSet>,
-        tool_registry: GlobalToolRegistry,
-        progress_reporter: Option<InternalPromptProgressReporter>,
-        mcp_manager: SharedMcpManager,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
-        let model = if model == "auto" {
-            api::auto_detect_default_model()
-                .ok_or_else(no_credentials_error)?
-                .to_string()
-        } else {
-            model
-        };
-        let resolved = api::resolve_model_alias(&model);
-        let provider_kind = api::detect_provider_kind(&resolved);
-        let auth = if provider_kind == ProviderKind::CodineerApi {
-            Some(resolve_cli_auth_source().map_err(|err| provider_hint(&model, &err))?)
-        } else {
-            None
-        };
-        let client = ProviderClient::from_model_with_default_auth(&resolved, auth)
-            .map_err(|err| provider_hint(&model, &err))?;
-        Ok(Self {
-            runtime: tokio::runtime::Runtime::new()?,
-            client,
-            model,
-            enable_tools,
-            emit_output,
-            allowed_tools,
-            tool_registry,
-            progress_reporter,
-            mcp_manager,
-        })
+    fn effective_tools_enabled(&self) -> bool {
+        self.enable_tools && !self.tools_disabled_by_provider
     }
 
     fn build_message_request(&self, request: &ApiRequest) -> MessageRequest {
+        let use_tools = self.effective_tools_enabled();
         MessageRequest {
             model: self.model.clone(),
             max_tokens: max_tokens_for_model(&self.model),
             messages: convert_messages(&request.messages),
             system: (!request.system_prompt.is_empty()).then(|| request.system_prompt.join("\n\n")),
-            tools: self.enable_tools.then(|| {
+            tools: use_tools.then(|| {
                 let mut specs = filter_tool_specs(&self.tool_registry, self.allowed_tools.as_ref());
                 specs.extend(discover_mcp_tools(&self.runtime, &self.mcp_manager));
                 specs
             }),
-            tool_choice: self.enable_tools.then_some(ToolChoice::Auto),
+            tool_choice: use_tools.then_some(ToolChoice::Auto),
             stream: true,
         }
     }
+
+    fn is_tool_use_error(error_msg: &str) -> bool {
+        let lower = error_msg.to_ascii_lowercase();
+        lower.contains("tool")
+            || lower.contains("function")
+            || lower.contains("unsupported parameter")
+            || lower.contains("does not support")
+    }
+}
+
+/// Probe local Ollama instance and pick the best coding model.
+/// Returns `Some("ollama/<model>")` if Ollama is running and has models.
+fn detect_ollama_model(providers: &BTreeMap<String, CustomProviderConfig>) -> Option<String> {
+    let base = providers
+        .get("ollama")
+        .map(|c| c.base_url.trim_end_matches("/v1").to_string())
+        .unwrap_or_else(|| "http://localhost:11434".to_string());
+
+    let tags_url = format!("{}/api/tags", base.trim_end_matches('/'));
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_millis(800))
+        .build()
+        .ok()?;
+    let response = client.get(&tags_url).send().ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    let body: serde_json::Value = response.json().ok()?;
+    let models = body.get("models")?.as_array()?;
+    let names: Vec<&str> = models
+        .iter()
+        .filter_map(|m| m.get("name")?.as_str())
+        .collect();
+    if names.is_empty() {
+        return None;
+    }
+    let best = pick_best_coding_model(&names);
+    Some(format!("ollama/{best}"))
+}
+
+/// Rank Ollama models by coding suitability.
+fn pick_best_coding_model<'a>(names: &[&'a str]) -> &'a str {
+    const PREFERRED: &[&str] = &[
+        "qwen3-coder",
+        "qwen2.5-coder",
+        "qwen3",
+        "deepseek-coder-v2",
+        "deepseek-coder",
+        "codellama",
+        "starcoder2",
+        "codegemma",
+    ];
+    for preferred in PREFERRED {
+        if let Some(found) = names.iter().find(|n| n.contains(preferred)) {
+            return found;
+        }
+    }
+    names[0]
 }
 
 pub(crate) fn write_flush(out: &mut dyn Write, buf: &str) -> Result<(), RuntimeError> {
@@ -313,47 +503,84 @@ impl ApiClient for DefaultRuntimeClient {
         }
         let message_request = self.build_message_request(&request);
 
-        self.runtime.block_on(async {
-            let mut stream = self
-                .client
-                .stream_message(&message_request)
-                .await
-                .map_err(|error| RuntimeError::new(error.to_string()))?;
-            let mut stdout = std::io::stdout();
-            let mut sink = std::io::sink();
-            let out: &mut dyn Write = if self.emit_output {
-                &mut stdout
-            } else {
-                &mut sink
-            };
-            let mut state = StreamState::new();
-            while let Some(event) = stream
-                .next_event()
-                .await
-                .map_err(|error| RuntimeError::new(error.to_string()))?
-            {
-                state.handle_event(event, self.progress_reporter.as_ref(), out)?;
-            }
+        let is_custom = self.client.provider_kind() == ProviderKind::Custom;
+        let has_tools = message_request.tools.is_some();
 
-            let events = state.ensure_stop_event();
-            if events
-                .iter()
-                .any(|event| matches!(event, AssistantEvent::MessageStop))
-            {
-                return Ok(events);
-            }
+        let result = self.runtime.block_on(async {
+            stream_with_client(
+                &self.client,
+                &message_request,
+                self.emit_output,
+                self.progress_reporter.as_ref(),
+            )
+            .await
+        });
 
-            let response = self
-                .client
-                .send_message(&MessageRequest {
-                    stream: false,
-                    ..message_request.clone()
-                })
-                .await
-                .map_err(|error| RuntimeError::new(error.to_string()))?;
-            response_to_events(response, out)
-        })
+        if is_custom && has_tools {
+            if let Err(ref err) = result {
+                if Self::is_tool_use_error(&err.to_string()) {
+                    self.tools_disabled_by_provider = true;
+                    eprintln!("[info] model does not support tool use; retrying without tools");
+                    let fallback_request = MessageRequest {
+                        tools: None,
+                        tool_choice: None,
+                        ..message_request
+                    };
+                    return self.runtime.block_on(async {
+                        stream_with_client(
+                            &self.client,
+                            &fallback_request,
+                            self.emit_output,
+                            self.progress_reporter.as_ref(),
+                        )
+                        .await
+                    });
+                }
+            }
+        }
+
+        result
     }
+}
+
+async fn stream_with_client(
+    client: &ProviderClient,
+    message_request: &MessageRequest,
+    emit_output: bool,
+    progress: Option<&InternalPromptProgressReporter>,
+) -> Result<Vec<AssistantEvent>, RuntimeError> {
+    let mut stream = client
+        .stream_message(message_request)
+        .await
+        .map_err(|error| RuntimeError::new(error.to_string()))?;
+    let mut stdout = std::io::stdout();
+    let mut sink = std::io::sink();
+    let out: &mut dyn Write = if emit_output { &mut stdout } else { &mut sink };
+    let mut state = StreamState::new();
+    while let Some(event) = stream
+        .next_event()
+        .await
+        .map_err(|error| RuntimeError::new(error.to_string()))?
+    {
+        state.handle_event(event, progress, out)?;
+    }
+
+    let events = state.ensure_stop_event();
+    if events
+        .iter()
+        .any(|event| matches!(event, AssistantEvent::MessageStop))
+    {
+        return Ok(events);
+    }
+
+    let response = client
+        .send_message(&MessageRequest {
+            stream: false,
+            ..message_request.clone()
+        })
+        .await
+        .map_err(|error| RuntimeError::new(error.to_string()))?;
+    response_to_events(response, out)
 }
 
 pub(crate) fn push_output_block(
@@ -618,4 +845,246 @@ pub(crate) fn convert_messages(messages: &[ConversationMessage]) -> Vec<InputMes
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn empty_providers() -> BTreeMap<String, CustomProviderConfig> {
+        BTreeMap::new()
+    }
+
+    fn make_provider(base_url: &str, default_model: Option<&str>) -> CustomProviderConfig {
+        CustomProviderConfig {
+            base_url: base_url.to_string(),
+            api_key: None,
+            api_key_env: None,
+            models: vec![],
+            default_model: default_model.map(|s| s.to_string()),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // pick_best_coding_model
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn pick_best_coding_model_prefers_qwen3_coder() {
+        let names = vec!["llama3:8b", "qwen3-coder:30b", "deepseek-coder:6.7b"];
+        assert_eq!(pick_best_coding_model(&names), "qwen3-coder:30b");
+    }
+
+    #[test]
+    fn pick_best_coding_model_falls_back_to_deepseek() {
+        let names = vec!["llama3:8b", "deepseek-coder-v2:16b", "mistral:7b"];
+        assert_eq!(pick_best_coding_model(&names), "deepseek-coder-v2:16b");
+    }
+
+    #[test]
+    fn pick_best_coding_model_falls_back_to_first_when_no_match() {
+        let names = vec!["llama3:8b", "mistral:7b", "phi3:14b"];
+        assert_eq!(pick_best_coding_model(&names), "llama3:8b");
+    }
+
+    #[test]
+    fn pick_best_coding_model_respects_priority_order() {
+        let names = vec!["codellama:13b", "qwen2.5-coder:7b", "starcoder2:3b"];
+        assert_eq!(pick_best_coding_model(&names), "qwen2.5-coder:7b");
+    }
+
+    #[test]
+    fn pick_best_coding_model_prefers_qwen3_over_qwen25() {
+        let names = vec!["qwen2.5-coder:7b", "qwen3-coder:30b", "codellama:13b"];
+        assert_eq!(pick_best_coding_model(&names), "qwen3-coder:30b");
+    }
+
+    #[test]
+    fn pick_best_coding_model_selects_qwen3_over_codellama() {
+        let names = vec!["codellama:13b", "qwen3:8b"];
+        assert_eq!(pick_best_coding_model(&names), "qwen3:8b");
+    }
+
+    // -----------------------------------------------------------------------
+    // resolve_custom_api_key
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn resolve_custom_api_key_returns_inline_key() {
+        let config = CustomProviderConfig {
+            base_url: "http://localhost".to_string(),
+            api_key: Some("sk-test-123".to_string()),
+            api_key_env: Some("SHOULD_NOT_USE".to_string()),
+            models: vec![],
+            default_model: None,
+        };
+        assert_eq!(resolve_custom_api_key(&config).unwrap(), "sk-test-123");
+    }
+
+    #[test]
+    fn resolve_custom_api_key_returns_empty_when_no_key_fields() {
+        let config = make_provider("http://localhost", None);
+        assert_eq!(resolve_custom_api_key(&config).unwrap(), "");
+    }
+
+    #[test]
+    fn resolve_custom_api_key_errors_on_missing_env_var() {
+        let config = CustomProviderConfig {
+            base_url: "http://localhost".to_string(),
+            api_key: None,
+            api_key_env: Some("__CODINEER_TEST_NONEXISTENT_KEY__".to_string()),
+            models: vec![],
+            default_model: None,
+        };
+        let err = resolve_custom_api_key(&config).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("__CODINEER_TEST_NONEXISTENT_KEY__"));
+    }
+
+    // -----------------------------------------------------------------------
+    // resolve_preset_api_key
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn resolve_preset_api_key_returns_empty_for_local_provider() {
+        let preset = api::builtin_preset("ollama").unwrap();
+        assert_eq!(resolve_preset_api_key(preset).unwrap(), "");
+    }
+
+    #[test]
+    fn resolve_preset_api_key_errors_when_env_missing() {
+        let preset = api::builtin_preset("groq").unwrap();
+        let err = resolve_preset_api_key(preset).unwrap_err();
+        assert!(err.to_string().contains("GROQ_API_KEY"));
+    }
+
+    // -----------------------------------------------------------------------
+    // ModelResolver::expand_shorthand (via resolve)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn resolver_resolves_alias_before_building_client() {
+        let providers = empty_providers();
+        let resolver = ModelResolver::new(&providers);
+        // "sonnet" alias → "claude-sonnet-4-6"; will fail auth in test env but
+        // the error message confirms the canonical model name was resolved.
+        let err = resolver.resolve("sonnet").unwrap_err();
+        assert!(
+            err.to_string().contains("claude-sonnet-4-6"),
+            "error should reference canonical model: {err}"
+        );
+    }
+
+    #[test]
+    fn resolver_passes_through_custom_prefixed_model() {
+        let mut providers = BTreeMap::new();
+        providers.insert(
+            "ollama".to_string(),
+            make_provider("http://localhost:11434/v1", None),
+        );
+        let resolver = ModelResolver::new(&providers);
+        let result = resolver.resolve("ollama/qwen3-coder:30b").unwrap();
+        assert_eq!(result.model, "ollama/qwen3-coder:30b");
+    }
+
+    #[test]
+    fn resolver_expands_bare_provider_with_default_model() {
+        let mut providers = BTreeMap::new();
+        providers.insert(
+            "groq".to_string(),
+            make_provider(
+                "https://api.groq.com/openai/v1",
+                Some("llama-3.3-70b-versatile"),
+            ),
+        );
+        let resolver = ModelResolver::new(&providers);
+        let result = resolver.resolve("groq").unwrap();
+        assert_eq!(result.model, "groq/llama-3.3-70b-versatile");
+    }
+
+    #[test]
+    fn resolver_errors_on_bare_provider_without_default() {
+        let providers = empty_providers();
+        let resolver = ModelResolver::new(&providers);
+        let err = resolver.resolve("groq").unwrap_err();
+        assert!(err.to_string().contains("requires a model name"));
+    }
+
+    #[test]
+    fn resolver_errors_on_unknown_provider_prefix() {
+        let providers = empty_providers();
+        let resolver = ModelResolver::new(&providers);
+        let err = resolver.resolve("unknown-provider/some-model").unwrap_err();
+        assert!(err.to_string().contains("unknown provider"));
+    }
+
+    #[test]
+    fn resolver_ollama_shorthand_errors_when_not_running() {
+        let providers = empty_providers();
+        let resolver = ModelResolver::new(&providers);
+        let err = resolver.resolve("ollama").unwrap_err();
+        assert!(err.to_string().contains("Ollama is not running"));
+    }
+
+    #[test]
+    fn resolver_uses_config_over_builtin_preset() {
+        let mut providers = BTreeMap::new();
+        providers.insert(
+            "ollama".to_string(),
+            CustomProviderConfig {
+                base_url: "http://custom-ollama:11434/v1".to_string(),
+                api_key: Some("custom-key".to_string()),
+                api_key_env: None,
+                models: vec![],
+                default_model: None,
+            },
+        );
+        let resolver = ModelResolver::new(&providers);
+        let result = resolver.resolve("ollama/llama3:8b").unwrap();
+        assert_eq!(result.model, "ollama/llama3:8b");
+    }
+
+    // -----------------------------------------------------------------------
+    // is_tool_use_error
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn is_tool_use_error_detects_tool_keywords() {
+        assert!(DefaultRuntimeClient::is_tool_use_error(
+            "tool_use is not supported"
+        ));
+        assert!(DefaultRuntimeClient::is_tool_use_error(
+            "Function calling unavailable"
+        ));
+        assert!(DefaultRuntimeClient::is_tool_use_error(
+            "unsupported parameter: tools"
+        ));
+        assert!(DefaultRuntimeClient::is_tool_use_error(
+            "model does not support this feature"
+        ));
+    }
+
+    #[test]
+    fn is_tool_use_error_rejects_unrelated_errors() {
+        assert!(!DefaultRuntimeClient::is_tool_use_error(
+            "rate limit exceeded"
+        ));
+        assert!(!DefaultRuntimeClient::is_tool_use_error("invalid API key"));
+        assert!(!DefaultRuntimeClient::is_tool_use_error(
+            "connection refused"
+        ));
+    }
+
+    // -----------------------------------------------------------------------
+    // ModelResolver::build_custom_client with preset fallback
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn resolver_uses_builtin_preset_for_lmstudio() {
+        let providers = empty_providers();
+        let resolver = ModelResolver::new(&providers);
+        let result = resolver.resolve("lmstudio/my-model").unwrap();
+        assert_eq!(result.model, "lmstudio/my-model");
+    }
 }
