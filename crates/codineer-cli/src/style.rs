@@ -40,25 +40,10 @@ fn ansi_supported() -> bool {
 
 #[cfg(windows)]
 fn try_enable_ansi_on_windows() -> bool {
-    use std::os::windows::io::AsRawHandle;
-    type HANDLE = *mut std::ffi::c_void;
-    type DWORD = u32;
-    type BOOL = i32;
-    const ENABLE_VIRTUAL_TERMINAL_PROCESSING: DWORD = 0x0004;
-    const ENABLE_PROCESSED_OUTPUT: DWORD = 0x0001;
-    extern "system" {
-        fn GetConsoleMode(handle: HANDLE, mode: *mut DWORD) -> BOOL;
-        fn SetConsoleMode(handle: HANDLE, mode: DWORD) -> BOOL;
-    }
-    unsafe {
-        let handle = std::io::stdout().as_raw_handle();
-        let mut mode: DWORD = 0;
-        if GetConsoleMode(handle, &mut mode) == 0 {
-            return false;
-        }
-        let new_mode = mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING | ENABLE_PROCESSED_OUTPUT;
-        SetConsoleMode(handle, new_mode) != 0
-    }
+    // crossterm's safe public API checks GetConsoleMode and enables
+    // ENABLE_VIRTUAL_TERMINAL_PROCESSING when needed — same logic as the
+    // previous manual FFI, but without an unsafe block in our code.
+    crossterm::terminal::supports_ansi()
 }
 
 /// Pre-computed ANSI escape codes.
