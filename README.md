@@ -21,9 +21,30 @@
 
 Built in safe Rust. Ships as a **single binary**. No daemon, no cloud dependency — bring your own API key and go.
 
-## Install
+## Table of Contents
 
-Choose the method that works best for you:
+- [Install](#install)
+- [Quick Start](#quick-start)
+- [Usage Guide](#usage-guide)
+  - [Interactive REPL](#interactive-repl)
+  - [One-shot Prompts](#one-shot-prompts)
+  - [Session Management](#session-management)
+  - [Model Selection](#model-selection)
+  - [Permission Modes](#permission-modes)
+  - [Scripting & Automation](#scripting--automation)
+- [Project Setup](#project-setup)
+- [Configuration](#configuration)
+- [Extending Codineer](#extending-codineer)
+  - [MCP Servers](#mcp-servers)
+  - [Plugins](#plugins)
+  - [Agents & Skills](#agents--skills)
+- [Built-in Tools](#built-in-tools)
+- [Publishing to crates.io](#publishing-to-cratesio)
+- [License](#license)
+
+---
+
+## Install
 
 ### Homebrew (macOS / Linux)
 
@@ -57,45 +78,332 @@ cd codineer
 cargo install --path crates/codineer-cli --locked
 ```
 
+---
+
 ## Quick Start
 
-**1. Set up your API key** (pick one):
+**1. Authenticate** — pick one method:
 
 ```bash
-export ANTHROPIC_API_KEY="sk-ant-..."   # Claude
+# Environment variable (any session)
+export ANTHROPIC_API_KEY="sk-ant-..."   # Claude (recommended)
 export XAI_API_KEY="xai-..."            # Grok
-export OPENAI_API_KEY="sk-..."          # GPT
-codineer login                          # or use OAuth
+export OPENAI_API_KEY="sk-..."          # GPT / OpenAI-compatible
+
+# OAuth login (stored in keyring)
+codineer login
 ```
 
-**2. Start coding:**
+**2. Initialize your project** (optional but recommended):
 
 ```bash
-codineer                                       # interactive REPL
-codineer prompt "explain this project"         # one-shot
-codineer -p "list TODOs" --output-format json  # scripting
+cd your-project
+codineer init        # generates CODINEER.md with project context
 ```
 
-Codineer auto-detects which provider to use. No extra configuration needed.
+**3. Start coding:**
 
-## What It Does
+```bash
+codineer             # open interactive REPL
+```
 
-- **Reads your project** — `CODINEER.md`, configs, git state, LSP diagnostics
-- **Runs tools** — shell, file read/write/edit, glob, grep, web fetch, notebooks
-- **Manages context** — session save/restore, compaction, conversation history
-- **Extends easily** — MCP servers (stdio/SSE/HTTP/WebSocket), plugins, custom agents & skills
-- **Stays safe** — sandboxed execution, permission modes, private by design
-- **Works everywhere** — macOS, Linux, Windows; Anthropic, OpenAI, xAI, Ollama
+Codineer auto-detects which provider to use from your environment — no extra configuration needed.
+
+---
+
+## Usage Guide
+
+### Interactive REPL
+
+The default mode. Launch with no arguments, then type naturally:
+
+```bash
+codineer
+```
+
+Inside the REPL you can use **slash commands** (Tab-autocomplete supported):
+
+| Command | Description |
+|---|---|
+| `/help` | Show all available commands |
+| `/status` | Session info: model, tokens, git branch, config |
+| `/model [name]` | View or switch the active model |
+| `/permissions [mode]` | View or change permission mode |
+| `/cost` | Show token usage and estimated cost |
+| `/compact` | Compress conversation history to save tokens |
+| `/clear [--confirm]` | Reset conversation (requires `--confirm` to execute) |
+| `/session [list\|switch <id>]` | List or switch named sessions |
+| `/resume <file>` | Resume a saved session file |
+| `/export [file]` | Export conversation to Markdown |
+| `/diff` | Show workspace git diff |
+| `/memory` | Inspect loaded CODINEER.md memory files |
+| `/config [env\|hooks\|model\|plugins]` | Inspect merged configuration |
+| `/init` | Re-generate CODINEER.md for current project |
+| `/plugin list\|install\|enable\|...` | Manage plugins |
+| `/agents` | List configured sub-agents |
+| `/skills` | List available skills |
+| `/exit` or `/quit` | Exit the REPL |
+
+**Keyboard shortcuts:**
+
+| Key | Action |
+|---|---|
+| `Up` / `Down` | Browse input history |
+| `Tab` | Cycle slash command completions |
+| `Shift+Enter` or `Ctrl+J` | Insert newline (multi-line input) |
+| `Ctrl+C` | Cancel current input or interrupt running tool |
+
+### One-shot Prompts
+
+Run a single prompt and exit — perfect for scripts and CI:
+
+```bash
+codineer "explain this project's architecture"
+codineer prompt "list all TODO comments" --output-format json
+codineer -p "summarize Cargo.toml" --model sonnet
+```
+
+Flags available in prompt mode:
+
+| Flag | Description |
+|---|---|
+| `--model <name>` | Choose model (see [Model Selection](#model-selection)) |
+| `--output-format text\|json` | Output format (default: `text`) |
+| `--allowedTools <list>` | Comma-separated tool allowlist |
+| `--permission-mode <mode>` | Permission level (see [Permission Modes](#permission-modes)) |
+
+### Session Management
+
+Save and restore conversations across terminal sessions:
+
+```bash
+# Inside the REPL — export to a file
+/export session.json
+
+# Resume later, optionally running slash commands immediately
+codineer --resume session.json
+codineer --resume session.json /status /compact /cost
+```
+
+### Model Selection
+
+Codineer supports short aliases for popular models:
+
+| Alias | Resolves to |
+|---|---|
+| `opus` | `claude-opus-4-6` |
+| `sonnet` | `claude-sonnet-4-6` |
+| `haiku` | `claude-haiku-4-5-20251213` |
+| `grok` | `grok-3` |
+| `grok-mini` | `grok-3-mini` |
+
+```bash
+codineer --model opus "review my changes"
+codineer --model grok-mini "quick question"
+```
+
+Switch model mid-session with `/model <name>`.
+
+### Permission Modes
+
+Control what tools the agent can use:
+
+| Mode | What it allows |
+|---|---|
+| `read-only` | Read and search tools only — no writes |
+| `workspace-write` | Edit files inside the workspace (default) |
+| `danger-full-access` | Unrestricted tool access including system commands |
+
+```bash
+codineer --permission-mode read-only "audit the codebase"
+codineer --permission-mode danger-full-access "run full test suite and fix failures"
+```
+
+Switch permission mid-session with `/permissions <mode>`.
+
+### Scripting & Automation
+
+Use `--output-format json` and pipe output for integration with other tools:
+
+```bash
+# Extract structured data
+codineer -p "list all public functions in src/" --output-format json | jq '.content[0].text'
+
+# CI pipeline example
+codineer -p "check for security issues" \
+  --permission-mode read-only \
+  --allowedTools read_file,grep_search \
+  --output-format json
+```
+
+---
+
+## Project Setup
+
+**`CODINEER.md`** is the project memory file — it tells Codineer about your codebase, conventions, and workflows. Generate one automatically:
+
+```bash
+codineer init
+```
+
+This creates a `CODINEER.md` in your project root with detected stack, verification commands, and repository shape. Commit it to share context with your whole team.
+
+Example `CODINEER.md`:
+
+```markdown
+# CODINEER.md
+
+## Detected stack
+- Languages: Rust, TypeScript
+
+## Verification
+- `cargo test --workspace`
+- `npm test`
+
+## Working agreement
+- All PRs require passing CI
+- Use conventional commits
+```
+
+You can have multiple memory files — Codineer loads all `CODINEER.md` files it finds walking up from the workspace root.
+
+---
 
 ## Configuration
 
 Codineer loads settings from (highest to lowest precedence):
 
 1. `.codineer/settings.local.json` — local overrides (gitignored)
-2. `.codineer/settings.json` — project settings
-3. `~/.codineer/settings.json` — global settings
+2. `.codineer/settings.json` — project settings (commit this)
+3. `~/.codineer/settings.json` — global user settings
 
-Run `codineer help` for full documentation.
+Inspect the merged configuration at any time:
+
+```bash
+/config          # full merged config
+/config env      # environment variables section
+/config model    # model settings
+/config plugins  # plugin configuration
+/config hooks    # hook configuration
+```
+
+**Useful environment variables:**
+
+| Variable | Purpose |
+|---|---|
+| `ANTHROPIC_API_KEY` | Claude API key |
+| `XAI_API_KEY` | xAI / Grok API key |
+| `OPENAI_API_KEY` | OpenAI API key |
+| `CODINEER_WORKSPACE_ROOT` | Override workspace root path |
+| `NO_COLOR` | Disable ANSI color output |
+
+---
+
+## Extending Codineer
+
+### MCP Servers
+
+Codineer supports the [Model Context Protocol](https://modelcontextprotocol.io) for connecting external tools. Configure MCP servers in your settings:
+
+```json
+{
+  "mcpServers": {
+    "my-server": {
+      "command": "node",
+      "args": ["path/to/mcp-server.js"],
+      "transport": "stdio"
+    }
+  }
+}
+```
+
+Supported transports: `stdio`, `sse`, `http`, `websocket`.
+
+### Plugins
+
+Plugins add custom tools and hooks. Manage them from the REPL:
+
+```bash
+/plugin list                          # list installed plugins
+/plugin install ./path/to/plugin      # install a local plugin
+/plugin enable my-plugin              # enable a plugin
+/plugin disable my-plugin             # disable a plugin
+/plugin update my-plugin              # update to latest
+/plugin uninstall my-plugin-id        # remove a plugin
+```
+
+### Agents & Skills
+
+**Agents** are named sub-agent configurations for specialized tasks:
+
+```bash
+codineer agents          # list configured agents
+codineer agents --help   # show agent options
+/agents                  # same, inside the REPL
+```
+
+**Skills** are reusable prompt templates loaded from `~/.codineer/skills/`:
+
+```bash
+codineer skills          # list available skills
+codineer /skills help    # show skill details
+/skills                  # same, inside the REPL
+```
+
+---
+
+## Built-in Tools
+
+Codineer ships with a rich set of tools the AI can invoke:
+
+| Tool | Description |
+|---|---|
+| `bash` | Execute shell commands |
+| `PowerShell` | Execute PowerShell commands (Windows) |
+| `read_file` | Read file contents with optional offset/limit |
+| `write_file` | Create or overwrite files |
+| `edit_file` | Targeted string replacement in files |
+| `glob_search` | Find files matching a glob pattern |
+| `grep_search` | Search file contents with regex |
+| `WebFetch` | Fetch and summarize a web page |
+| `WebSearch` | Search the web via DuckDuckGo |
+| `NotebookEdit` | Edit Jupyter notebook cells |
+| `TodoWrite` | Manage a structured task list |
+| `Agent` | Launch a sub-agent for complex tasks |
+| `Skill` | Load and execute a skill prompt |
+| `ToolSearch` | Search available tools by keyword |
+| `REPL` | Run a persistent language REPL (Python, Node, etc.) |
+| `Sleep` | Pause execution for a given duration |
+| `SendUserMessage` | Send a message to the user |
+| `Config` | Read or write configuration values |
+| `StructuredOutput` | Return structured JSON output |
+
+---
+
+## Publishing to crates.io
+
+The library crates (`api`, `runtime`, `tools`, `plugins`, `commands`, `lsp`) are published independently to crates.io. Releases are automated via GitHub Actions — tag a version to trigger the release pipeline:
+
+```bash
+git tag v0.6.0
+git push origin v0.6.0
+```
+
+To use the library crates in your own Rust project:
+
+```toml
+[dependencies]
+# High-level tool execution
+tools = { version = "0.5" }
+
+# Runtime and session management
+runtime = { version = "0.5" }
+
+# API provider abstraction (Anthropic, OpenAI, xAI)
+api = { version = "0.5" }
+```
+
+---
 
 ## License
 
