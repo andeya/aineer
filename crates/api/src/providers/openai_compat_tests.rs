@@ -48,6 +48,44 @@ fn request_translation_uses_openai_compatible_shape() {
 }
 
 #[test]
+fn chat_completion_strips_custom_provider_prefix_for_upstream_model() {
+    let payload = build_chat_completion_request(&MessageRequest {
+        model: "dashscope/qwen-plus-2025-07-28".to_string(),
+        max_tokens: 64,
+        messages: vec![InputMessage {
+            role: "user".to_string(),
+            content: vec![InputContentBlock::Text {
+                text: "hi".to_string(),
+            }],
+        }],
+        system: None,
+        tools: None,
+        tool_choice: None,
+        stream: false,
+    });
+    assert_eq!(payload["model"], json!("qwen-plus-2025-07-28"));
+}
+
+#[test]
+fn chat_completion_preserves_openrouter_model_after_provider_prefix() {
+    let payload = build_chat_completion_request(&MessageRequest {
+        model: "openrouter/meta-llama/llama-3.1-8b:free".to_string(),
+        max_tokens: 64,
+        messages: vec![InputMessage {
+            role: "user".to_string(),
+            content: vec![InputContentBlock::Text {
+                text: "hi".to_string(),
+            }],
+        }],
+        system: None,
+        tools: None,
+        tool_choice: None,
+        stream: false,
+    });
+    assert_eq!(payload["model"], json!("meta-llama/llama-3.1-8b:free"));
+}
+
+#[test]
 fn tool_choice_translation_supports_required_function() {
     assert_eq!(openai_tool_choice(&ToolChoice::Any), json!("required"));
     assert_eq!(

@@ -4,7 +4,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::error::ApiError;
-use crate::providers::RetryPolicy;
+use crate::providers::{parse_custom_provider_prefix, RetryPolicy};
 use crate::types::{
     ContentBlockDelta, ContentBlockDeltaEvent, ContentBlockStartEvent, ContentBlockStopEvent,
     InputContentBlock, InputMessage, MessageDelta, MessageDeltaEvent, MessageRequest,
@@ -638,6 +638,13 @@ struct ErrorBody {
     message: Option<String>,
 }
 
+/// Model name sent to upstream OpenAI-compatible APIs (strip `provider/` prefix).
+fn upstream_openai_model(model: &str) -> String {
+    parse_custom_provider_prefix(model)
+        .map(|(_, rest)| rest.to_string())
+        .unwrap_or_else(|| model.to_string())
+}
+
 fn build_chat_completion_request(request: &MessageRequest) -> Value {
     let mut messages = Vec::new();
     if let Some(system) = request.system.as_ref().filter(|value| !value.is_empty()) {
@@ -650,8 +657,9 @@ fn build_chat_completion_request(request: &MessageRequest) -> Value {
         messages.extend(translate_message(message));
     }
 
+    let upstream_model = upstream_openai_model(&request.model);
     let mut payload = json!({
-        "model": request.model,
+        "model": upstream_model,
         "max_tokens": request.max_tokens,
         "messages": messages,
         "stream": request.stream,
