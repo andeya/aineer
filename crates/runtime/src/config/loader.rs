@@ -12,7 +12,7 @@ use super::types::*;
 pub fn default_config_home() -> PathBuf {
     std::env::var_os("CODINEER_CONFIG_HOME")
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".codineer")))
+        .or_else(|| crate::home_dir().map(|home| home.join(".codineer")))
         .unwrap_or_else(|| PathBuf::from(".codineer"))
 }
 

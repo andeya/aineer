@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -164,8 +163,7 @@ fn discover_definition_roots(cwd: &Path, leaf: &str) -> Vec<(DefinitionSource, P
         );
     }
 
-    if let Some(home) = env::var_os("HOME") {
-        let home = PathBuf::from(home);
+    if let Some(home) = runtime::home_dir() {
         push_unique_root(
             &mut roots,
             DefinitionSource::User,
@@ -187,8 +185,7 @@ fn discover_skill_roots(cwd: &Path) -> Vec<SkillRoot> {
         );
     }
 
-    if let Some(home) = env::var_os("HOME") {
-        let home = PathBuf::from(home);
+    if let Some(home) = runtime::home_dir() {
         push_unique_skill_root(
             &mut roots,
             DefinitionSource::User,
