@@ -9,6 +9,7 @@ pub enum ProviderClient {
     CodineerApi(CodineerApiClient),
     Xai(OpenAiCompatClient),
     OpenAi(OpenAiCompatClient),
+    Custom(OpenAiCompatClient),
 }
 
 impl ProviderClient {
@@ -32,7 +33,16 @@ impl ProviderClient {
             ProviderKind::OpenAi => Ok(Self::OpenAi(OpenAiCompatClient::from_env(
                 OpenAiCompatConfig::openai(),
             )?)),
+            ProviderKind::Custom => Err(ApiError::Auth(
+                "custom provider models must be resolved via from_custom()".to_string(),
+            )),
         }
+    }
+
+    /// Construct a `Custom` provider client from a pre-configured `OpenAiCompatClient`.
+    #[must_use]
+    pub fn from_custom(client: OpenAiCompatClient) -> Self {
+        Self::Custom(client)
     }
 
     #[must_use]
@@ -41,6 +51,7 @@ impl ProviderClient {
             Self::CodineerApi(_) => ProviderKind::CodineerApi,
             Self::Xai(_) => ProviderKind::Xai,
             Self::OpenAi(_) => ProviderKind::OpenAi,
+            Self::Custom(_) => ProviderKind::Custom,
         }
     }
 
@@ -50,7 +61,9 @@ impl ProviderClient {
     ) -> Result<MessageResponse, ApiError> {
         match self {
             Self::CodineerApi(client) => client.send_message(request).await,
-            Self::Xai(client) | Self::OpenAi(client) => client.send_message(request).await,
+            Self::Xai(client) | Self::OpenAi(client) | Self::Custom(client) => {
+                client.send_message(request).await
+            }
         }
     }
 
@@ -63,7 +76,7 @@ impl ProviderClient {
                 .stream_message(request)
                 .await
                 .map(MessageStream::CodineerApi),
-            Self::Xai(client) | Self::OpenAi(client) => client
+            Self::Xai(client) | Self::OpenAi(client) | Self::Custom(client) => client
                 .stream_message(request)
                 .await
                 .map(MessageStream::OpenAiCompat),

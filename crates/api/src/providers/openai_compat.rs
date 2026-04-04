@@ -77,6 +77,18 @@ impl OpenAiCompatClient {
         }
     }
 
+    /// Construct a client for a custom / local provider.
+    /// `api_key` may be empty for local providers like Ollama and LM Studio.
+    #[must_use]
+    pub fn new_custom(base_url: impl Into<String>, api_key: impl Into<String>) -> Self {
+        Self {
+            http: reqwest::Client::new(),
+            api_key: api_key.into(),
+            base_url: base_url.into(),
+            retry: RetryPolicy::default(),
+        }
+    }
+
     pub fn from_env(config: OpenAiCompatConfig) -> Result<Self, ApiError> {
         let Some(api_key) = read_env_non_empty(config.api_key_env)? else {
             return Err(ApiError::missing_credentials(
@@ -176,11 +188,14 @@ impl OpenAiCompatClient {
         request: &MessageRequest,
     ) -> Result<reqwest::Response, ApiError> {
         let request_url = chat_completions_endpoint(&self.base_url);
-        self.http
+        let mut req = self
+            .http
             .post(&request_url)
-            .header("content-type", "application/json")
-            .bearer_auth(&self.api_key)
-            .json(&build_chat_completion_request(request))
+            .header("content-type", "application/json");
+        if !self.api_key.is_empty() {
+            req = req.bearer_auth(&self.api_key);
+        }
+        req.json(&build_chat_completion_request(request))
             .send()
             .await
             .map_err(ApiError::from)

@@ -25,6 +25,7 @@ pub enum ProviderKind {
     CodineerApi,
     Xai,
     OpenAi,
+    Custom,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -191,9 +192,78 @@ const MODEL_REGISTRY: &[(&str, ProviderMetadata)] = &[
     ),
 ];
 
+/// Built-in provider presets for OpenAI-compatible services.
+/// Each entry: (name, base_url, api_key_env or empty for local providers).
+pub const BUILTIN_PROVIDER_PRESETS: &[BuiltinProviderPreset] = &[
+    BuiltinProviderPreset {
+        name: "ollama",
+        base_url: "http://localhost:11434/v1",
+        api_key_env: "",
+        description: "Local Ollama instance (no API key needed)",
+    },
+    BuiltinProviderPreset {
+        name: "lmstudio",
+        base_url: "http://localhost:1234/v1",
+        api_key_env: "",
+        description: "Local LM Studio instance (no API key needed)",
+    },
+    BuiltinProviderPreset {
+        name: "openrouter",
+        base_url: "https://openrouter.ai/api/v1",
+        api_key_env: "OPENROUTER_API_KEY",
+        description: "OpenRouter (free models available)",
+    },
+    BuiltinProviderPreset {
+        name: "groq",
+        base_url: "https://api.groq.com/openai/v1",
+        api_key_env: "GROQ_API_KEY",
+        description: "Groq Cloud (generous free tier)",
+    },
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BuiltinProviderPreset {
+    pub name: &'static str,
+    pub base_url: &'static str,
+    pub api_key_env: &'static str,
+    pub description: &'static str,
+}
+
+/// If model starts with `provider/`, return `(provider_name, model_name)`.
+/// Otherwise return `None`.
+#[must_use]
+pub fn parse_custom_provider_prefix(model: &str) -> Option<(&str, &str)> {
+    let trimmed = model.trim();
+    let slash_pos = trimmed.find('/')?;
+    let provider = &trimmed[..slash_pos];
+    let model_part = &trimmed[slash_pos + 1..];
+    if provider.is_empty() || model_part.is_empty() {
+        return None;
+    }
+    if MODEL_REGISTRY
+        .iter()
+        .any(|(alias, _)| *alias == provider.to_ascii_lowercase())
+    {
+        return None;
+    }
+    Some((provider, model_part))
+}
+
+/// Look up a built-in provider preset by name (case-insensitive).
+#[must_use]
+pub fn builtin_preset(name: &str) -> Option<&'static BuiltinProviderPreset> {
+    let lower = name.to_ascii_lowercase();
+    BUILTIN_PROVIDER_PRESETS
+        .iter()
+        .find(|preset| preset.name == lower)
+}
+
 #[must_use]
 pub fn resolve_model_alias(model: &str) -> String {
     let trimmed = model.trim();
+    if parse_custom_provider_prefix(trimmed).is_some() {
+        return trimmed.to_string();
+    }
     let lower = trimmed.to_ascii_lowercase();
     MODEL_REGISTRY
         .iter()
@@ -218,6 +288,7 @@ pub fn resolve_model_alias(model: &str) -> String {
                     "o3-mini" => "o3-mini",
                     _ => trimmed,
                 },
+                ProviderKind::Custom => trimmed,
             })
         })
         .map_or_else(|| trimmed.to_string(), ToOwned::to_owned)
@@ -243,6 +314,9 @@ pub fn metadata_for_model(model: &str) -> Option<ProviderMetadata> {
 
 #[must_use]
 pub fn detect_provider_kind(model: &str) -> ProviderKind {
+    if parse_custom_provider_prefix(model).is_some() {
+        return ProviderKind::Custom;
+    }
     if let Some(metadata) = metadata_for_model(model) {
         return metadata.provider;
     }
@@ -272,6 +346,7 @@ pub fn auto_detect_default_model() -> Option<&'static str> {
         ProviderKind::CodineerApi => Some("claude-sonnet-4-6"),
         ProviderKind::Xai => Some("grok-3"),
         ProviderKind::OpenAi => Some("gpt-4o"),
+        ProviderKind::Custom => None,
     }
 }
 
@@ -280,6 +355,10 @@ pub fn max_tokens_for_model(model: &str) -> u32 {
     let canonical = resolve_model_alias(model);
     if canonical.starts_with("claude-opus") || canonical == "opus" {
         32_000
+    } else if parse_custom_provider_prefix(&canonical).is_some() {
+        // Local / custom models often have smaller context windows;
+        // 16k is a safe default that avoids hitting limits on 8B–32B models.
+        16_000
     } else {
         64_000
     }
@@ -287,7 +366,10 @@ pub fn max_tokens_for_model(model: &str) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{detect_provider_kind, max_tokens_for_model, resolve_model_alias, ProviderKind};
+    use super::{
+        builtin_preset, detect_provider_kind, max_tokens_for_model, parse_custom_provider_prefix,
+        resolve_model_alias, ProviderKind,
+    };
 
     #[test]
     fn resolves_grok_aliases() {
@@ -309,5 +391,62 @@ mod tests {
     fn keeps_existing_max_token_heuristic() {
         assert_eq!(max_tokens_for_model("opus"), 32_000);
         assert_eq!(max_tokens_for_model("grok-3"), 64_000);
+    }
+
+    #[test]
+    fn parses_custom_provider_prefix() {
+        assert_eq!(
+            parse_custom_provider_prefix("ollama/qwen2.5-coder"),
+            Some(("ollama", "qwen2.5-coder"))
+        );
+        assert_eq!(
+            parse_custom_provider_prefix("groq/llama-3.3-70b"),
+            Some(("groq", "llama-3.3-70b"))
+        );
+        assert_eq!(
+            parse_custom_provider_prefix("openrouter/meta-llama/llama-3.1-8b:free"),
+            Some(("openrouter", "meta-llama/llama-3.1-8b:free"))
+        );
+        assert_eq!(parse_custom_provider_prefix("grok-3"), None);
+        assert_eq!(parse_custom_provider_prefix("sonnet"), None);
+        assert_eq!(parse_custom_provider_prefix("/model"), None);
+        assert_eq!(parse_custom_provider_prefix("provider/"), None);
+    }
+
+    #[test]
+    fn detects_custom_provider_kind() {
+        assert_eq!(
+            detect_provider_kind("ollama/qwen2.5-coder"),
+            ProviderKind::Custom
+        );
+        assert_eq!(
+            detect_provider_kind("lmstudio/my-model"),
+            ProviderKind::Custom
+        );
+    }
+
+    #[test]
+    fn resolves_custom_model_passthrough() {
+        assert_eq!(
+            resolve_model_alias("ollama/qwen2.5-coder"),
+            "ollama/qwen2.5-coder"
+        );
+    }
+
+    #[test]
+    fn custom_model_tokens_smaller_default() {
+        assert_eq!(max_tokens_for_model("ollama/qwen2.5-coder"), 16_000);
+    }
+
+    #[test]
+    fn builtin_presets_lookup() {
+        let ollama = builtin_preset("ollama").expect("ollama preset should exist");
+        assert_eq!(ollama.base_url, "http://localhost:11434/v1");
+        assert!(ollama.api_key_env.is_empty());
+
+        let groq = builtin_preset("groq").expect("groq preset should exist");
+        assert_eq!(groq.api_key_env, "GROQ_API_KEY");
+
+        assert!(builtin_preset("nonexistent").is_none());
     }
 }
