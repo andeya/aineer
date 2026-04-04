@@ -292,11 +292,7 @@ fn check_auto_discover_source(
             } else {
                 "This credential source is auto-discovered and cannot be set up interactively through Codineer."
             };
-            Err(format!(
-                "{} credentials not found.\n{hint}",
-                resolver.display_name()
-            )
-            .into())
+            Err(format!("{} credentials not found.\n{hint}", resolver.display_name()).into())
         }
     }
 }
