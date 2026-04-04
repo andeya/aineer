@@ -1,10 +1,11 @@
 {
   "$schema": "SettingsSchema",
-
-  "model": "claude-sonnet-4-20250514",
-
-  "permissionMode": "default",
-
+  "model": "sonnet",
+  "fallbackModels": [
+    "ollama/qwen3-coder",
+    "groq/llama-3.3-70b-versatile"
+  ],
+  "permissionMode": "workspace-write",
   "env": {
     "ANTHROPIC_API_KEY": "sk-ant-xxx",
     "ANTHROPIC_AUTH_TOKEN": "",
@@ -15,78 +16,108 @@
     "OPENROUTER_API_KEY": "sk-or-xxx",
     "OLLAMA_HOST": "http://localhost:11434"
   },
-
   "providers": {
     "ollama": {
       "baseUrl": "http://localhost:11434/v1",
-      "models": ["qwen3-coder", "llama3.3", "deepseek-coder-v2"],
+      "models": [
+        "qwen3-coder",
+        "llama3.3",
+        "deepseek-coder-v2"
+      ],
       "defaultModel": "qwen3-coder"
     },
     "lmstudio": {
       "baseUrl": "http://localhost:1234/v1",
-      "models": ["qwen2.5-coder-7b"],
+      "models": [
+        "qwen2.5-coder-7b"
+      ],
       "defaultModel": "qwen2.5-coder-7b"
     },
     "openrouter": {
       "baseUrl": "https://openrouter.ai/api/v1",
       "apiKeyEnv": "OPENROUTER_API_KEY",
-      "models": ["meta-llama/llama-3.3-70b-instruct:free"],
+      "models": [
+        "meta-llama/llama-3.3-70b-instruct:free"
+      ],
       "defaultModel": "meta-llama/llama-3.3-70b-instruct:free"
     },
     "groq": {
       "baseUrl": "https://api.groq.com/openai/v1",
       "apiKeyEnv": "GROQ_API_KEY",
-      "models": ["llama-3.3-70b-versatile", "mixtral-8x7b-32768"],
+      "models": [
+        "llama-3.3-70b-versatile",
+        "mixtral-8x7b-32768"
+      ],
       "defaultModel": "llama-3.3-70b-versatile"
     },
     "vllm": {
       "baseUrl": "http://localhost:8000/v1",
-      "models": ["Qwen/Qwen2.5-Coder-32B-Instruct"],
+      "models": [
+        "Qwen/Qwen2.5-Coder-32B-Instruct"
+      ],
       "defaultModel": "Qwen/Qwen2.5-Coder-32B-Instruct"
     },
     "my-company-proxy": {
       "baseUrl": "https://ai-proxy.internal.company.com/v1",
       "apiKey": "company-secret-key",
       "apiKeyEnv": "COMPANY_AI_KEY",
-      "models": ["gpt-4o", "claude-sonnet-4-20250514"],
+      "models": [
+        "gpt-4o",
+        "claude-sonnet-4-6"
+      ],
       "defaultModel": "gpt-4o"
     }
   },
-
   "oauth": {
     "clientId": "df03b862-78fe-4a2b-bb24-426ac30897b7",
     "authorizeUrl": "https://platform.codineer.dev/oauth/authorize",
     "tokenUrl": "https://platform.codineer.dev/v1/oauth/token",
     "callbackPort": 4545,
     "manualRedirectUrl": "https://platform.codineer.dev/oauth/callback",
-    "scopes": ["user:profile", "user:inference"]
+    "scopes": [
+      "user:profile",
+      "user:inference"
+    ]
   },
-
+  "credentials": {
+    "defaultSource": "codineer-oauth",
+    "autoDiscover": true,
+    "claudeCode": {
+      "enabled": true
+    }
+  },
   "hooks": {
-    "PreToolUse": ["my-pre-hook-plugin"],
-    "PostToolUse": ["my-post-hook-plugin"]
+    "PreToolUse": [
+      "my-pre-hook-plugin"
+    ],
+    "PostToolUse": [
+      "my-post-hook-plugin"
+    ]
   },
-
   "plugins": {
     "enabled": {
       "my-plugin-a": true,
       "my-plugin-b": false
     },
-    "externalDirectories": ["/path/to/custom/plugins"],
+    "externalDirectories": [
+      "/path/to/custom/plugins"
+    ],
     "installRoot": "/path/to/plugin/install",
     "registryPath": "/path/to/plugin/registry",
     "bundledRoot": "/path/to/bundled/plugins"
   },
-
   "enabledPlugins": {
     "my-plugin-c": true
   },
-
   "mcpServers": {
     "my-stdio-server": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"],
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/workspace"
+      ],
       "env": {
         "NODE_ENV": "production"
       }
@@ -124,16 +155,17 @@
       "name": "built-in-server"
     }
   },
-
   "sandbox": {
     "enabled": false,
     "namespaceRestrictions": true,
     "networkIsolation": false,
     "filesystemMode": "workspace-only",
-    "allowedMounts": ["/tmp", "/var/data"]
+    "allowedMounts": [
+      "/tmp",
+      "/var/data"
+    ]
   },
-
   "permissions": {
-    "defaultMode": "default"
+    "defaultMode": "workspace-write"
   }
 }

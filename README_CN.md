@@ -99,7 +99,10 @@ export XAI_API_KEY="xai-..."                      # Grok
 export OPENROUTER_API_KEY="..."                   # OpenRouter（免费模型）
 export GROQ_API_KEY="..."                         # Groq Cloud（免费额度）
 ollama serve                                      # 本地 AI（无需 Key）
-codineer login                                    # 或 OAuth
+codineer login                                    # 或 OAuth 登录（默认 Provider）
+codineer login anthropic --source claude-code     # 使用 Claude Code 凭据
+codineer status                                   # 查看认证状态
+codineer config set model sonnet                  # 设置默认模型
 
 # 2. 初始化项目上下文（可选）
 codineer init
@@ -156,6 +159,14 @@ codineer --model ollama              # 自动选择最佳编程模型
 
 > 不支持 function calling 的模型自动降级为纯文本模式——任何模型都能工作。
 
+### 列出可用模型
+
+```bash
+codineer models               # 所有 Provider
+codineer models anthropic     # 按 Provider 筛选
+codineer models ollama        # 显示本地 Ollama 模型
+```
+
 ### 模型解析顺序
 
 未指定 `--model` 时：
@@ -164,7 +175,22 @@ codineer --model ollama              # 自动选择最佳编程模型
 2. 根据可用 API 凭据自动检测
 3. 检测运行中的 Ollama 实例
 
+若解析出的模型缺少凭据，Codineer 会依次尝试 `fallbackModels` 中的每个模型。
+
 会话中切换模型：`/model <名称>`
+
+### 模型回退
+
+在 `settings.json` 中设置有序的回退模型列表。当主模型不可用（如缺少 API key）时，Codineer 依序尝试每个回退模型：
+
+```json
+{
+  "model": "sonnet",
+  "fallbackModels": ["ollama/qwen3-coder", "groq/llama-3.3-70b-versatile"]
+}
+```
+
+零成本设置特别有用：将云端模型设为主模型，本地模型设为回退。
 
 ---
 
@@ -259,22 +285,25 @@ Codineer 从多个 JSON 文件合并设置（优先级从高到低）：
     "my-api": { "baseUrl": "https://api.example.com/v1", "apiKeyEnv": "MY_KEY" }
   },
   "mcpServers": { "my-server": { "command": "node", "args": ["server.js"] } },
-  "plugins": ["my-plugin"],
+  "enabledPlugins": { "my-plugin": true },
   "hooks": { "PreToolUse": ["lint-check"], "PostToolUse": ["notify"] }
 }
 ```
 
-| 字段             | 类型   | 说明                                                                           |
-| ---------------- | ------ | ------------------------------------------------------------------------------ |
-| `model`          | string | 默认模型（如 `"sonnet"`、`"ollama/qwen3-coder"`）                              |
-| `permissionMode` | string | `"read-only"`、`"workspace-write"` 或 `"danger-full-access"`                   |
-| `env`            | object | 启动时注入的环境变量。Shell export 优先。                                      |
-| `providers`      | object | 自定义 OpenAI 兼容 Provider 端点（见[示例](https://github.com/andeya/codineer/blob/main/settings.example.json)） |
-| `oauth`          | object | 自定义 OAuth 配置（clientId、authorizeUrl、tokenUrl、scopes 等）               |
-| `mcpServers`     | object | MCP 服务器定义（stdio、sse、http、ws）                                         |
-| `sandbox`        | object | 沙箱安全设置（enabled、filesystemMode、allowedMounts）                         |
-| `plugins`        | object | 插件管理（enabled、externalDirectories、installRoot）                          |
-| `hooks`          | object | `PreToolUse` / `PostToolUse` Hook 的 Shell 命令                                |
+| 字段               | 类型     | 说明                                                                                                             |
+| ------------------ | -------- | ---------------------------------------------------------------------------------------------------------------- |
+| `model`            | string   | 默认模型（如 `"sonnet"`、`"ollama/qwen3-coder"`）                                                                |
+| `fallbackModels`   | string[] | 主模型不可用时依序尝试的回退模型列表                                                                             |
+| `permissionMode`   | string   | `"read-only"`、`"workspace-write"` 或 `"danger-full-access"`                                                     |
+| `env`              | object   | 启动时注入的环境变量。Shell export 优先。                                                                        |
+| `providers`        | object   | 自定义 OpenAI 兼容 Provider 端点（见[示例](https://github.com/andeya/codineer/blob/main/settings.example.json)） |
+| `oauth`            | object   | 自定义 OAuth 配置（clientId、authorizeUrl、tokenUrl、scopes 等）                                                 |
+| `credentials`      | object   | 凭据链配置（defaultSource、autoDiscover、claudeCode）                                                            |
+| `mcpServers`       | object   | MCP 服务器定义（stdio、sse、http、ws）                                                                           |
+| `sandbox`          | object   | 沙箱安全设置（enabled、filesystemMode、allowedMounts）                                                           |
+| `enabledPlugins`   | object   | 启用的插件（插件名 → 布尔值的映射）                                                                             |
+| `plugins`          | object   | 插件管理（externalDirectories、installRoot）                                                                     |
+| `hooks`            | object   | `PreToolUse` / `PostToolUse` Hook 的 Shell 命令                                                                  |
 
 运行时查看合并配置：`/config`、`/config env`、`/config model`
 
@@ -297,7 +326,32 @@ Codineer 从多个 JSON 文件合并设置（优先级从高到低）：
 | `NO_COLOR`                 | 禁用 ANSI 颜色                                 |
 | `CLICOLOR=0`               | 禁用 ANSI 颜色（替代方式）                     |
 
-**凭据优先级：** Shell 环境变量 → settings.json `"env"` → OAuth（`codineer login`）
+**凭据链（按 Provider 分别管理，优先级从高到低）：**
+
+| Provider           | 凭据链                                                                                                  |
+| ------------------ | ------------------------------------------------------------------------------------------------------- |
+| Anthropic (Claude) | `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` → Codineer OAuth (`codineer login`) → Claude Code 自动发现 |
+| xAI (Grok)         | `XAI_API_KEY`                                                                                           |
+| OpenAI             | `OPENAI_API_KEY`                                                                                        |
+| 自定义 Provider    | 内联 `apiKey` → `apiKeyEnv` 环境变量                                                                    |
+
+**Claude Code 自动发现：** 如果你已安装 Claude Code 并登录（`claude login`），Codineer 会自动从 `~/.claude/.credentials.json`（或 macOS 钥匙串）发现凭据。这意味着你可以直接使用已有的 Claude 订阅，无需单独获取 API Key。
+
+在 `settings.json` 中配置：
+
+```json
+{ "credentials": { "autoDiscover": true, "claudeCode": { "enabled": true } } }
+```
+
+查看认证状态：`codineer status` 或 `codineer status anthropic`
+
+**配置管理：**
+
+```bash
+codineer config set model sonnet               # 设置配置项
+codineer config get model                      # 读取配置项
+codineer config list                           # 列出全部配置
+```
 
 ---
 
