@@ -60,7 +60,7 @@ pub struct RuntimePluginConfig {
 }
 
 /// Controls which external credential sources are enabled.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CredentialConfig {
     /// Default auth source id for `codineer login` (e.g. `"codineer-oauth"`).
     pub default_source: Option<String>,
@@ -68,6 +68,16 @@ pub struct CredentialConfig {
     pub auto_discover: bool,
     /// Enable Claude Code credential auto-discovery.
     pub claude_code_enabled: bool,
+}
+
+impl Default for CredentialConfig {
+    fn default() -> Self {
+        Self {
+            default_source: None,
+            auto_discover: true,
+            claude_code_enabled: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

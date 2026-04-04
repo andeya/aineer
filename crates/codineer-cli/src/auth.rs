@@ -151,9 +151,18 @@ fn find_source<'a>(
     chain: &'a CredentialChain,
     source_id: &str,
 ) -> Result<&'a dyn runtime::CredentialResolver, Box<dyn std::error::Error>> {
-    chain
-        .get_resolver(source_id)
-        .ok_or_else(|| format!("unknown credential source: {source_id}").into())
+    chain.get_resolver(source_id).ok_or_else(|| {
+        let available: Vec<&str> = chain.resolver_ids().collect();
+        format!(
+            "unknown credential source: {source_id}\nAvailable sources: {}",
+            if available.is_empty() {
+                "(none)".to_string()
+            } else {
+                available.join(", ")
+            }
+        )
+        .into()
+    })
 }
 
 pub fn run_login(

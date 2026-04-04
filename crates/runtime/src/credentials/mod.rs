@@ -210,6 +210,11 @@ impl CredentialChain {
             .map(|r| r.as_ref())
     }
 
+    /// Iterate over all resolver IDs in priority order.
+    pub fn resolver_ids(&self) -> impl Iterator<Item = &str> {
+        self.resolvers.iter().map(|r| r.id())
+    }
+
     /// Provider name this chain serves.
     #[must_use]
     pub fn provider_name(&self) -> &str {
