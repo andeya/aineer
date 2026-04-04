@@ -1,4 +1,4 @@
-use std::io::{self, IsTerminal};
+use std::io;
 
 use commands::{
     render_slash_command_help, resume_supported_slash_commands, slash_command_specs,
@@ -20,7 +20,7 @@ pub(crate) fn print_help_section(
 }
 
 pub(crate) fn print_help_to(out: &mut impl io::Write) -> io::Result<()> {
-    let color = io::stdout().is_terminal();
+    let color = crate::style::color_for_stdout();
     writeln!(out, "{}", logo_ascii(color))?;
     writeln!(out, "  v{VERSION}")?;
     writeln!(out)?;
@@ -157,20 +157,21 @@ pub(crate) fn render_repl_help() -> String {
     )
 }
 
-pub(crate) fn append_slash_command_suggestions(lines: &mut Vec<String>, name: &str) {
-    let suggestions = suggest_slash_commands(name, 3);
-    if suggestions.is_empty() {
-        lines.push("  Try              /help shows the full slash command map".to_string());
-        return;
-    }
-
+fn append_suggestions(lines: &mut Vec<String>, suggestions: Vec<String>) {
     lines.push("  Try              /help shows the full slash command map".to_string());
-    lines.push("Suggestions".to_string());
-    lines.extend(
-        suggestions
-            .into_iter()
-            .map(|suggestion| format!("  {suggestion}")),
-    );
+    if !suggestions.is_empty() {
+        let p = crate::style::Palette::for_stdout();
+        lines.push(p.title("Suggestions"));
+        lines.extend(
+            suggestions
+                .into_iter()
+                .map(|suggestion| format!("  {suggestion}")),
+        );
+    }
+}
+
+pub(crate) fn append_slash_command_suggestions(lines: &mut Vec<String>, name: &str) {
+    append_suggestions(lines, suggest_slash_commands(name, 3));
 }
 
 pub(crate) fn render_unknown_repl_command(name: &str) -> String {
@@ -178,24 +179,8 @@ pub(crate) fn render_unknown_repl_command(name: &str) -> String {
         "Unknown slash command".to_string(),
         format!("  Command          /{name}"),
     ];
-    append_repl_command_suggestions(&mut lines, name);
+    append_suggestions(&mut lines, suggest_repl_commands(name));
     lines.join("\n")
-}
-
-pub(crate) fn append_repl_command_suggestions(lines: &mut Vec<String>, name: &str) {
-    let suggestions = suggest_repl_commands(name);
-    if suggestions.is_empty() {
-        lines.push("  Try              /help shows the full slash command map".to_string());
-        return;
-    }
-
-    lines.push("  Try              /help shows the full slash command map".to_string());
-    lines.push("Suggestions".to_string());
-    lines.extend(
-        suggestions
-            .into_iter()
-            .map(|suggestion| format!("  {suggestion}")),
-    );
 }
 
 pub(crate) fn slash_command_completion_candidates() -> Vec<String> {
