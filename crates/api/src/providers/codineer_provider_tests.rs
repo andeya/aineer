@@ -407,3 +407,35 @@ fn auth_source_applies_headers() {
         Some("Bearer proxy-token")
     );
 }
+
+#[test]
+fn auth_source_debug_redacts_secrets() {
+    let key = AuthSource::ApiKey("sk-secret-key-12345".to_string());
+    let debug = format!("{key:?}");
+    assert!(
+        !debug.contains("sk-secret"),
+        "Debug must not leak API key: {debug}"
+    );
+    assert!(
+        debug.contains("***"),
+        "Debug should show redacted marker: {debug}"
+    );
+
+    let bearer = AuthSource::BearerToken("bearer-secret-token".to_string());
+    let debug = format!("{bearer:?}");
+    assert!(
+        !debug.contains("bearer-secret"),
+        "Debug must not leak bearer token: {debug}"
+    );
+
+    let both = AuthSource::ApiKeyAndBearer {
+        api_key: "key".to_string(),
+        bearer_token: "tok".to_string(),
+    };
+    let debug = format!("{both:?}");
+    assert!(!debug.contains("key"), "Debug must not leak keys: {debug}");
+    assert!(
+        !debug.contains("tok"),
+        "Debug must not leak tokens: {debug}"
+    );
+}

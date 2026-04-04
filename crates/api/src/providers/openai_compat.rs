@@ -58,7 +58,7 @@ impl OpenAiCompatConfig {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct OpenAiCompatClient {
     http: reqwest::Client,
     api_key: String,
@@ -66,11 +66,20 @@ pub struct OpenAiCompatClient {
     retry: RetryPolicy,
 }
 
+impl std::fmt::Debug for OpenAiCompatClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpenAiCompatClient")
+            .field("base_url", &self.base_url)
+            .field("api_key", &"***")
+            .finish()
+    }
+}
+
 impl OpenAiCompatClient {
     #[must_use]
     pub fn new(api_key: impl Into<String>, config: OpenAiCompatConfig) -> Self {
         Self {
-            http: reqwest::Client::new(),
+            http: crate::default_http_client(),
             api_key: api_key.into(),
             base_url: read_base_url(config),
             retry: RetryPolicy::default(),
@@ -82,7 +91,7 @@ impl OpenAiCompatClient {
     #[must_use]
     pub fn new_custom(base_url: impl Into<String>, api_key: impl Into<String>) -> Self {
         Self {
-            http: reqwest::Client::new(),
+            http: crate::default_http_client(),
             api_key: api_key.into(),
             base_url: base_url.into(),
             retry: RetryPolicy::default(),

@@ -17,7 +17,7 @@ const ANTHROPIC_VERSION: &str = "2023-06-01";
 const REQUEST_ID_HEADER: &str = "request-id";
 const ALT_REQUEST_ID_HEADER: &str = "x-request-id";
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum AuthSource {
     None,
     ApiKey(String),
@@ -26,6 +26,17 @@ pub enum AuthSource {
         api_key: String,
         bearer_token: String,
     },
+}
+
+impl std::fmt::Debug for AuthSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::None => write!(f, "AuthSource::None"),
+            Self::ApiKey(_) => write!(f, "AuthSource::ApiKey(***)"),
+            Self::BearerToken(_) => write!(f, "AuthSource::BearerToken(***)"),
+            Self::ApiKeyAndBearer { .. } => write!(f, "AuthSource::ApiKeyAndBearer(***)"),
+        }
+    }
 }
 
 impl AuthSource {
@@ -101,7 +112,7 @@ impl From<OAuthTokenSet> for AuthSource {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct CodineerApiClient {
     http: reqwest::Client,
     auth: AuthSource,
@@ -109,11 +120,20 @@ pub struct CodineerApiClient {
     retry: RetryPolicy,
 }
 
+impl std::fmt::Debug for CodineerApiClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CodineerApiClient")
+            .field("base_url", &self.base_url)
+            .field("auth", &self.auth)
+            .finish()
+    }
+}
+
 impl CodineerApiClient {
     #[must_use]
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
-            http: reqwest::Client::new(),
+            http: crate::default_http_client(),
             auth: AuthSource::ApiKey(api_key.into()),
             base_url: DEFAULT_BASE_URL.to_string(),
             retry: RetryPolicy::default(),
@@ -123,7 +143,7 @@ impl CodineerApiClient {
     #[must_use]
     pub fn from_auth(auth: AuthSource) -> Self {
         Self {
-            http: reqwest::Client::new(),
+            http: crate::default_http_client(),
             auth,
             base_url: DEFAULT_BASE_URL.to_string(),
             retry: RetryPolicy::default(),
