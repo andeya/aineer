@@ -52,6 +52,17 @@ pub struct RuntimeFeatureConfig {
     pub(crate) model: Option<String>,
     pub(crate) permission_mode: Option<ResolvedPermissionMode>,
     pub(crate) sandbox: SandboxConfig,
+    pub(crate) providers: BTreeMap<String, CustomProviderConfig>,
+}
+
+/// Configuration for a custom OpenAI-compatible provider.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CustomProviderConfig {
+    pub base_url: String,
+    pub api_key: Option<String>,
+    pub api_key_env: Option<String>,
+    pub models: Vec<String>,
+    pub default_model: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -244,6 +255,11 @@ impl RuntimeConfig {
         &self.feature_config.sandbox
     }
 
+    #[must_use]
+    pub fn providers(&self) -> &BTreeMap<String, CustomProviderConfig> {
+        &self.feature_config.providers
+    }
+
     /// Return the `"env"` section from merged config as key-value pairs.
     /// Callers can use this to apply environment variables to the process.
     #[must_use]
@@ -306,6 +322,11 @@ impl RuntimeFeatureConfig {
     #[must_use]
     pub fn sandbox(&self) -> &SandboxConfig {
         &self.sandbox
+    }
+
+    #[must_use]
+    pub fn providers(&self) -> &BTreeMap<String, CustomProviderConfig> {
+        &self.providers
     }
 }
 

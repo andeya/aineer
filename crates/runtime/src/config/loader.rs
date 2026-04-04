@@ -100,6 +100,7 @@ impl ConfigLoader {
             model: parse_optional_model(&merged_value),
             permission_mode: parse_optional_permission_mode(&merged_value)?,
             sandbox: parse_optional_sandbox_config(&merged_value)?,
+            providers: parse_optional_providers_config(&merged_value)?,
         };
 
         for w in &config_warnings {
@@ -184,6 +185,40 @@ fn parse_optional_model(root: &JsonValue) -> Option<String> {
         .and_then(|object| object.get("model"))
         .and_then(JsonValue::as_str)
         .map(ToOwned::to_owned)
+}
+
+fn parse_optional_providers_config(
+    root: &JsonValue,
+) -> Result<BTreeMap<String, CustomProviderConfig>, ConfigError> {
+    let Some(object) = root.as_object() else {
+        return Ok(BTreeMap::new());
+    };
+    let Some(providers_value) = object.get("providers") else {
+        return Ok(BTreeMap::new());
+    };
+    let providers_obj = expect_object(providers_value, "merged settings.providers")?;
+    let mut result = BTreeMap::new();
+    for (name, value) in providers_obj {
+        let ctx = format!("merged settings.providers.{name}");
+        let provider_obj = expect_object(value, &ctx)?;
+        let base_url = expect_string(provider_obj, "baseUrl", &ctx)?.to_string();
+        let api_key = optional_string(provider_obj, "apiKey", &ctx)?.map(str::to_string);
+        let api_key_env = optional_string(provider_obj, "apiKeyEnv", &ctx)?.map(str::to_string);
+        let models = optional_string_array(provider_obj, "models", &ctx)?.unwrap_or_default();
+        let default_model =
+            optional_string(provider_obj, "defaultModel", &ctx)?.map(str::to_string);
+        result.insert(
+            name.clone(),
+            CustomProviderConfig {
+                base_url,
+                api_key,
+                api_key_env,
+                models,
+                default_model,
+            },
+        );
+    }
+    Ok(result)
 }
 
 fn parse_optional_hooks_config(root: &JsonValue) -> Result<RuntimeHookConfig, ConfigError> {
