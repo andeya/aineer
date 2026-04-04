@@ -213,6 +213,11 @@ fn prepare_command(
     {
         let mut prepared = Command::new("cmd");
         prepared.arg("/C").arg(command).current_dir(cwd);
+        if sandbox_status.filesystem_active {
+            prepared.env("USERPROFILE", cwd.join(".sandbox-home"));
+            prepared.env("TEMP", cwd.join(".sandbox-tmp"));
+            prepared.env("TMP", cwd.join(".sandbox-tmp"));
+        }
         apply_proxy_env(&mut prepared);
         prepared
     }
@@ -252,6 +257,11 @@ fn prepare_tokio_command(
     {
         let mut prepared = TokioCommand::new("cmd");
         prepared.arg("/C").arg(command).current_dir(cwd);
+        if sandbox_status.filesystem_active {
+            prepared.env("USERPROFILE", cwd.join(".sandbox-home"));
+            prepared.env("TEMP", cwd.join(".sandbox-tmp"));
+            prepared.env("TMP", cwd.join(".sandbox-tmp"));
+        }
         apply_tokio_proxy_env(&mut prepared);
         prepared
     }
