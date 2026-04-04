@@ -489,7 +489,7 @@ pub(crate) fn render_teleport_report(target: &str) -> Result<String, Box<dyn std
     };
 
     let content_output = Command::new("rg")
-        .args(["-n", "-S", "--color", "never", target, "."])
+        .args(["-n", "-S", "--color", "never", "-e", target, "."])
         .current_dir(&cwd)
         .output()?;
 
@@ -668,6 +668,18 @@ pub(crate) fn resolve_export_path(
     let cwd = env::current_dir()?;
     let file_name =
         requested_path.map_or_else(|| default_export_filename(session), ToOwned::to_owned);
+
+    if Path::new(&file_name).is_absolute()
+        || file_name.contains("..")
+        || file_name.contains('/')
+        || file_name.contains('\\')
+    {
+        return Err(format!(
+            "export path must be a simple filename (no directories or '..'): {file_name}"
+        )
+        .into());
+    }
+
     let final_name = if Path::new(&file_name)
         .extension()
         .is_some_and(|ext| ext.eq_ignore_ascii_case("txt"))

@@ -1363,4 +1363,27 @@ mod tests {
         ));
         assert!(!String::from_utf8(out).expect("utf8").contains("step 1"));
     }
+
+    #[test]
+    fn resolve_export_path_rejects_traversal() {
+        use crate::reports::resolve_export_path;
+        use runtime::Session;
+        let session = Session::default();
+
+        let err = resolve_export_path(Some("../../../etc/passwd"), &session);
+        assert!(err.is_err(), "should reject path traversal");
+
+        let err = resolve_export_path(Some("/tmp/evil.txt"), &session);
+        assert!(err.is_err(), "should reject absolute path");
+
+        let ok = resolve_export_path(Some("my-export"), &session);
+        assert!(ok.is_ok(), "simple name should succeed");
+        assert!(ok
+            .unwrap()
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .ends_with("my-export.txt"));
+    }
 }

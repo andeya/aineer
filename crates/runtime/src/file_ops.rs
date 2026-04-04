@@ -476,9 +476,13 @@ fn workspace_root() -> io::Result<PathBuf> {
 }
 
 fn enforce_workspace_boundary(resolved: &Path) -> io::Result<()> {
-    let root = dunce::canonicalize(workspace_root()?)
-        .unwrap_or_else(|_| workspace_root().unwrap_or_default());
-    if !resolved.starts_with(&root) {
+    let root = dunce::canonicalize(workspace_root()?).map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("cannot resolve workspace root: {e}"),
+        )
+    })?;
+    if root.as_os_str().is_empty() || !resolved.starts_with(&root) {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
             format!(
@@ -662,12 +666,21 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn rejects_absolute_path_outside_workspace() {
         allow_temp_workspace();
         let result = read_file("/etc/passwd", None, None);
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn rejects_absolute_path_outside_workspace_windows() {
+        allow_temp_workspace();
+        let result = read_file("C:\\Windows\\System32\\drivers\\etc\\hosts", None, None);
+        assert!(result.is_err());
     }
 
     #[test]

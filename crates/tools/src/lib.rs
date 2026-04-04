@@ -260,6 +260,12 @@ fn resolve_skill_path(skill: &str) -> Result<std::path::PathBuf, String> {
         return Err(String::from("skill must not be empty"));
     }
 
+    if requested.contains("..") || requested.contains('/') || requested.contains('\\') {
+        return Err(format!(
+            "invalid skill name '{requested}': must not contain path separators or '..'"
+        ));
+    }
+
     let mut candidates = Vec::new();
     if let Ok(cwd) = std::env::current_dir() {
         candidates.push(cwd.join(".codineer").join("skills"));
@@ -443,12 +449,33 @@ pub(crate) fn canonical_tool_token(value: &str) -> String {
     canonical
 }
 
+#[cfg(test)]
+pub(crate) const MAX_SLEEP_MS: u64 = 5 * 60 * 1000;
+#[cfg(not(test))]
+const MAX_SLEEP_MS: u64 = 5 * 60 * 1000;
+
+#[cfg(test)]
+pub(crate) fn clamp_sleep(requested_ms: u64) -> (u64, String) {
+    clamp_sleep_inner(requested_ms)
+}
+
+fn clamp_sleep_inner(requested_ms: u64) -> (u64, String) {
+    let clamped = requested_ms.min(MAX_SLEEP_MS);
+    let message = if clamped < requested_ms {
+        format!("Slept for {clamped}ms (clamped from {requested_ms}ms)")
+    } else {
+        format!("Slept for {clamped}ms")
+    };
+    (clamped, message)
+}
+
 #[allow(clippy::needless_pass_by_value)]
 fn execute_sleep(input: SleepInput) -> SleepOutput {
-    std::thread::sleep(Duration::from_millis(input.duration_ms));
+    let (duration_ms, message) = clamp_sleep_inner(input.duration_ms);
+    std::thread::sleep(Duration::from_millis(duration_ms));
     SleepOutput {
-        duration_ms: input.duration_ms,
-        message: format!("Slept for {}ms", input.duration_ms),
+        duration_ms,
+        message,
     }
 }
 

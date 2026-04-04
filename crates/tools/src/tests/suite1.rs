@@ -613,3 +613,25 @@ fn agent_fake_runner_can_persist_completion_and_failure() {
     std::env::remove_var("CODINEER_AGENT_STORE");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn skill_rejects_path_traversal() {
+    let err = execute_tool("Skill", &json!({"skill": "../../../etc/passwd", "args": "x"}))
+        .expect_err("should reject path traversal");
+    assert!(err.contains("must not contain"), "got: {err}");
+
+    let err = execute_tool("Skill", &json!({"skill": "foo/bar", "args": "x"}))
+        .expect_err("should reject slash");
+    assert!(err.contains("must not contain"), "got: {err}");
+}
+
+#[test]
+fn sleep_clamp_caps_excessive_duration() {
+    let (clamped, msg) = crate::clamp_sleep(999_999_999);
+    assert_eq!(clamped, crate::MAX_SLEEP_MS);
+    assert!(msg.contains("clamped"), "message should mention clamping: {msg}");
+
+    let (normal, msg) = crate::clamp_sleep(100);
+    assert_eq!(normal, 100);
+    assert!(!msg.contains("clamped"), "normal sleep should not mention clamping: {msg}");
+}
