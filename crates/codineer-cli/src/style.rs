@@ -1,15 +1,17 @@
 use std::io::IsTerminal;
+use std::sync::OnceLock;
 
 /// Unified color / TTY detection for the CLI.
 ///
-/// Respects `NO_COLOR` (https://no-color.org/), `CLICOLOR`, and TTY status.
+/// Respects `NO_COLOR` (https://no-color.org/), `CLICOLOR`, TTY status,
+/// and Windows virtual terminal processing support.
 /// All modules should use this instead of ad-hoc checks.
 pub(crate) fn color_for_stdout() -> bool {
-    std::io::stdout().is_terminal() && color_env_allows()
+    std::io::stdout().is_terminal() && color_env_allows() && ansi_supported()
 }
 
 pub(crate) fn color_for_stderr() -> bool {
-    std::io::stderr().is_terminal() && color_env_allows()
+    std::io::stderr().is_terminal() && color_env_allows() && ansi_supported()
 }
 
 fn color_env_allows() -> bool {
@@ -20,6 +22,43 @@ fn color_env_allows() -> bool {
         return val != "0";
     }
     true
+}
+
+fn ansi_supported() -> bool {
+    static SUPPORTED: OnceLock<bool> = OnceLock::new();
+    *SUPPORTED.get_or_init(|| {
+        #[cfg(windows)]
+        {
+            try_enable_ansi_on_windows()
+        }
+        #[cfg(not(windows))]
+        {
+            true
+        }
+    })
+}
+
+#[cfg(windows)]
+fn try_enable_ansi_on_windows() -> bool {
+    use std::os::windows::io::AsRawHandle;
+    type HANDLE = *mut std::ffi::c_void;
+    type DWORD = u32;
+    type BOOL = i32;
+    const ENABLE_VIRTUAL_TERMINAL_PROCESSING: DWORD = 0x0004;
+    const ENABLE_PROCESSED_OUTPUT: DWORD = 0x0001;
+    extern "system" {
+        fn GetConsoleMode(handle: HANDLE, mode: *mut DWORD) -> BOOL;
+        fn SetConsoleMode(handle: HANDLE, mode: DWORD) -> BOOL;
+    }
+    unsafe {
+        let handle = std::io::stdout().as_raw_handle();
+        let mut mode: DWORD = 0;
+        if GetConsoleMode(handle, &mut mode) == 0 {
+            return false;
+        }
+        let new_mode = mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING | ENABLE_PROCESSED_OUTPUT;
+        SetConsoleMode(handle, new_mode) != 0
+    }
 }
 
 /// Pre-computed ANSI escape codes.
