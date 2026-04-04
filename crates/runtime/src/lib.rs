@@ -2,6 +2,7 @@ mod bash;
 mod compact;
 mod config;
 mod conversation;
+pub mod credentials;
 mod file_ops;
 mod hooks;
 mod json;
@@ -23,7 +24,7 @@ pub use compact::{
     get_compact_continuation_message, should_compact, CompactionConfig, CompactionResult,
 };
 pub use config::{
-    ConfigEntry, ConfigError, ConfigLoader, ConfigSource, CustomProviderConfig,
+    ConfigEntry, ConfigError, ConfigLoader, ConfigSource, CredentialConfig, CustomProviderConfig,
     McpConfigCollection, McpManagedProxyServerConfig, McpOAuthConfig, McpRemoteServerConfig,
     McpSdkServerConfig, McpServerConfig, McpStdioServerConfig, McpTransport,
     McpWebSocketServerConfig, OAuthConfig, ResolvedPermissionMode, RuntimeConfig,
@@ -40,6 +41,7 @@ pub use file_ops::{
     TextFilePayload, WriteFileOutput,
 };
 pub use hooks::{HookCommandSource, HookEvent, HookRunResult, HookRunner};
+pub use json::JsonValue;
 pub use lsp::{
     FileDiagnostics, LspContextEnrichment, LspError, LspManager, LspServerConfig, SymbolLocation,
     WorkspaceDiagnostics,
@@ -69,6 +71,11 @@ pub use prompt::{
 };
 pub use remote::{
     inherited_upstream_proxy_env, RemoteSessionContext, UpstreamProxyBootstrap, UpstreamProxyState,
+};
+
+pub use credentials::{
+    ClaudeCodeResolver, CodineerOAuthResolver, CredentialChain, CredentialError,
+    CredentialResolver, CredentialStatus, EnvVarResolver, ResolvedCredential,
 };
 pub use session::{ContentBlock, ConversationMessage, MessageRole, Session, SessionError};
 pub use usage::{format_usd, pricing_for_model, TokenUsage, UsageCostEstimate, UsageTracker};
