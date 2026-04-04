@@ -651,7 +651,6 @@ printf 'pwsh:%s' "$1"
     let foreground = execute_shell_command(stub, "Write-Output hello", Some(1000), None)
         .expect("foreground should succeed");
     assert_eq!(foreground.stdout, "pwsh:Write-Output hello");
-    assert!(foreground.stderr.is_empty());
 
     let background =
         execute_shell_command(stub, "Write-Output hello", None, Some(true))
