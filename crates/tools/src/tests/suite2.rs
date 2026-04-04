@@ -601,12 +601,9 @@ fn structured_output_echoes_input_payload() {
 #[test]
 #[cfg(unix)]
 fn repl_executes_python_code() {
-    let python_available = std::process::Command::new("python3")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !python_available {
-        eprintln!("skipping: python3 not found");
+    use crate::powershell::command_exists;
+    if !command_exists("python3") && !command_exists("python") {
+        eprintln!("skipping: python3/python not found via command_exists");
         return;
     }
     let result = execute_tool(
