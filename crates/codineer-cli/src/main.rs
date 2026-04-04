@@ -123,26 +123,22 @@ fn main() {
 }
 
 fn render_cli_error(problem: &str) -> String {
+    use std::fmt::Write;
     let p = style::Palette::for_stderr();
     let mut out = String::from("\n");
     let mut lines = problem.lines();
 
     if let Some(summary) = lines.next() {
-        out.push_str(&format!(
-            "  {}✖ Error:{} {}{}{}\n",
-            p.bold_red, p.r, p.bold_white, summary, p.r,
-        ));
+        let _ = writeln!(out, "  {}✖ Error:{} {}{}{}", p.bold_red, p.r, p.bold_white, summary, p.r);
     }
-
     for line in lines {
         if line.is_empty() {
             out.push('\n');
         } else {
-            out.push_str(&format!("    {}\n", highlight_cli_hint(&p, line)));
+            let _ = writeln!(out, "    {}", highlight_cli_hint(&p, line));
         }
     }
-
-    out.push_str(&format!("\n  {}codineer --help{}\n", p.dim, p.r));
+    let _ = writeln!(out, "\n  {}codineer --help{}", p.dim, p.r);
     out
 }
 

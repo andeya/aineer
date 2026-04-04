@@ -375,7 +375,6 @@ pub(crate) fn push_output_block(
         }
         OutputContentBlock::ToolUse { id, name, input } => {
             let initial_input = if streaming_tool_input
-                && input.is_object()
                 && input.as_object().is_some_and(serde_json::Map::is_empty)
             {
                 String::new()

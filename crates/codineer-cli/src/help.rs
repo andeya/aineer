@@ -140,24 +140,22 @@ pub(crate) fn print_help() {
 }
 
 pub(crate) fn render_repl_help() -> String {
-    [
-        "Interactive REPL".to_string(),
-        "  Quick start          Ask a task in plain English or use one of the core commands below."
-            .to_string(),
-        "  Core commands        /help · /status · /model · /permissions · /compact".to_string(),
-        "  Exit                 /exit or /quit".to_string(),
-        "  Vim mode             /vim toggles modal editing".to_string(),
-        "  History              Up/Down recalls previous prompts".to_string(),
-        "  Completion           Tab cycles slash command matches".to_string(),
-        "  Cancel               Ctrl-C clears input (or exits on an empty prompt)".to_string(),
-        "  Multiline            Shift+Enter or Ctrl+J inserts a newline".to_string(),
-        String::new(),
-        render_slash_command_help(),
-    ]
-    .join(
-        "
-",
-    )
+    const HEADER: &[&str] = &[
+        "Interactive REPL",
+        "  Quick start          Ask a task in plain English or use one of the core commands below.",
+        "  Core commands        /help · /status · /model · /permissions · /compact",
+        "  Exit                 /exit or /quit",
+        "  Vim mode             /vim toggles modal editing",
+        "  History              Up/Down recalls previous prompts",
+        "  Completion           Tab cycles slash command matches",
+        "  Cancel               Ctrl-C clears input (or exits on an empty prompt)",
+        "  Multiline            Shift+Enter or Ctrl+J inserts a newline",
+    ];
+    let mut parts: Vec<&str> = HEADER.to_vec();
+    parts.push("");
+    let commands = render_slash_command_help();
+    parts.push(&commands);
+    parts.join("\n")
 }
 
 fn append_suggestions(lines: &mut Vec<String>, suggestions: Vec<String>) {

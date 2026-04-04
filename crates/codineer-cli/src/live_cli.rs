@@ -526,6 +526,14 @@ impl LiveCli {
         println!("{}", format_cost_report(cumulative));
     }
 
+    fn activate_session(&mut self, handle: SessionHandle) -> Result<usize, Box<dyn std::error::Error>> {
+        let session = Session::load_from_path(&handle.path)?;
+        let count = session.messages.len();
+        self.runtime = build_runtime(self.runtime_params(session, true))?;
+        self.session = handle;
+        Ok(count)
+    }
+
     fn resume_session(
         &mut self,
         session_path: Option<String>,
@@ -534,17 +542,12 @@ impl LiveCli {
             println!("Usage: /resume <session-path>");
             return Ok(false);
         };
-
-        let handle = resolve_session_reference(&session_ref)?;
-        let session = Session::load_from_path(&handle.path)?;
-        let message_count = session.messages.len();
-        self.runtime = build_runtime(self.runtime_params(session, true))?;
-        self.session = handle;
+        let count = self.activate_session(resolve_session_reference(&session_ref)?)?;
         println!(
             "{}",
             format_resume_report(
                 &self.session.path.display().to_string(),
-                message_count,
+                count,
                 self.runtime.usage().turns(),
             )
         );
@@ -611,16 +614,12 @@ impl LiveCli {
                     println!("Usage: /session switch <session-id>");
                     return Ok(false);
                 };
-                let handle = resolve_session_reference(target)?;
-                let session = Session::load_from_path(&handle.path)?;
-                let message_count = session.messages.len();
-                self.runtime = build_runtime(self.runtime_params(session, true))?;
-                self.session = handle;
+                let count = self.activate_session(resolve_session_reference(target)?)?;
                 println!(
                     "Session switched\n  Active session   {}\n  File             {}\n  Messages         {}",
                     self.session.id,
                     self.session.path.display(),
-                    message_count,
+                    count,
                 );
                 Ok(true)
             }
