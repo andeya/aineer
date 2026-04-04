@@ -163,6 +163,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             permission_mode,
         } => run_repl(model, allowed_tools, permission_mode)?,
         CliAction::Help => print_help(),
+        CliAction::SubcommandHelp {
+            name,
+            summary,
+            usage,
+        } => {
+            println!("codineer {name}\n  {summary}\n\nUsage:\n  {usage}");
+        }
     }
     Ok(())
 }
@@ -573,8 +580,10 @@ mod tests {
         assert_eq!(
             parse_args(&["agents".to_string(), "--help".to_string()])
                 .expect("agents help should parse"),
-            CliAction::Agents {
-                args: Some("--help".to_string())
+            CliAction::SubcommandHelp {
+                name: "agents",
+                summary: "List configured agents. Pass an optional query to filter.",
+                usage: "codineer agents [query]",
             }
         );
     }

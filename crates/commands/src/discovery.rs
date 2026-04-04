@@ -119,6 +119,7 @@ impl ShadowableItem for AgentSummary {
 pub(crate) struct SkillSummary {
     name: String,
     description: Option<String>,
+    root_path: PathBuf,
     source: DefinitionSource,
     shadowed_by: Option<DefinitionSource>,
 }
@@ -141,6 +142,7 @@ impl ShadowableItem for SkillSummary {
         if let Some(description) = &self.description {
             parts.push(description.clone());
         }
+        parts.push(format!("({})", self.root_path.display()));
         parts.join(" · ")
     }
 }
@@ -266,6 +268,7 @@ pub(crate) fn load_skills_from_roots(roots: &[SkillRoot]) -> std::io::Result<Vec
             root_skills.push(SkillSummary {
                 name: name.unwrap_or_else(|| entry.file_name().to_string_lossy().to_string()),
                 description,
+                root_path: root.path.clone(),
                 source: root.source,
                 shadowed_by: None,
             });

@@ -49,6 +49,11 @@ pub(crate) enum CliAction {
         permission_mode: PermissionMode,
     },
     Help,
+    SubcommandHelp {
+        name: &'static str,
+        summary: &'static str,
+        usage: &'static str,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -203,17 +208,49 @@ pub(crate) fn parse_args(args: &[String]) -> Result<CliAction, String> {
         return parse_resume_args(&rest[1..]);
     }
 
+    let has_help_flag = |args: &[String]| args.iter().any(|a| a == "--help" || a == "-h");
+
     match rest[0].as_str() {
         "help" => Ok(CliAction::Help),
+        "agents" if has_help_flag(&rest[1..]) => Ok(CliAction::SubcommandHelp {
+            name: "agents",
+            summary: "List configured agents. Pass an optional query to filter.",
+            usage: "codineer agents [query]",
+        }),
         "agents" => Ok(CliAction::Agents {
             args: join_optional_args(&rest[1..]),
+        }),
+        "skills" if has_help_flag(&rest[1..]) => Ok(CliAction::SubcommandHelp {
+            name: "skills",
+            summary: "List available skills. Pass an optional query to filter.",
+            usage: "codineer skills [query]",
         }),
         "skills" => Ok(CliAction::Skills {
             args: join_optional_args(&rest[1..]),
         }),
+        "system-prompt" if has_help_flag(&rest[1..]) => Ok(CliAction::SubcommandHelp {
+            name: "system-prompt",
+            summary: "Print the system prompt that would be sent to the model.",
+            usage: "codineer system-prompt [--cwd PATH] [--date YYYY-MM-DD]",
+        }),
         "system-prompt" => parse_system_prompt_args(&rest[1..]),
+        "login" if has_help_flag(&rest[1..]) => Ok(CliAction::SubcommandHelp {
+            name: "login",
+            summary: "Start the OAuth login flow and save credentials.",
+            usage: "codineer login",
+        }),
         "login" => Ok(CliAction::Login),
+        "logout" if has_help_flag(&rest[1..]) => Ok(CliAction::SubcommandHelp {
+            name: "logout",
+            summary: "Clear saved OAuth credentials.",
+            usage: "codineer logout",
+        }),
         "logout" => Ok(CliAction::Logout),
+        "init" if has_help_flag(&rest[1..]) => Ok(CliAction::SubcommandHelp {
+            name: "init",
+            summary: "Scaffold a CODINEER.md project context file in the current directory.",
+            usage: "codineer init",
+        }),
         "init" => Ok(CliAction::Init),
         "prompt" => {
             let prompt = rest[1..].join(" ");
