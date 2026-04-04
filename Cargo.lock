@@ -130,6 +130,7 @@ dependencies = [
  "codineer-tools",
  "crossterm",
  "pulldown-cmark",
+ "reqwest",
  "rustyline",
  "serde_json",
  "syntect",
