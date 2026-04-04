@@ -1,0 +1,139 @@
+{
+  "$schema": "SettingsSchema",
+
+  "model": "claude-sonnet-4-20250514",
+
+  "permissionMode": "default",
+
+  "env": {
+    "ANTHROPIC_API_KEY": "sk-ant-xxx",
+    "ANTHROPIC_AUTH_TOKEN": "",
+    "ANTHROPIC_BASE_URL": "https://api.anthropic.com",
+    "OPENAI_API_KEY": "sk-xxx",
+    "XAI_API_KEY": "xai-xxx",
+    "GROQ_API_KEY": "gsk_xxx",
+    "OPENROUTER_API_KEY": "sk-or-xxx",
+    "OLLAMA_HOST": "http://localhost:11434"
+  },
+
+  "providers": {
+    "ollama": {
+      "baseUrl": "http://localhost:11434/v1",
+      "models": ["qwen3-coder", "llama3.3", "deepseek-coder-v2"],
+      "defaultModel": "qwen3-coder"
+    },
+    "lmstudio": {
+      "baseUrl": "http://localhost:1234/v1",
+      "models": ["qwen2.5-coder-7b"],
+      "defaultModel": "qwen2.5-coder-7b"
+    },
+    "openrouter": {
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "apiKeyEnv": "OPENROUTER_API_KEY",
+      "models": ["meta-llama/llama-3.3-70b-instruct:free"],
+      "defaultModel": "meta-llama/llama-3.3-70b-instruct:free"
+    },
+    "groq": {
+      "baseUrl": "https://api.groq.com/openai/v1",
+      "apiKeyEnv": "GROQ_API_KEY",
+      "models": ["llama-3.3-70b-versatile", "mixtral-8x7b-32768"],
+      "defaultModel": "llama-3.3-70b-versatile"
+    },
+    "vllm": {
+      "baseUrl": "http://localhost:8000/v1",
+      "models": ["Qwen/Qwen2.5-Coder-32B-Instruct"],
+      "defaultModel": "Qwen/Qwen2.5-Coder-32B-Instruct"
+    },
+    "my-company-proxy": {
+      "baseUrl": "https://ai-proxy.internal.company.com/v1",
+      "apiKey": "company-secret-key",
+      "apiKeyEnv": "COMPANY_AI_KEY",
+      "models": ["gpt-4o", "claude-sonnet-4-20250514"],
+      "defaultModel": "gpt-4o"
+    }
+  },
+
+  "oauth": {
+    "clientId": "df03b862-78fe-4a2b-bb24-426ac30897b7",
+    "authorizeUrl": "https://platform.codineer.dev/oauth/authorize",
+    "tokenUrl": "https://platform.codineer.dev/v1/oauth/token",
+    "callbackPort": 4545,
+    "manualRedirectUrl": "https://platform.codineer.dev/oauth/callback",
+    "scopes": ["user:profile", "user:inference"]
+  },
+
+  "hooks": {
+    "PreToolUse": ["my-pre-hook-plugin"],
+    "PostToolUse": ["my-post-hook-plugin"]
+  },
+
+  "plugins": {
+    "enabled": {
+      "my-plugin-a": true,
+      "my-plugin-b": false
+    },
+    "externalDirectories": ["/path/to/custom/plugins"],
+    "installRoot": "/path/to/plugin/install",
+    "registryPath": "/path/to/plugin/registry",
+    "bundledRoot": "/path/to/bundled/plugins"
+  },
+
+  "enabledPlugins": {
+    "my-plugin-c": true
+  },
+
+  "mcpServers": {
+    "my-stdio-server": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"],
+      "env": {
+        "NODE_ENV": "production"
+      }
+    },
+    "my-sse-server": {
+      "type": "sse",
+      "url": "https://mcp.example.com/sse",
+      "headers": {
+        "Authorization": "Bearer token-xxx"
+      },
+      "headersHelper": "get-mcp-headers",
+      "oauth": {
+        "clientId": "mcp-client-id",
+        "callbackPort": 5555,
+        "authServerMetadataUrl": "https://auth.example.com/.well-known/oauth-authorization-server",
+        "xaa": false
+      }
+    },
+    "my-http-server": {
+      "type": "http",
+      "url": "https://mcp.example.com/api",
+      "headers": {
+        "X-Custom-Header": "custom-value"
+      }
+    },
+    "my-ws-server": {
+      "type": "ws",
+      "url": "wss://mcp.example.com/ws",
+      "headers": {
+        "Authorization": "Bearer ws-token"
+      }
+    },
+    "my-sdk-server": {
+      "type": "sdk",
+      "name": "built-in-server"
+    }
+  },
+
+  "sandbox": {
+    "enabled": false,
+    "namespaceRestrictions": true,
+    "networkIsolation": false,
+    "filesystemMode": "workspace-only",
+    "allowedMounts": ["/tmp", "/var/data"]
+  },
+
+  "permissions": {
+    "defaultMode": "default"
+  }
+}

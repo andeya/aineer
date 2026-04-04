@@ -14,7 +14,7 @@ const DEFAULT_OAUTH_CALLBACK_PORT: u16 = 4545;
 
 pub fn default_oauth_config() -> OAuthConfig {
     OAuthConfig {
-        client_id: String::from("9d1c250a-e61b-44d9-88ed-5944d1962f5e"),
+        client_id: String::from("df03b862-78fe-4a2b-bb24-426ac30897b7"),
         authorize_url: String::from("https://platform.codineer.dev/oauth/authorize"),
         token_url: String::from("https://platform.codineer.dev/v1/oauth/token"),
         callback_port: None,
