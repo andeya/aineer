@@ -1,6 +1,7 @@
 [package]
 name = "codineer-tools"
 description = "AI-callable tool definitions and execution for Codineer"
+readme = "README.md"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

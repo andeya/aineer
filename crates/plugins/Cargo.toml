@@ -1,6 +1,7 @@
 [package]
 name = "codineer-plugins"
 description = "Plugin system and hooks for Codineer"
+readme = "README.md"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

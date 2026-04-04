@@ -1,6 +1,7 @@
 [package]
 name = "codineer-commands"
 description = "Slash commands and agent/skill discovery for Codineer"
+readme = "README.md"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
