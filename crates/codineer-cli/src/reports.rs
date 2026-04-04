@@ -44,7 +44,8 @@ Aliases
   haiku            claude-haiku-4-5-20251213 (Anthropic)
   grok             grok-3               (xAI)
   grok-mini        grok-3-mini          (xAI)
-  gpt-4o           gpt-4o               (OpenAI)
+  gpt              gpt-4o               (OpenAI)
+  mini             gpt-4o-mini          (OpenAI)
   o3               o3                   (OpenAI)
 
 Next

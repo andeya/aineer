@@ -90,6 +90,10 @@ export ANTHROPIC_API_KEY="sk-ant-..."   # Claude (recommended)
 export XAI_API_KEY="xai-..."            # Grok
 export OPENAI_API_KEY="sk-..."          # GPT / OpenAI-compatible
 
+# Or via settings.json (persistent, no export needed)
+# ~/.codineer/settings.json:
+#   { "env": { "ANTHROPIC_API_KEY": "sk-ant-..." } }
+
 # OAuth login (stored in keyring)
 codineer login
 ```
@@ -228,7 +232,8 @@ Codineer supports short aliases for popular models:
 | `haiku`     | `claude-haiku-4-5-20251213`   | Anthropic |
 | `grok`      | `grok-3`                      | xAI       |
 | `grok-mini` | `grok-3-mini`                 | xAI       |
-| `gpt-4o`    | `gpt-4o`                      | OpenAI    |
+| `gpt`       | `gpt-4o`                      | OpenAI    |
+| `mini`      | `gpt-4o-mini`                 | OpenAI    |
 | `o3`        | `o3`                          | OpenAI    |
 
 ```bash
@@ -346,7 +351,7 @@ Inspect the merged configuration at any time:
 | `CODINEER_PERMISSION_MODE`  | Default permission mode                    |
 | `NO_COLOR`                  | Disable ANSI color output                  |
 
-> **Note:** API keys are read from environment variables or OAuth credentials (`codineer login` / `codineer logout`). They cannot be set in configuration files.
+> **Note:** API keys can be configured via environment variables, the `"env"` section of `settings.json`, or OAuth (`codineer login`). Explicit environment variables always take precedence over config file values.
 
 ---
 
@@ -368,7 +373,7 @@ Codineer supports the [Model Context Protocol](https://modelcontextprotocol.io) 
 }
 ```
 
-Supported transport types: `stdio` (default), `sse`, `http`, `ws`.
+Supported transport types: `stdio` (default), `sse`, `http`, `ws` (or `websocket`).
 
 ### Plugins
 

@@ -243,6 +243,21 @@ impl RuntimeConfig {
     pub fn sandbox(&self) -> &SandboxConfig {
         &self.feature_config.sandbox
     }
+
+    /// Return the `"env"` section from merged config as key-value pairs.
+    /// Callers can use this to apply environment variables to the process.
+    #[must_use]
+    pub fn env_section(&self) -> Vec<(String, String)> {
+        self.merged
+            .get("env")
+            .and_then(JsonValue::as_object)
+            .map(|obj| {
+                obj.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
 }
 
 impl RuntimeFeatureConfig {

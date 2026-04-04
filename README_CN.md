@@ -90,6 +90,10 @@ export ANTHROPIC_API_KEY="sk-ant-..."   # Claude（推荐）
 export XAI_API_KEY="xai-..."            # Grok
 export OPENAI_API_KEY="sk-..."          # GPT / OpenAI 兼容接口
 
+# 或通过配置文件（持久化，无需每次 export）
+# ~/.codineer/settings.json:
+#   { "env": { "ANTHROPIC_API_KEY": "sk-ant-..." } }
+
 # OAuth 登录（凭证存储在系统密钥链）
 codineer login
 ```
@@ -228,7 +232,8 @@ Codineer 为常用模型提供短别名：
 | `haiku` | `claude-haiku-4-5-20251213` | Anthropic |
 | `grok` | `grok-3` | xAI |
 | `grok-mini` | `grok-3-mini` | xAI |
-| `gpt-4o` | `gpt-4o` | OpenAI |
+| `gpt` | `gpt-4o` | OpenAI |
+| `mini` | `gpt-4o-mini` | OpenAI |
 | `o3` | `o3` | OpenAI |
 
 ```bash
@@ -343,7 +348,7 @@ Codineer 会从工作区根目录向上逐级查找匹配的指令文件：
 | `CODINEER_PERMISSION_MODE` | 默认权限模式 |
 | `NO_COLOR` | 禁用 ANSI 颜色输出 |
 
-> **注意：** API 密钥通过环境变量或 OAuth 凭证（`codineer login` / `codineer logout`）配置，不支持在配置文件中设置。
+> **注意：** API 密钥可通过环境变量、`settings.json` 的 `"env"` 字段或 OAuth（`codineer login`）配置。显式环境变量始终优先于配置文件中的值。
 
 ---
 
@@ -365,7 +370,7 @@ Codineer 支持 [Model Context Protocol](https://modelcontextprotocol.io) 来接
 }
 ```
 
-支持的传输类型：`stdio`（默认）、`sse`、`http`、`ws`。
+支持的传输类型：`stdio`（默认）、`sse`、`http`、`ws`（或 `websocket`）。
 
 ### 插件
 

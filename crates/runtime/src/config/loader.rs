@@ -346,7 +346,7 @@ fn parse_mcp_server_config(
         "http" => Ok(McpServerConfig::Http(parse_mcp_remote_server_config(
             object, context,
         )?)),
-        "ws" => Ok(McpServerConfig::Ws(McpWebSocketServerConfig {
+        "ws" | "websocket" => Ok(McpServerConfig::Ws(McpWebSocketServerConfig {
             url: expect_string(object, "url", context)?.to_string(),
             headers: optional_string_map(object, "headers", context)?.unwrap_or_default(),
             headers_helper: optional_string(object, "headersHelper", context)?.map(str::to_string),
