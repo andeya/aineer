@@ -234,14 +234,17 @@ pub(crate) fn print_help() {
 pub(crate) fn render_repl_help() -> String {
     const HEADER: &[&str] = &[
         "Interactive REPL",
-        "  Quick start          Welcome panel shows context and `codineer --resume …`; prompt is `>`. Ask in plain English or use commands below.",
+        "  Quick start          Welcome panel shows context and `codineer --resume …`; prompt is `❯`. Ask in plain English or use commands below.",
         "  Core commands        /help · /status · /model · /permissions · /compact",
-        "  Exit                 /exit or /quit",
+        "  Exit                 /exit, /quit, or Ctrl-D",
+        "  Bash mode            !<command> sends a shell command request to the AI",
         "  Vim mode             /vim toggles modal editing",
         "  History              Up/Down recalls previous prompts",
         "  Completion           Tab cycles slash command matches",
-        "  Cancel               Ctrl-C clears input (or exits on an empty prompt)",
-        "  Multiline            Shift+Enter or Ctrl+J inserts a newline",
+        "  Cancel               Ctrl-C clears input; press twice on empty prompt to exit",
+        "  Multiline            Shift+Enter, Ctrl+J, or \\ + Enter inserts a newline",
+        "  Clear input          Double-tap Esc clears the current input",
+        "  Shortcuts            Type ? to see the shortcut reference (inline preview)",
     ];
     let mut parts: Vec<&str> = HEADER.to_vec();
     parts.push("");

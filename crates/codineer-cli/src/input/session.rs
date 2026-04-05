@@ -69,10 +69,17 @@ pub(super) struct EditSession {
     pub(super) visual_anchor: Option<usize>,
     pub(super) command_buffer: String,
     pub(super) command_cursor: usize,
+    /// When true, render a "Press Ctrl-C again to exit" hint below the prompt.
+    /// Cleared on the next re-render that doesn't set it.
+    pub(super) show_interrupt_hint: bool,
     pub(super) history_index: Option<usize>,
     pub(super) history_backup: Option<String>,
     rendered_cursor_row: usize,
     rendered_lines: usize,
+    /// Visible character width of each prefix line rendered above the prompt
+    /// (banner + help text + separator). Used to compute reflow-adjusted line
+    /// counts when the terminal is resized.
+    pub(super) prefix_line_widths: Vec<usize>,
 }
 
 impl EditSession {
@@ -91,9 +98,25 @@ impl EditSession {
             command_cursor: 0,
             history_index: None,
             history_backup: None,
+            show_interrupt_hint: false,
             rendered_cursor_row: 0,
             rendered_lines: 1,
+            prefix_line_widths: Vec::new(),
         }
+    }
+
+    pub(super) fn prefix_lines(&self) -> usize {
+        self.prefix_line_widths.len()
+    }
+
+    /// How many terminal rows the prefix occupies at `new_cols` width,
+    /// accounting for line wrapping (reflow) after a resize.
+    pub(super) fn prefix_reflow_lines(&self, new_cols: usize) -> usize {
+        let c = new_cols.max(1);
+        self.prefix_line_widths
+            .iter()
+            .map(|&w| if w == 0 { 1 } else { w.div_ceil(c) })
+            .sum()
     }
 
     pub(super) fn active_text(&self) -> &str {
@@ -181,36 +204,50 @@ impl EditSession {
         }
     }
 
-    pub(super) fn clear_render(&self, out: &mut impl Write) -> std::io::Result<()> {
-        if self.rendered_cursor_row > 0 {
-            queue!(out, MoveUp(to_u16(self.rendered_cursor_row)?))?;
+    /// Erase the currently rendered area.
+    ///
+    /// `extra_lines_above`: number of lines above the prompt to also erase.
+    /// Pass `0` for prompt-only, `prefix_lines` for normal prefix clear, or
+    /// a larger value to account for terminal reflow after resize.
+    pub(super) fn clear_render(
+        &self,
+        out: &mut impl Write,
+        extra_lines_above: usize,
+    ) -> std::io::Result<()> {
+        let up = self.rendered_cursor_row + extra_lines_above;
+        if up > 0 {
+            queue!(out, MoveUp(to_u16(up)?))?;
         }
         queue!(out, MoveToColumn(0), Clear(ClearType::FromCursorDown))?;
         out.flush()
     }
 
-    pub(super) fn render_with_suggestions(
+    /// Render prompt + buffer + suggestions/shortcuts panel (without clearing
+    /// first).
+    pub(super) fn render_content(
         &mut self,
         out: &mut impl Write,
         base_prompt: &str,
         vim_enabled: bool,
         suggestions: Option<&SuggestionState>,
     ) -> std::io::Result<()> {
-        self.clear_render(out)?;
-
         let prompt = self.prompt(base_prompt, vim_enabled);
         let buffer = self.visible_buffer();
         write!(out, "{prompt}{buffer}")?;
 
         let (cursor_row, cursor_col, total_lines) = self.cursor_layout(prompt.as_ref());
 
-        let suggestion_lines = if let Some(state) = suggestions.filter(|s| !s.items.is_empty()) {
+        let panel_lines = if self.text == "?" {
+            self.draw_shortcuts_panel(out)?
+        } else if self.show_interrupt_hint {
+            self.draw_interrupt_hint(out)?
+        } else if let Some(state) = suggestions.filter(|s| !s.items.is_empty()) {
             self.draw_suggestions(out, state)?
         } else {
             0
         };
 
-        let rows_below = total_lines.saturating_sub(cursor_row + 1) + suggestion_lines;
+        let rows_below = total_lines.saturating_sub(cursor_row + 1) + panel_lines;
         if rows_below > 0 {
             queue!(out, MoveUp(to_u16(rows_below)?))?;
         }
@@ -220,6 +257,18 @@ impl EditSession {
         self.rendered_cursor_row = cursor_row;
         self.rendered_lines = total_lines;
         Ok(())
+    }
+
+    /// Clear prompt area only, then re-render prompt + buffer + suggestions.
+    pub(super) fn render_with_suggestions(
+        &mut self,
+        out: &mut impl Write,
+        base_prompt: &str,
+        vim_enabled: bool,
+        suggestions: Option<&SuggestionState>,
+    ) -> std::io::Result<()> {
+        self.clear_render(out, 0)?;
+        self.render_content(out, base_prompt, vim_enabled, suggestions)
     }
 
     fn draw_suggestions(
@@ -283,13 +332,55 @@ impl EditSession {
         Ok(lines_drawn)
     }
 
+    /// Draw the keyboard shortcuts panel below the prompt (shown when the
+    /// user types `?` as the sole character).  Returns the number of terminal
+    /// lines drawn so the cursor can be repositioned correctly.
+    fn draw_shortcuts_panel(&self, out: &mut impl Write) -> std::io::Result<usize> {
+        let (cols, _) = terminal::size().unwrap_or((80, 24));
+        let cols = cols as usize;
+        let p = crate::style::Palette::for_stdout();
+
+        write!(out, "\r\n{}{}{}", p.dim, "─".repeat(cols), p.r)?;
+        let mut lines: usize = 1;
+
+        const SHORTCUTS: &[(&str, &str)] = &[
+            ("! for bash mode", "double tap esc to clear input"),
+            ("/ for commands", "shift + enter for newline"),
+            ("@ for file paths", "ctrl + j for newline"),
+            ("\\ + enter for newline", "ctrl + c to cancel input"),
+            ("/vim to toggle vim mode", "ctrl + d to exit"),
+            ("? for shortcuts", "/help for full command list"),
+        ];
+
+        let left_col_width = (cols / 2).max(20);
+        for &(left, right) in SHORTCUTS {
+            write!(
+                out,
+                "\r\n{}  {:<width$}{right}{}",
+                p.dim,
+                left,
+                p.r,
+                width = left_col_width - 2,
+            )?;
+            lines += 1;
+        }
+
+        Ok(lines)
+    }
+
+    fn draw_interrupt_hint(&self, out: &mut impl Write) -> std::io::Result<usize> {
+        let p = crate::style::Palette::for_stdout();
+        write!(out, "\r\n{}Press Ctrl-C again to exit{}", p.dim, p.r,)?;
+        Ok(1)
+    }
+
     pub(super) fn finalize_render(
         &self,
         out: &mut impl Write,
         base_prompt: &str,
         vim_enabled: bool,
     ) -> std::io::Result<()> {
-        self.clear_render(out)?;
+        self.clear_render(out, self.prefix_lines())?;
         let prompt = self.prompt(base_prompt, vim_enabled);
         let buffer = self.visible_buffer();
         write!(out, "{prompt}{buffer}")?;
@@ -456,4 +547,145 @@ pub(super) enum KeyAction {
     Cancel,
     Exit,
     ToggleVim,
+    /// First Ctrl+C on an empty prompt — show "Press Ctrl-C again to exit".
+    InterruptHint,
+}
+
+// ─── Unit tests ──────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn session_with_prefix(widths: &[usize]) -> EditSession {
+        let mut s = EditSession::new(false);
+        s.prefix_line_widths = widths.to_vec();
+        s
+    }
+
+    // ── prefix_lines ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn prefix_lines_empty() {
+        let s = EditSession::new(false);
+        assert_eq!(s.prefix_lines(), 0);
+    }
+
+    #[test]
+    fn prefix_lines_counts_elements() {
+        let s = session_with_prefix(&[80, 80, 80]);
+        assert_eq!(s.prefix_lines(), 3);
+    }
+
+    // ── prefix_reflow_lines ──────────────────────────────────────────────────
+
+    #[test]
+    fn reflow_empty_prefix_is_zero() {
+        let s = EditSession::new(false);
+        assert_eq!(s.prefix_reflow_lines(80), 0);
+    }
+
+    #[test]
+    fn reflow_lines_fit_without_wrap() {
+        // Three lines each 80 cols wide; terminal also 80 cols → no wrapping.
+        let s = session_with_prefix(&[80, 80, 80]);
+        assert_eq!(s.prefix_reflow_lines(80), 3);
+    }
+
+    #[test]
+    fn reflow_single_wide_line_wraps_to_two() {
+        // A 160-char separator at 80 cols → ceil(160/80) = 2 rows.
+        let s = session_with_prefix(&[160]);
+        assert_eq!(s.prefix_reflow_lines(80), 2);
+    }
+
+    #[test]
+    fn reflow_line_exactly_fits_counts_as_one() {
+        let s = session_with_prefix(&[80]);
+        assert_eq!(s.prefix_reflow_lines(80), 1);
+    }
+
+    #[test]
+    fn reflow_zero_width_line_counts_as_one() {
+        // An empty (zero-width) line still occupies one terminal row.
+        let s = session_with_prefix(&[0]);
+        assert_eq!(s.prefix_reflow_lines(80), 1);
+    }
+
+    #[test]
+    fn reflow_mixed_widths() {
+        // widths=[80, 160, 0] at 80 cols → 1 + 2 + 1 = 4 rows.
+        let s = session_with_prefix(&[80, 160, 0]);
+        assert_eq!(s.prefix_reflow_lines(80), 4);
+    }
+
+    #[test]
+    fn reflow_narrow_terminal_increases_rows() {
+        // A 120-char line at 40 cols → ceil(120/40) = 3 rows.
+        let s = session_with_prefix(&[120]);
+        assert_eq!(s.prefix_reflow_lines(40), 3);
+    }
+
+    #[test]
+    fn reflow_wide_terminal_decreases_rows() {
+        // A line that was 160 chars at old width; new terminal is 200 cols → 1 row.
+        let s = session_with_prefix(&[160]);
+        assert_eq!(s.prefix_reflow_lines(200), 1);
+    }
+
+    #[test]
+    fn reflow_cols_zero_treated_as_one() {
+        // Guard against division by zero — cols=0 is clamped to 1.
+        let s = session_with_prefix(&[80]);
+        // 80 / 1 = 80 rows
+        assert_eq!(s.prefix_reflow_lines(0), 80);
+    }
+
+    // ── shortcuts panel ─────────────────────────────────────────────────────
+
+    #[test]
+    fn shortcuts_panel_draws_expected_lines() {
+        let s = EditSession::new(false);
+        let mut buf = Vec::new();
+        let lines = s.draw_shortcuts_panel(&mut buf).unwrap();
+        // 1 separator + 6 shortcut rows
+        assert_eq!(lines, 7);
+        let output = String::from_utf8(buf).unwrap();
+        assert!(
+            output.contains("! for bash mode"),
+            "panel should contain bash mode shortcut"
+        );
+        assert!(
+            output.contains("? for shortcuts"),
+            "panel should contain ? shortcut"
+        );
+    }
+
+    // ── KeyAction variants ──────────────────────────────────────────────────
+
+    #[test]
+    fn key_action_interrupt_hint_is_distinct() {
+        let hint = KeyAction::InterruptHint;
+        assert_ne!(hint, KeyAction::Exit);
+        assert_ne!(hint, KeyAction::Cancel);
+        assert_ne!(hint, KeyAction::Continue);
+    }
+
+    // ── submit_or_toggle ────────────────────────────────────────────────────
+
+    #[test]
+    fn submit_or_toggle_detects_vim() {
+        let mut s = EditSession::new(false);
+        s.text = "/vim".to_string();
+        s.cursor = s.text.len();
+        assert_eq!(s.submit_or_toggle(), KeyAction::ToggleVim);
+    }
+
+    #[test]
+    fn submit_or_toggle_submits_normal_text() {
+        let mut s = EditSession::new(false);
+        s.text = "hello".to_string();
+        s.cursor = s.text.len();
+        assert_eq!(s.submit_or_toggle(), KeyAction::Submit("hello".to_string()));
+    }
 }

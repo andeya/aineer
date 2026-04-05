@@ -1,4 +1,5 @@
 use std::io::{self, IsTerminal, Write};
+use std::time::Instant;
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crossterm::terminal;
@@ -6,6 +7,10 @@ use crossterm::terminal;
 use super::session::{EditSession, EditorMode, KeyAction, ReadOutcome, YankBuffer, YankShape};
 use super::suggestions::{self, CommandEntry, SuggestionState, SuggestionTrigger};
 use super::text::{current_line_delete_range, is_vim_toggle, line_end, next_boundary};
+
+/// Maximum interval (ms) between two Ctrl+C or Esc presses to be considered a
+/// "double-tap".
+const DOUBLE_TAP_MS: u128 = 1500;
 
 pub struct LineEditor {
     prompt: String,
@@ -15,6 +20,17 @@ pub struct LineEditor {
     pub(super) vim_enabled: bool,
     suggestion_state: Option<SuggestionState>,
     dismissed_for_input: Option<String>,
+    show_separator: bool,
+    /// Optional closure that generates prefix text (banner + help) above the
+    /// separator. Called on each render so the output adapts to terminal width.
+    /// Consumed after the first `read_line` call.
+    prefix_fn: Option<Box<dyn Fn() -> String>>,
+    /// Timestamp of the last Ctrl+C on an empty prompt — used for "press
+    /// Ctrl-C again to exit" (Claude Code style).
+    last_ctrlc: Option<Instant>,
+    /// Timestamp of the last Esc press in Plain mode — used for double-tap Esc
+    /// to clear input.
+    last_esc: Option<Instant>,
 }
 
 impl LineEditor {
@@ -28,7 +44,28 @@ impl LineEditor {
             vim_enabled: false,
             suggestion_state: None,
             dismissed_for_input: None,
+            show_separator: false,
+            prefix_fn: None,
+            last_ctrlc: None,
+            last_esc: None,
         }
+    }
+
+    /// Enable a full-width separator line above the prompt that
+    /// auto-adjusts on terminal resize.
+    #[must_use]
+    pub fn with_separator(mut self) -> Self {
+        self.show_separator = true;
+        self
+    }
+
+    /// Set a prefix renderer (e.g. banner + help text) shown above the
+    /// separator on the first prompt. Re-generated on resize so the layout
+    /// adapts to the current terminal width.
+    #[must_use]
+    pub fn with_prefix(mut self, f: impl Fn() -> String + 'static) -> Self {
+        self.prefix_fn = Some(Box::new(f));
+        self
     }
 
     pub fn push_history(&mut self, entry: impl Into<String>) {
@@ -48,10 +85,16 @@ impl LineEditor {
         let _raw_mode = RawModeGuard::new()?;
         let mut stdout = io::stdout();
         let mut session = EditSession::new(self.vim_enabled);
-        session.render_with_suggestions(&mut stdout, &self.prompt, self.vim_enabled, None)?;
+        self.render_prefix(&mut session, &mut stdout, None)?;
 
         loop {
-            let Event::Key(key) = event::read()? else {
+            let event = event::read()?;
+            if let Event::Resize(w, _) = event {
+                crate::terminal_width::update_terminal_cols(w as usize);
+                self.render_prefix(&mut session, &mut stdout, self.suggestion_state.as_ref())?;
+                continue;
+            }
+            let Event::Key(key) = event else {
                 continue;
             };
             if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
@@ -70,31 +113,27 @@ impl LineEditor {
                 }
                 KeyAction::Submit(line) => {
                     session.finalize_render(&mut stdout, &self.prompt, self.vim_enabled)?;
+                    self.prefix_fn = None;
                     return Ok(ReadOutcome::Submit(line));
                 }
                 KeyAction::Cancel => {
-                    session.clear_render(&mut stdout)?;
-                    writeln!(stdout)?;
+                    session.clear_render(&mut stdout, session.prefix_lines())?;
+                    // In raw mode `\n` only moves the cursor down without
+                    // resetting the column; `\r\n` is required on all platforms
+                    // (including Windows) to land at column 0.
+                    write!(stdout, "\r\n")?;
+                    stdout.flush()?;
+                    self.prefix_fn = None;
                     return Ok(ReadOutcome::Cancel);
                 }
                 KeyAction::Exit => {
-                    session.clear_render(&mut stdout)?;
-                    writeln!(stdout)?;
+                    session.clear_render(&mut stdout, session.prefix_lines())?;
+                    write!(stdout, "\r\n")?;
+                    stdout.flush()?;
                     return Ok(ReadOutcome::Exit);
                 }
-                KeyAction::ToggleVim => {
-                    session.clear_render(&mut stdout)?;
-                    self.vim_enabled = !self.vim_enabled;
-                    writeln!(
-                        stdout,
-                        "Vim mode {}.",
-                        if self.vim_enabled {
-                            "enabled"
-                        } else {
-                            "disabled"
-                        }
-                    )?;
-                    session = EditSession::new(self.vim_enabled);
+                KeyAction::InterruptHint => {
+                    session.show_interrupt_hint = true;
                     session.render_with_suggestions(
                         &mut stdout,
                         &self.prompt,
@@ -102,8 +141,65 @@ impl LineEditor {
                         None,
                     )?;
                 }
+                KeyAction::ToggleVim => {
+                    session.clear_render(&mut stdout, session.prefix_lines())?;
+                    self.vim_enabled = !self.vim_enabled;
+                    // The banner is only shown once (at startup).  Consuming
+                    // prefix_fn here prevents it from reappearing every time
+                    // the user toggles Vim mode.
+                    self.prefix_fn = None;
+                    write!(
+                        stdout,
+                        "Vim mode {}.\r\n",
+                        if self.vim_enabled {
+                            "enabled"
+                        } else {
+                            "disabled"
+                        }
+                    )?;
+                    stdout.flush()?;
+                    session = EditSession::new(self.vim_enabled);
+                    self.render_prefix(&mut session, &mut stdout, None)?;
+                }
             }
         }
+    }
+
+    /// Clear the entire prefix area (accounting for reflow), regenerate
+    /// prefix content (banner + help + separator), then render prompt.
+    fn render_prefix(
+        &self,
+        session: &mut EditSession,
+        out: &mut impl Write,
+        suggestions: Option<&SuggestionState>,
+    ) -> io::Result<()> {
+        let new_cols = crate::terminal_width::terminal_cols().max(1);
+        let reflow = session.prefix_reflow_lines(new_cols);
+        session.clear_render(out, reflow)?;
+
+        session.prefix_line_widths.clear();
+
+        if let Some(ref f) = self.prefix_fn {
+            let text = f();
+            for line in text.split('\n') {
+                write!(out, "{line}\r\n")?;
+                session
+                    .prefix_line_widths
+                    .push(crate::terminal_width::display_width(line));
+            }
+        }
+
+        if self.show_separator {
+            let p = crate::style::Palette::for_stdout();
+            if p.violet.is_empty() {
+                write!(out, "{}\r\n", "-".repeat(new_cols))?;
+            } else {
+                write!(out, "{}{}{}\r\n", p.violet, "─".repeat(new_cols), p.r)?;
+            }
+            session.prefix_line_widths.push(new_cols);
+        }
+
+        session.render_content(out, &self.prompt, self.vim_enabled, suggestions)
     }
 
     fn read_line_fallback(&mut self) -> io::Result<ReadOutcome> {
@@ -247,6 +343,10 @@ impl LineEditor {
         session: &mut EditSession,
         key: KeyEvent,
     ) -> KeyAction {
+        // Clear the "Press Ctrl-C again" hint on every keystroke so it
+        // disappears as soon as the user does anything else.
+        session.show_interrupt_hint = false;
+
         // When suggestions are visible, intercept navigation keys
         if self.suggestion_state.is_some() {
             match key.code {
@@ -285,15 +385,33 @@ impl LineEditor {
             }
         }
 
-        // Normal key handling (unchanged from original)
+        // Any key other than the double-tap target resets that target's timer.
+        let is_ctrl_c = key.modifiers.contains(KeyModifiers::CONTROL)
+            && matches!(key.code, KeyCode::Char('c' | 'C'));
+        if !is_ctrl_c {
+            self.last_ctrlc = None;
+        }
+        if key.code != KeyCode::Esc {
+            self.last_esc = None;
+        }
+
+        // Normal key handling
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             match key.code {
                 KeyCode::Char('c' | 'C') => {
-                    return if session.has_input() {
-                        KeyAction::Cancel
-                    } else {
-                        KeyAction::Exit
-                    };
+                    if session.has_input() {
+                        return KeyAction::Cancel;
+                    }
+                    let now = Instant::now();
+                    if self
+                        .last_ctrlc
+                        .is_some_and(|t| now.duration_since(t).as_millis() < DOUBLE_TAP_MS)
+                    {
+                        self.last_ctrlc = None;
+                        return KeyAction::Exit;
+                    }
+                    self.last_ctrlc = Some(now);
+                    return KeyAction::InterruptHint;
                 }
                 KeyCode::Char('j' | 'J') => {
                     if session.mode != EditorMode::Normal && session.mode != EditorMode::Visual {
@@ -319,8 +437,38 @@ impl LineEditor {
                 }
                 KeyAction::Continue
             }
-            KeyCode::Enter => session.submit_or_toggle(),
-            KeyCode::Esc => session.handle_escape(),
+            KeyCode::Enter => {
+                if session.mode != EditorMode::Normal
+                    && session.mode != EditorMode::Visual
+                    && session.text.ends_with('\\')
+                {
+                    session.text.pop();
+                    session.cursor = session.cursor.min(session.text.len());
+                    session.insert_text("\n");
+                    KeyAction::Continue
+                } else {
+                    session.submit_or_toggle()
+                }
+            }
+            KeyCode::Esc => {
+                if session.mode == EditorMode::Plain && session.has_input() {
+                    let now = Instant::now();
+                    if self
+                        .last_esc
+                        .is_some_and(|t| now.duration_since(t).as_millis() < DOUBLE_TAP_MS)
+                    {
+                        self.last_esc = None;
+                        session.text.clear();
+                        session.cursor = 0;
+                        return KeyAction::Cancel;
+                    }
+                    self.last_esc = Some(now);
+                    KeyAction::Continue
+                } else {
+                    self.last_esc = None;
+                    session.handle_escape()
+                }
+            }
             KeyCode::Backspace => {
                 session.handle_backspace();
                 KeyAction::Continue
