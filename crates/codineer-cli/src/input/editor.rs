@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::{self, IsTerminal, Write};
 use std::time::Instant;
 
@@ -14,6 +15,12 @@ use super::text::{current_line_delete_range, is_vim_toggle, line_end, next_bound
 /// Maximum interval (ms) between two Ctrl+C or Esc presses to be considered a
 /// "double-tap".
 const DOUBLE_TAP_MS: u128 = 1500;
+
+/// Pasted text longer than this many characters is stored as a reference and
+/// shown as `[Pasted text #N +M lines]` in the input area (Claude Code style).
+const PASTE_CHAR_THRESHOLD: usize = 800;
+/// Pasted text with more than this many newlines is also stored as a reference.
+const PASTE_LINE_THRESHOLD: usize = 2;
 
 pub struct LineEditor {
     prompt: String,
@@ -37,6 +44,12 @@ pub struct LineEditor {
     /// Optional one-line hint rendered in the info area (below the bottom
     /// separator) whenever no other panel is active.
     hint_line: Option<String>,
+    /// Storage for pasted text references: maps numeric ID → original content.
+    /// References are shown as `[Pasted text #N +M lines]` in the input and
+    /// expanded back to their full content when the message is submitted.
+    paste_store: HashMap<usize, String>,
+    /// Auto-incrementing counter for paste reference IDs.
+    next_paste_id: usize,
 }
 
 impl LineEditor {
@@ -55,6 +68,8 @@ impl LineEditor {
             last_ctrlc: None,
             last_esc: None,
             hint_line: None,
+            paste_store: HashMap::new(),
+            next_paste_id: 1,
         }
     }
 
@@ -115,8 +130,23 @@ impl LineEditor {
             // Bracketed paste: insert the whole text at once so newlines in the
             // pasted content don't accidentally trigger a submission.
             if let Event::Paste(ref text) = event {
-                let text = text.clone();
-                session.insert_text(&text);
+                let text = text.replace('\r', "\n");
+                let num_newlines = text.matches('\n').count();
+                let insert =
+                    if text.len() > PASTE_CHAR_THRESHOLD || num_newlines > PASTE_LINE_THRESHOLD {
+                        // Store the full content and show a compact reference token.
+                        let id = self.next_paste_id;
+                        self.next_paste_id += 1;
+                        self.paste_store.insert(id, text);
+                        if num_newlines == 0 {
+                            format!("[Pasted text #{id}]")
+                        } else {
+                            format!("[Pasted text #{id} +{num_newlines} lines]")
+                        }
+                    } else {
+                        text
+                    };
+                session.insert_text(&insert);
                 self.update_suggestions(&session);
                 session.render_with_suggestions(
                     &mut stdout,
@@ -144,22 +174,22 @@ impl LineEditor {
                     )?;
                 }
                 KeyAction::Submit(line) => {
+                    let line = self.expand_paste_refs(line);
                     session.finalize_render(&mut stdout, &self.prompt, self.vim_enabled)?;
-                    self.prefix_fn = None;
                     return Ok(ReadOutcome::Submit(line));
                 }
                 KeyAction::Cancel => {
-                    session.clear_render(&mut stdout, session.prefix_lines())?;
+                    // Keep the banner visible above — only clear the prompt area.
                     // In raw mode `\n` only moves the cursor down without
                     // resetting the column; `\r\n` is required on all platforms
                     // (including Windows) to land at column 0.
+                    session.clear_render(&mut stdout, 0)?;
                     write!(stdout, "\r\n")?;
                     stdout.flush()?;
-                    self.prefix_fn = None;
                     return Ok(ReadOutcome::Cancel);
                 }
                 KeyAction::Exit => {
-                    session.clear_render(&mut stdout, session.prefix_lines())?;
+                    session.clear_render(&mut stdout, 0)?;
                     write!(stdout, "\r\n")?;
                     stdout.flush()?;
                     return Ok(ReadOutcome::Exit);
@@ -176,10 +206,6 @@ impl LineEditor {
                 KeyAction::ToggleVim => {
                     session.clear_render(&mut stdout, session.prefix_lines())?;
                     self.vim_enabled = !self.vim_enabled;
-                    // The banner is only shown once (at startup).  Consuming
-                    // prefix_fn here prevents it from reappearing every time
-                    // the user toggles Vim mode.
-                    self.prefix_fn = None;
                     write!(
                         stdout,
                         "Vim mode {}.\r\n",
@@ -268,6 +294,32 @@ impl LineEditor {
 
             return Ok(ReadOutcome::Submit(buffer));
         }
+    }
+
+    // --- Paste reference expansion ---
+
+    /// Replace every `[Pasted text #N …]` token in `text` with the original
+    /// stored content so the AI receives the full pasted value.
+    fn expand_paste_refs(&self, text: String) -> String {
+        if self.paste_store.is_empty() {
+            return text;
+        }
+        let mut result = text;
+        for (id, content) in &self.paste_store {
+            let prefix = format!("[Pasted text #{id}");
+            let mut search_from = 0;
+            while let Some(rel) = result[search_from..].find(&prefix) {
+                let abs = search_from + rel;
+                if let Some(close) = result[abs..].find(']') {
+                    let end = abs + close + 1;
+                    result.replace_range(abs..end, content);
+                    search_from = abs + content.len();
+                } else {
+                    break;
+                }
+            }
+        }
+        result
     }
 
     // --- Suggestion handling (Claude Code aligned) ---

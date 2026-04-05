@@ -429,7 +429,10 @@ impl EditSession {
         base_prompt: &str,
         vim_enabled: bool,
     ) -> std::io::Result<()> {
-        self.clear_render(out, self.prefix_lines())?;
+        // Only clear the prompt area (not the banner) so the banner remains
+        // visible as the session scrolls.  The next read_line() will draw a
+        // fresh banner before the next prompt.
+        self.clear_render(out, 0)?;
         let prompt = self.prompt(base_prompt, vim_enabled);
         let buffer = self.visible_buffer();
         let prompt_display_width = strip_ansi(prompt.as_ref()).width();

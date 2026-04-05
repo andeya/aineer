@@ -569,3 +569,46 @@ fn ctrl_d_deletes_char_when_input_exists() {
     assert!(matches!(action, KeyAction::Continue));
     assert_eq!(session.text, "ac");
 }
+
+// ── Paste reference system ────────────────────────────────────────────────────
+
+#[test]
+fn short_single_line_paste_inserts_inline() {
+    let mut editor = LineEditor::new("> ", vec![]);
+    // Simulate: insert short text via expand_paste_refs (no ref created).
+    let result = editor.expand_paste_refs("hello world".to_string());
+    assert_eq!(result, "hello world");
+    assert!(editor.paste_store.is_empty());
+}
+
+#[test]
+fn expand_paste_refs_replaces_single_ref() {
+    let mut editor = LineEditor::new("> ", vec![]);
+    editor
+        .paste_store
+        .insert(1, "line1\nline2\nline3".to_string());
+    let input = "[Pasted text #1 +2 lines]".to_string();
+    let expanded = editor.expand_paste_refs(input);
+    assert_eq!(expanded, "line1\nline2\nline3");
+}
+
+#[test]
+fn expand_paste_refs_replaces_multiple_refs() {
+    let mut editor = LineEditor::new("> ", vec![]);
+    editor.paste_store.insert(1, "aaa".to_string());
+    editor.paste_store.insert(2, "bbb".to_string());
+    let input = "before [Pasted text #1] and [Pasted text #2] after".to_string();
+    let expanded = editor.expand_paste_refs(input);
+    assert!(expanded.contains("aaa"));
+    assert!(expanded.contains("bbb"));
+    assert!(!expanded.contains("[Pasted text #1]"));
+    assert!(!expanded.contains("[Pasted text #2]"));
+}
+
+#[test]
+fn expand_paste_refs_no_op_when_store_empty() {
+    let editor = LineEditor::new("> ", vec![]);
+    let input = "[Pasted text #1 +3 lines]".to_string();
+    let expanded = editor.expand_paste_refs(input.clone());
+    assert_eq!(expanded, input);
+}
