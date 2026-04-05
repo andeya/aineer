@@ -75,6 +75,10 @@ pub(super) struct EditSession {
     /// When true, render a bottom separator line below the input text and above
     /// the info/panel area.  Set from `LineEditor::show_separator`.
     pub(super) show_bottom_sep: bool,
+    /// Persistent one-line hint shown in the info area below the bottom
+    /// separator whenever no other panel (?, interrupt, suggestions) is active.
+    /// Set from `LineEditor::hint_line` when the session is created.
+    pub(super) static_hint: Option<String>,
     pub(super) history_index: Option<usize>,
     pub(super) history_backup: Option<String>,
     rendered_cursor_row: usize,
@@ -103,6 +107,7 @@ impl EditSession {
             history_backup: None,
             show_interrupt_hint: false,
             show_bottom_sep: false,
+            static_hint: None,
             rendered_cursor_row: 0,
             rendered_lines: 1,
             prefix_line_widths: Vec::new(),
@@ -244,8 +249,12 @@ impl EditSession {
         let prompt = self.prompt(base_prompt, vim_enabled);
         let buffer = self.visible_buffer();
         // In raw mode `\n` only moves the cursor down without resetting the
-        // column; convert to `\r\n` so continuation lines start at column 0.
-        let display_buffer = buffer.replace('\n', "\r\n");
+        // column.  Convert to `\r\n` AND indent continuation lines by the
+        // visible prompt width so they are visually aligned with the first
+        // line's content area (matching Claude Code's multi-line appearance).
+        let prompt_display_width = strip_ansi(prompt.as_ref()).width();
+        let indent = " ".repeat(prompt_display_width);
+        let display_buffer = buffer.replace('\n', &format!("\r\n{indent}"));
         write!(out, "{prompt}{display_buffer}")?;
 
         let (cursor_row, cursor_col, total_lines) = self.cursor_layout(prompt.as_ref());
@@ -273,6 +282,14 @@ impl EditSession {
             self.draw_interrupt_hint(out)?
         } else if let Some(state) = suggestions.filter(|s| !s.items.is_empty()) {
             self.draw_suggestions(out, state)?
+        } else if self.show_bottom_sep {
+            // Static hint line — shown whenever the info area is otherwise empty.
+            if let Some(ref hint) = self.static_hint {
+                write!(out, "\r\n{hint}")?;
+                1
+            } else {
+                0
+            }
         } else {
             0
         };
@@ -415,8 +432,9 @@ impl EditSession {
         self.clear_render(out, self.prefix_lines())?;
         let prompt = self.prompt(base_prompt, vim_enabled);
         let buffer = self.visible_buffer();
-        // Convert \n to \r\n for correct raw-mode rendering.
-        let display_buffer = buffer.replace('\n', "\r\n");
+        let prompt_display_width = strip_ansi(prompt.as_ref()).width();
+        let indent = " ".repeat(prompt_display_width);
+        let display_buffer = buffer.replace('\n', &format!("\r\n{indent}"));
         write!(out, "{prompt}{display_buffer}")?;
         // In raw mode `\n` only moves down without resetting the column.
         // Use `\r\n` so the cursor lands at column 0 on the new line before
@@ -439,10 +457,13 @@ impl EditSession {
             cursor -= 1;
         }
         let cursor_prefix = &active_text[..cursor];
+        let prompt_w = strip_ansi(prompt).width();
         let cursor_row = cursor_prefix.bytes().filter(|byte| *byte == b'\n').count();
         let cursor_col = match cursor_prefix.rsplit_once('\n') {
-            Some((_, suffix)) => strip_ansi(suffix).width(),
-            None => strip_ansi(prompt).width() + strip_ansi(cursor_prefix).width(),
+            // Continuation lines are indented by `prompt_w` spaces so the
+            // cursor column must include that indent.
+            Some((_, suffix)) => prompt_w + strip_ansi(suffix).width(),
+            None => prompt_w + strip_ansi(cursor_prefix).width(),
         };
         let total_lines = active_text.bytes().filter(|byte| *byte == b'\n').count() + 1;
         (cursor_row, cursor_col, total_lines)

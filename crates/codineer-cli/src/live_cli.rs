@@ -855,14 +855,15 @@ pub(crate) fn run_repl(
     let b_perms = cli.permission_mode.as_str().to_string();
     let b_session_id = cli.session.id.clone();
     let b_session_path = cli.session.path.clone();
-    let help_line = format!(
-        "{}{}? for shortcuts · /help · Esc cancels line{}",
+    let hint_line = format!(
+        "{}{}? for shortcuts  ·  /help  ·  Esc cancels{}",
         p.dim, p.gray, p.r
     );
     let mut editor = input::LineEditor::new(prompt, slash_command_entries())
         .with_separator()
+        .with_hint_line(hint_line)
         .with_prefix(move || {
-            let banner = welcome_banner(
+            welcome_banner(
                 color,
                 BannerContext {
                     workspace_summary: &workspace_summary,
@@ -873,8 +874,7 @@ pub(crate) fn run_repl(
                     session_path: &b_session_path,
                     has_codineer_md,
                 },
-            );
-            format!("{banner}\n\n{help_line}")
+            )
         });
 
     loop {

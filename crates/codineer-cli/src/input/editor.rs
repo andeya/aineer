@@ -34,6 +34,9 @@ pub struct LineEditor {
     /// Timestamp of the last Esc press in Plain mode — used for double-tap Esc
     /// to clear input.
     last_esc: Option<Instant>,
+    /// Optional one-line hint rendered in the info area (below the bottom
+    /// separator) whenever no other panel is active.
+    hint_line: Option<String>,
 }
 
 impl LineEditor {
@@ -51,6 +54,7 @@ impl LineEditor {
             prefix_fn: None,
             last_ctrlc: None,
             last_esc: None,
+            hint_line: None,
         }
     }
 
@@ -62,12 +66,21 @@ impl LineEditor {
         self
     }
 
-    /// Set a prefix renderer (e.g. banner + help text) shown above the
-    /// separator on the first prompt. Re-generated on resize so the layout
-    /// adapts to the current terminal width.
+    /// Set a prefix renderer (e.g. banner) shown above the top separator on
+    /// the first prompt. Re-generated on resize so the layout adapts to the
+    /// current terminal width.
     #[must_use]
     pub fn with_prefix(mut self, f: impl Fn() -> String + 'static) -> Self {
         self.prefix_fn = Some(Box::new(f));
+        self
+    }
+
+    /// Set a persistent one-line hint shown in the info area below the bottom
+    /// separator whenever no other panel (shortcuts, interrupt, suggestions) is
+    /// active.  Accepts ANSI-coloured strings.
+    #[must_use]
+    pub fn with_hint_line(mut self, hint: impl Into<String>) -> Self {
+        self.hint_line = Some(hint.into());
         self
     }
 
@@ -89,6 +102,7 @@ impl LineEditor {
         let mut stdout = io::stdout();
         let mut session = EditSession::new(self.vim_enabled);
         session.show_bottom_sep = self.show_separator;
+        session.static_hint = self.hint_line.clone();
         self.render_prefix(&mut session, &mut stdout, None)?;
 
         loop {
@@ -178,6 +192,7 @@ impl LineEditor {
                     stdout.flush()?;
                     session = EditSession::new(self.vim_enabled);
                     session.show_bottom_sep = self.show_separator;
+                    session.static_hint = self.hint_line.clone();
                     self.render_prefix(&mut session, &mut stdout, None)?;
                 }
             }
