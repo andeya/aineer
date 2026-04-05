@@ -21,6 +21,10 @@
 
 安全 Rust 构建，**单个约 15 MB 二进制文件**。无守护进程，无运行时依赖——带上任意模型即可开始。
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/andeya/codineer/main/assets/ScreenShot_01.png" alt="Codineer REPL 截图" width="780">
+</p>
+
 ## 为什么选择 Codineer？
 
 大多数 AI 编程 CLI 将你绑定在单一 Provider 上。Claude Code 依赖 Anthropic，Codex CLI 依赖 OpenAI。**Codineer 支持所有 Provider——包括本地模型。**

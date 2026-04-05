@@ -21,6 +21,10 @@
 
 Built in safe Rust. Ships as a **single ~15 MB binary**. No daemon, no runtime dependency — bring any model and go.
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/andeya/codineer/main/assets/ScreenShot_01.png" alt="Codineer REPL screenshot" width="780">
+</p>
+
 ## Why Codineer?
 
 Most AI coding CLIs lock you into a single provider. Claude Code requires Anthropic. Codex CLI requires OpenAI. **Codineer works with all of them — and local models too.**
