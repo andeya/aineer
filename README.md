@@ -274,15 +274,15 @@ codineer -p "check for security issues" \
 
 Codineer merges JSON settings from multiple files (highest to lowest precedence):
 
-| File                            | Scope                          | Committed?      |
-| ------------------------------- | ------------------------------ | --------------- |
-| `.codineer/settings.local.json` | Project — local overrides      | No (gitignored) |
-| `.codineer/settings.json`       | Project — directory config     | Yes             |
-| `.codineer.json`                | Project — flat config          | Yes             |
-| `~/.codineer/settings.json`     | User — global directory config | —               |
-| `~/.codineer.json`              | User — global flat config      | —               |
+| File                            | Actual path                                    | Scope                          | Committed?      |
+| ------------------------------- | ---------------------------------------------- | ------------------------------ | --------------- |
+| `.codineer/settings.local.json` | `<project root>/.codineer/settings.local.json` | Project — local overrides      | No (gitignored) |
+| `.codineer/settings.json`       | `<project root>/.codineer/settings.json`       | Project — directory config     | Yes             |
+| `.codineer.json`                | `<project root>/.codineer.json`                | Project — flat config          | Yes             |
+| `~/.codineer/settings.json`     | `$HOME/.codineer/settings.json`                | User — global directory config | —               |
+| `~/.codineer.json`              | `$HOME/.codineer.json`                         | User — global flat config      | —               |
 
-Each scope has two **optional** files: a directory-based form (`settings.json`) and a flat form (`.codineer.json`). **They are not duplicates** — they are two layout choices for the same scope; when both exist the directory-based file wins. Use whichever layout you prefer; `codineer config set` always writes the directory-based file.
+Each scope has two **optional** files: a directory-based form (inside `.codineer/`) and a flat form (`.codineer.json` directly in the project root or home dir). **They are not duplicates** — they are two layout choices for the same scope; when both exist the directory-based file wins (higher row = higher precedence). Use whichever layout you prefer; `codineer config set` always writes the directory-based file.
 
 All files use the same schema. `env`, `providers`, and `mcpServers` objects are deep-merged across layers. For `mcpServers`, a server name defined in a later file replaces (not deep-merges) the earlier definition.
 
@@ -308,20 +308,20 @@ All files use the same schema. `env`, `providers`, and `mcpServers` objects are 
 }
 ```
 
-| Key                | Type     | Description                                                                                                                     |
-| ------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `model`            | string   | Default model (e.g. `"sonnet"`, `"ollama/qwen3-coder"`)                                                                        |
-| `fallbackModels`   | string[] | Ordered list of fallback models when the primary is unavailable                                                                 |
-| `permissionMode`   | string   | `"read-only"`, `"workspace-write"`, or `"danger-full-access"`                                                                   |
-| `env`              | object   | Environment variables injected at startup. Shell exports take precedence.                                                       |
-| `providers`        | object   | Custom OpenAI-compatible endpoints: `baseUrl`, `apiKey` / `apiKeyEnv`, optional **`apiVersion`** (Azure), `defaultModel`, etc. (see [example](https://github.com/andeya/codineer/blob/main/settings.example.json)) |
-| `oauth`            | object   | Custom OAuth config (clientId, authorizeUrl, tokenUrl, scopes, etc.)                                                            |
-| `credentials`      | object   | Credential chain config (defaultSource, autoDiscover, claudeCode)                                                               |
-| `mcpServers`       | object   | MCP server definitions (stdio, sse, http, ws)                                                                                   |
-| `sandbox`          | object   | Sandbox security settings (enabled, filesystemMode, allowedMounts)                                                              |
-| `enabledPlugins`   | object   | Plugins to enable (map of plugin name → boolean)                                                                                |
-| `plugins`          | object   | Plugin management (externalDirectories, installRoot)                                                                            |
-| `hooks`            | object   | Shell commands for `PreToolUse` / `PostToolUse` hooks                                                                           |
+| Key              | Type     | Description                                                                                                                                                                                                        |
+| ---------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `model`          | string   | Default model (e.g. `"sonnet"`, `"ollama/qwen3-coder"`)                                                                                                                                                            |
+| `fallbackModels` | string[] | Ordered list of fallback models when the primary is unavailable                                                                                                                                                    |
+| `permissionMode` | string   | `"read-only"`, `"workspace-write"`, or `"danger-full-access"`                                                                                                                                                      |
+| `env`            | object   | Environment variables injected at startup. Shell exports take precedence.                                                                                                                                          |
+| `providers`      | object   | Custom OpenAI-compatible endpoints: `baseUrl`, `apiKey` / `apiKeyEnv`, optional **`apiVersion`** (Azure), `defaultModel`, etc. (see [example](https://github.com/andeya/codineer/blob/main/settings.example.json)) |
+| `oauth`          | object   | Custom OAuth config (clientId, authorizeUrl, tokenUrl, scopes, etc.)                                                                                                                                               |
+| `credentials`    | object   | Credential chain config (defaultSource, autoDiscover, claudeCode)                                                                                                                                                  |
+| `mcpServers`     | object   | MCP server definitions (stdio, sse, http, ws)                                                                                                                                                                      |
+| `sandbox`        | object   | Sandbox security settings (enabled, filesystemMode, allowedMounts)                                                                                                                                                 |
+| `enabledPlugins` | object   | Plugins to enable (map of plugin name → boolean)                                                                                                                                                                   |
+| `plugins`        | object   | Plugin management (externalDirectories, installRoot)                                                                                                                                                               |
+| `hooks`          | object   | Shell commands for `PreToolUse` / `PostToolUse` hooks                                                                                                                                                              |
 
 Inspect merged config at runtime: `/config`, `/config env`, `/config model`
 
@@ -329,21 +329,21 @@ Inspect merged config at runtime: `/config`, `/config env`, `/config model`
 
 Set via shell export **or** the `"env"` section in settings.json (shell exports take precedence):
 
-| Variable                   | Purpose                                             |
-| -------------------------- | --------------------------------------------------- |
-| `ANTHROPIC_API_KEY`        | Claude API key                                      |
-| `ANTHROPIC_AUTH_TOKEN`     | Bearer token (alternative)                          |
-| `XAI_API_KEY`              | xAI / Grok API key                                  |
-| `OPENAI_API_KEY`           | OpenAI API key                                      |
-| `OPENROUTER_API_KEY`       | OpenRouter API key                                  |
-| `GROQ_API_KEY`             | Groq Cloud API key                                  |
-| `DASHSCOPE_API_KEY`       | Alibaba Cloud DashScope (OpenAI-compatible)         |
-| `OLLAMA_HOST`              | Ollama endpoint (e.g. `http://192.168.1.100:11434`) |
-| `CODINEER_WORKSPACE_ROOT`  | Override workspace root                             |
+| Variable                   | Purpose                                                                                                    |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `ANTHROPIC_API_KEY`        | Claude API key                                                                                             |
+| `ANTHROPIC_AUTH_TOKEN`     | Bearer token (alternative)                                                                                 |
+| `XAI_API_KEY`              | xAI / Grok API key                                                                                         |
+| `OPENAI_API_KEY`           | OpenAI API key                                                                                             |
+| `OPENROUTER_API_KEY`       | OpenRouter API key                                                                                         |
+| `GROQ_API_KEY`             | Groq Cloud API key                                                                                         |
+| `DASHSCOPE_API_KEY`        | Alibaba Cloud DashScope (OpenAI-compatible)                                                                |
+| `OLLAMA_HOST`              | Ollama endpoint (e.g. `http://192.168.1.100:11434`)                                                        |
+| `CODINEER_WORKSPACE_ROOT`  | Override workspace root                                                                                    |
 | `CODINEER_CONFIG_HOME`     | Override global config dir (default `~/.codineer`); the global flat config moves to the parent of this dir |
-| `CODINEER_PERMISSION_MODE` | Default permission mode                             |
-| `NO_COLOR`                 | Disable ANSI colors                                 |
-| `CLICOLOR=0`               | Disable ANSI colors (alternative)                   |
+| `CODINEER_PERMISSION_MODE` | Default permission mode                                                                                    |
+| `NO_COLOR`                 | Disable ANSI colors                                                                                        |
+| `CLICOLOR=0`               | Disable ANSI colors (alternative)                                                                          |
 
 **Credential chain (per-provider, in priority order):**
 
