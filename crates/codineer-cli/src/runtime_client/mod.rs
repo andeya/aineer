@@ -36,8 +36,13 @@ pub(crate) struct RuntimeParams {
 
 pub(crate) fn build_runtime(
     params: RuntimeParams,
-) -> Result<ConversationRuntime<DefaultRuntimeClient, CliToolExecutor>, Box<dyn std::error::Error>>
-{
+) -> Result<
+    (
+        ConversationRuntime<DefaultRuntimeClient, CliToolExecutor>,
+        String,
+    ),
+    Box<dyn std::error::Error>,
+> {
     let RuntimeParams {
         session,
         model,
@@ -60,8 +65,9 @@ pub(crate) fn build_runtime(
     };
     let resolver = ModelResolver::new(&runtime_config);
     let resolved = resolver.resolve(&model)?;
+    let resolved_model = resolved.model.clone();
     let shared_runtime = Arc::new(tokio::runtime::Runtime::new()?);
-    Ok(ConversationRuntime::new_with_features(
+    let runtime = ConversationRuntime::new_with_features(
         session,
         DefaultRuntimeClient {
             runtime: Arc::clone(&shared_runtime),
@@ -85,7 +91,8 @@ pub(crate) fn build_runtime(
         permission_policy(permission_mode, &tool_registry),
         system_prompt,
         runtime_config.feature_config(),
-    ))
+    );
+    Ok((runtime, resolved_model))
 }
 
 pub(crate) struct DefaultRuntimeClient {
