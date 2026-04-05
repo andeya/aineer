@@ -186,7 +186,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             model,
             allowed_tools,
             permission_mode,
-        } => run_repl(model, allowed_tools, permission_mode)?,
+            resume_path,
+        } => run_repl(model, allowed_tools, permission_mode, resume_path)?,
         CliAction::Help => print_help(),
         CliAction::SubcommandHelp {
             name,

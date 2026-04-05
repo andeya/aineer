@@ -26,6 +26,21 @@ pub(crate) fn sessions_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
     Ok(path)
 }
 
+impl SessionHandle {
+    /// Build a handle directly from an existing session file path.
+    pub(crate) fn from_path(path: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
+        if !path.exists() {
+            return Err(format!("session file not found: {}", path.display()).into());
+        }
+        let id = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("restored")
+            .to_string();
+        Ok(Self { id, path })
+    }
+}
+
 pub(crate) fn create_managed_session_handle() -> Result<SessionHandle, Box<dyn std::error::Error>> {
     let id = generate_session_id();
     let path = sessions_dir()?.join(format!("{id}.json"));

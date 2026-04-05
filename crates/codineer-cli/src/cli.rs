@@ -67,6 +67,8 @@ pub(crate) enum CliAction {
         model: String,
         allowed_tools: Option<AllowedToolSet>,
         permission_mode: PermissionMode,
+        /// Path to a session file to restore before entering the REPL.
+        resume_path: Option<PathBuf>,
     },
     Help,
     SubcommandHelp {
@@ -278,13 +280,14 @@ pub(crate) fn parse_args(args: &[String]) -> Result<CliAction, String> {
             model,
             allowed_tools,
             permission_mode,
+            resume_path: None,
         });
     }
     if is_help_flag(rest.first()) {
         return Ok(CliAction::Help);
     }
     if rest.first().map(String::as_str) == Some("--resume") {
-        return parse_resume_args(&rest[1..]);
+        return parse_resume_args(&rest[1..], model, allowed_tools, permission_mode);
     }
 
     if let Some(&(name, summary, usage)) = SUBCOMMAND_HELP
@@ -582,7 +585,18 @@ fn is_help_flag(arg: Option<&String>) -> bool {
     matches!(arg.map(String::as_str), Some("--help" | "-h"))
 }
 
-pub(crate) fn parse_resume_args(args: &[String]) -> Result<CliAction, String> {
+/// Parse arguments following `--resume <session-path> [/slash …]`.
+///
+/// `model`, `allowed_tools`, and `permission_mode` are the values already
+/// resolved from the flags that preceded `--resume` so they are not silently
+/// discarded when the user combines `--model`/`--permission-mode` with
+/// `--resume`.
+pub(crate) fn parse_resume_args(
+    args: &[String],
+    model: String,
+    allowed_tools: Option<AllowedToolSet>,
+    permission_mode: PermissionMode,
+) -> Result<CliAction, String> {
     let session_path = args
         .first()
         .ok_or_else(|| "missing session path for --resume".to_string())
@@ -593,6 +607,16 @@ pub(crate) fn parse_resume_args(args: &[String]) -> Result<CliAction, String> {
         .any(|command| !command.trim_start().starts_with('/'))
     {
         return Err("--resume trailing arguments must be slash commands".to_string());
+    }
+    // No slash commands → open the interactive REPL with the session restored.
+    // With slash commands → run them non-interactively (batch / CI mode).
+    if commands.is_empty() {
+        return Ok(CliAction::Repl {
+            model,
+            allowed_tools,
+            permission_mode,
+            resume_path: Some(session_path),
+        });
     }
     Ok(CliAction::ResumeSession {
         session_path,
