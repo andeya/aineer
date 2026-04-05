@@ -236,18 +236,18 @@ A **framed welcome banner** shows workspace, directory, model, session, and a co
 
 **Keyboard shortcuts:**
 
-| Shortcut | Action |
-| --- | --- |
-| `?` | Inline shortcuts reference panel |
-| `!<cmd>` | Bash mode — sends a shell command request to the AI |
-| `@` | File path completion |
-| `/` | Slash command completion (with Tab) |
-| `Up` / `Down` | History recall |
-| `Shift+Enter`, `Ctrl+J`, `\ + Enter` | Insert newline |
-| `Ctrl+C` | Cancel input; press twice on empty prompt to exit |
-| `Ctrl+D` | Exit (on empty prompt) |
-| `Double-tap Esc` | Clear input |
-| `/vim` | Toggle Vim modal editing |
+| Shortcut                             | Action                                              |
+| ------------------------------------ | --------------------------------------------------- |
+| `?`                                  | Inline shortcuts reference panel                    |
+| `!<cmd>`                             | Bash mode — sends a shell command request to the AI |
+| `@`                                  | File path completion                                |
+| `/`                                  | Slash command completion (with Tab)                 |
+| `Up` / `Down`                        | History recall                                      |
+| `Shift+Enter`, `Ctrl+J`, `\ + Enter` | Insert newline                                      |
+| `Ctrl+C`                             | Cancel input; press twice on empty prompt to exit   |
+| `Ctrl+D`                             | Exit (on empty prompt)                              |
+| `Double-tap Esc`                     | Clear input                                         |
+| `/vim`                               | Toggle Vim modal editing                            |
 
 ### One-shot prompts
 
