@@ -176,16 +176,14 @@ impl LineEditor {
                 KeyAction::Submit(line) => {
                     let line = self.expand_paste_refs(line);
                     session.finalize_render(&mut stdout, &self.prompt, self.vim_enabled)?;
+                    self.prefix_fn = None;
                     return Ok(ReadOutcome::Submit(line));
                 }
                 KeyAction::Cancel => {
-                    // Keep the banner visible above — only clear the prompt area.
-                    // In raw mode `\n` only moves the cursor down without
-                    // resetting the column; `\r\n` is required on all platforms
-                    // (including Windows) to land at column 0.
                     session.clear_render(&mut stdout, 0)?;
                     write!(stdout, "\r\n")?;
                     stdout.flush()?;
+                    self.prefix_fn = None;
                     return Ok(ReadOutcome::Cancel);
                 }
                 KeyAction::Exit => {
@@ -206,6 +204,7 @@ impl LineEditor {
                 KeyAction::ToggleVim => {
                     session.clear_render(&mut stdout, session.prefix_lines())?;
                     self.vim_enabled = !self.vim_enabled;
+                    self.prefix_fn = None;
                     write!(
                         stdout,
                         "Vim mode {}.\r\n",
