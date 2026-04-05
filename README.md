@@ -45,6 +45,7 @@ Most AI coding CLIs lock you into a single provider. Claude Code requires Anthro
 - **Instant setup** — `brew install` or `cargo install`. One Rust binary, no runtime dependencies.
 - **Graceful degradation** — models without function calling automatically fall back to text-only mode.
 - **Project memory** — `CODINEER.md` gives the AI persistent context about your codebase. Commit it to share with your team.
+- **Adaptive terminal UI** — welcome panel and separator line reflow in real time as the window resizes. Ultra-narrow terminals collapse to a single-column layout; the input line redraws in place without flicker. Works on macOS, Linux, and Windows (Windows Terminal / ConPTY).
 
 ## Table of Contents
 
@@ -218,7 +219,7 @@ This is especially useful for zero-cost setups: set a cloud model as primary and
 codineer
 ```
 
-A **framed welcome summary** shows workspace, directory, model, session, and a copy-paste `codineer --resume …` line. The prompt is **`>`**. Type naturally. Use **slash commands** (Tab-autocomplete supported):
+A **framed welcome banner** shows workspace, directory, model, session, and a copy-paste `codineer --resume …` line. The banner and separator adapt to the current terminal width in real time — narrow terminals switch to a single-column layout automatically. The prompt is **`❯`**. Type naturally. Use **slash commands** (Tab-autocomplete supported):
 
 | Category       | Commands                                                                 |
 | -------------- | ------------------------------------------------------------------------ |
@@ -229,7 +230,20 @@ A **framed welcome summary** shows workspace, directory, model, session, and a c
 | **Advanced**   | `/ultraplan` `/bughunter` `/teleport` `/debug-tool-call` `/vim`          |
 | **Navigation** | `/init` `/permissions` `/exit`                                           |
 
-**Keyboard shortcuts:** `Up`/`Down` history, `Tab` completion, `Shift+Enter` newline, `Ctrl+C` cancel.
+**Keyboard shortcuts:**
+
+| Shortcut | Action |
+| --- | --- |
+| `?` | Inline shortcuts reference panel |
+| `!<cmd>` | Bash mode — sends a shell command request to the AI |
+| `@` | File path completion |
+| `/` | Slash command completion (with Tab) |
+| `Up` / `Down` | History recall |
+| `Shift+Enter`, `Ctrl+J`, `\ + Enter` | Insert newline |
+| `Ctrl+C` | Cancel input; press twice on empty prompt to exit |
+| `Ctrl+D` | Exit (on empty prompt) |
+| `Double-tap Esc` | Clear input |
+| `/vim` | Toggle Vim modal editing |
 
 ### One-shot prompts
 
