@@ -29,22 +29,24 @@ Built in safe Rust. Ships as a **single ~15 MB binary**. No daemon, no runtime d
 
 Most AI coding CLIs lock you into a single provider. Claude Code requires Anthropic. Codex CLI requires OpenAI. **Codineer works with all of them — and local models too.**
 
-|                                                        |     Codineer     |  Claude Code   |    Codex CLI    |    Aider     |
-| ------------------------------------------------------ | :--------------: | :------------: | :-------------: | :----------: |
-| **Multi-provider** (Anthropic, OpenAI, xAI, Ollama, …) | **All built-in** | Anthropic only | OpenAI + Ollama |     Yes      |
-| **Zero-config local AI** (auto-detect Ollama)          |     **Yes**      |       No       |  `--oss` flag   | Manual setup |
-| **Single binary** (no runtime deps)                    |     **Rust**     |    Node.js     |     Node.js     |    Python    |
-| **MCP protocol** (external tool integration)           |     **Yes**      |      Yes       |       Yes       |     Yes      |
-| **Plugin system** + agents + skills                    |     **Yes**      |      Yes       |       No        |      No      |
-| **Permission modes** (read-only → full access)         |     **Yes**      |      Yes       |       Yes       |   Partial    |
-| **Tool-use fallback** (graceful degradation)           |     **Yes**      |      N/A       |       N/A       |     N/A      |
-| **Git workflow** (/commit, /pr, /diff, /branch)        |   **Built-in**   |   Via tools    |    Via tools    | Auto-commit  |
-| **Vim mode** in REPL                                   |     **Yes**      |       No       |       No        |      No      |
-| **CI/CD ready** (JSON output, tool allowlists)         |     **Yes**      |      Yes       |       Yes       |   Limited    |
+|                                                                                                          |     Codineer     |  Claude Code   |    Codex CLI    |    Aider     |
+| -------------------------------------------------------------------------------------------------------- | :--------------: | :------------: | :-------------: | :----------: |
+| **Multi-provider** (Anthropic, OpenAI, xAI, Ollama, …)                                                   | **All built-in** | Anthropic only | OpenAI + Ollama |     Yes      |
+| **Zero-token-cost** ([free access to major models](#openclaw-zero-token-free-access-to-major-ai-models)) |     **Yes**      |       No       |       No        |      No      |
+| **Zero-config local AI** (auto-detect Ollama)                                                            |     **Yes**      |       No       |  `--oss` flag   | Manual setup |
+| **Single binary** (no runtime deps)                                                                      |     **Rust**     |    Node.js     |     Node.js     |    Python    |
+| **MCP protocol** (external tool integration)                                                             |     **Yes**      |      Yes       |       Yes       |     Yes      |
+| **Plugin system** + agents + skills                                                                      |     **Yes**      |      Yes       |       No        |      No      |
+| **Permission modes** (read-only → full access)                                                           |     **Yes**      |      Yes       |       Yes       |   Partial    |
+| **Tool-use fallback** (graceful degradation)                                                             |     **Yes**      |      N/A       |       N/A       |     N/A      |
+| **Git workflow** (/commit, /pr, /diff, /branch)                                                          |   **Built-in**   |   Via tools    |    Via tools    | Auto-commit  |
+| **Vim mode** in REPL                                                                                     |     **Yes**      |       No       |       No        |      No      |
+| **CI/CD ready** (JSON output, tool allowlists)                                                           |     **Yes**      |      Yes       |       Yes       |   Limited    |
 
 **Key advantages:**
 
 - **Provider freedom** — switch between Claude, GPT, Grok, Ollama, LM Studio, OpenRouter, Groq, or any OpenAI-compatible API with `--model`. No vendor lock-in.
+- **Zero token cost** — pair with [OpenClaw Zero Token](https://github.com/andeya/openclaw-zero-token) to use Claude, ChatGPT, Gemini, DeepSeek, and 10+ more models for free — no API key purchase needed.
 - **Zero-config local AI** — start Ollama, run `codineer`. Auto-detects local models and picks the best one.
 - **Instant setup** — `brew install` or `cargo install`. One Rust binary, no runtime dependencies.
 - **Graceful degradation** — models without function calling automatically fall back to text-only mode.
@@ -105,6 +107,7 @@ export OPENROUTER_API_KEY="..."                   # OpenRouter (free models)
 export GROQ_API_KEY="..."                         # Groq Cloud (free tier)
 export DASHSCOPE_API_KEY="sk-..."                 # Alibaba DashScope (OpenAI-compatible)
 ollama serve                                      # Local AI (no key needed)
+# Or use OpenClaw Zero Token gateway for free access to all major models (see below)
 codineer login                                    # Or OAuth login (default provider)
 codineer login anthropic --source claude-code     # Use Claude Code credentials
 codineer status                                   # Check authentication status
@@ -175,6 +178,58 @@ codineer --model dashscope/qwen-plus-2025-07-28 "one-line Rust ownership"
 ```
 
 Streaming deltas may use `reasoning_content`, `thought`, or array-shaped `content`; Codineer normalizes these. If you still see **assistant stream produced no content**, the CLI automatically retries **once** with a non-streaming request. Use a current build from source or the latest release.
+
+### OpenClaw Zero Token (Free Access to Major AI Models)
+
+> **Zero API token cost** — log in via browser once, then call Claude, ChatGPT, Gemini, DeepSeek, Qwen, Kimi, Grok, and more through a single unified gateway — completely free.
+
+[OpenClaw Zero Token](https://github.com/andeya/openclaw-zero-token) is an AI gateway that drives official model web UIs (browser login) instead of paid API keys. If you can use a model in the browser, you can call it through Codineer — no API token purchase required.
+
+**Highlights:**
+
+| Traditional approach | OpenClaw Zero Token way  |
+| -------------------- | ------------------------ |
+| Buy API tokens       | **Completely free**      |
+| Pay per request      | No enforced quota        |
+| Credit card required | Browser login only       |
+| API tokens may leak  | Credentials stored local |
+
+**Supported models:** Claude Web, ChatGPT Web, Gemini Web, DeepSeek Web, Qwen Web (intl/cn), Kimi, Doubao, Grok Web, GLM Web, Xiaomi MiMo, and more. 11 out of 13 web models support tool calling.
+
+**Setup:**
+
+1. Deploy and start the [OpenClaw Zero Token](https://github.com/andeya/openclaw-zero-token) gateway (default port 3001)
+2. Add the provider to `settings.json`:
+
+```json
+{
+  "model": "openclaw-zero/openclaw",
+  "env": {
+    "OPENCLAW_ZERO_API_KEY": "your-gateway-token"
+  },
+  "providers": {
+    "openclaw-zero": {
+      "baseUrl": "http://127.0.0.1:3001/v1",
+      "apiKeyEnv": "OPENCLAW_ZERO_API_KEY",
+      "defaultModel": "openclaw",
+      "models": ["openclaw"],
+      "headers": {
+        "x-openclaw-scopes": "operator.write"
+      }
+    }
+  }
+}
+```
+
+3. Start coding:
+
+```bash
+codineer --model openclaw-zero/openclaw "refactor this module"
+codineer --model openclaw-zero/claude-web/claude-sonnet-4-6 "code review"
+codineer --model openclaw-zero/deepseek-web/deepseek-chat "explain this code"
+```
+
+> The `headers` field is optional and lets you attach custom HTTP headers to every request sent to a provider. In the OpenClaw Zero Token scenario, `x-openclaw-scopes` controls the permission scope on the gateway.
 
 ### Azure OpenAI
 
