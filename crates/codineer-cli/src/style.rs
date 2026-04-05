@@ -66,6 +66,9 @@ pub(crate) struct Palette {
     pub(crate) cyan_fg: &'static str,
     pub(crate) amber: &'static str,
     pub(crate) bash_bg: &'static str,
+    /// Dark gray background for submitted prompt lines (matches Claude Code's
+    /// highlighted input bar).
+    pub(crate) prompt_bg: &'static str,
 }
 
 impl Palette {
@@ -92,6 +95,7 @@ impl Palette {
         cyan_fg: "",
         amber: "",
         bash_bg: "",
+        prompt_bg: "",
     };
 
     pub(crate) fn new(color: bool) -> Self {
@@ -111,6 +115,7 @@ impl Palette {
                 cyan_fg: "\x1b[38;5;81m",
                 amber: "\x1b[38;5;214m",
                 bash_bg: "\x1b[48;5;236;38;5;255m",
+                prompt_bg: "\x1b[48;5;236m",
             }
         } else {
             Self::PLAIN

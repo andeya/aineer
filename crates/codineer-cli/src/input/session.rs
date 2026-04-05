@@ -430,17 +430,39 @@ impl EditSession {
         vim_enabled: bool,
     ) -> std::io::Result<()> {
         self.clear_render(out, 0)?;
-        // Re-draw the submitted prompt + buffer in dim gray so it visually
-        // recedes compared to the active prompt (matching Claude Code where
-        // completed turns are dimmed).
+        // Re-draw the submitted prompt with a dark gray background bar,
+        // matching Claude Code's highlighted input band for completed turns.
+        // The response below has no background — only the prompt line itself.
         let p = crate::style::Palette::for_stdout();
         let prompt = self.prompt(base_prompt, vim_enabled);
         let prompt_plain = strip_ansi(prompt.as_ref());
         let prompt_display_width = prompt_plain.width();
         let indent = " ".repeat(prompt_display_width);
         let buffer = self.visible_buffer();
-        let display_buffer = buffer.replace('\n', &format!("\r\n{indent}"));
-        write!(out, "{}{prompt_plain}{display_buffer}{}", p.dim, p.r)?;
+        let (term_cols, _) = terminal::size().unwrap_or((80, 24));
+        let cols = term_cols as usize;
+        // Build each visual line with background padding to fill the terminal
+        // width, producing a solid background bar per line.
+        let first_line = format!("{prompt_plain}{}", buffer.lines().next().unwrap_or(""));
+        let pad = cols.saturating_sub(first_line.width());
+        write!(
+            out,
+            "{bg}{first_line}{pad}{r}",
+            bg = p.prompt_bg,
+            pad = " ".repeat(pad),
+            r = p.r
+        )?;
+        for line in buffer.lines().skip(1) {
+            let visual = format!("{indent}{line}");
+            let pad = cols.saturating_sub(visual.width());
+            write!(
+                out,
+                "\r\n{bg}{visual}{pad}{r}",
+                bg = p.prompt_bg,
+                pad = " ".repeat(pad),
+                r = p.r
+            )?;
+        }
         write!(out, "\r\n")?;
         out.flush()
     }
