@@ -4,7 +4,8 @@ use std::time::Instant;
 
 use crossterm::event::{
     self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyEventKind,
-    KeyModifiers,
+    KeyModifiers, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
+    PushKeyboardEnhancementFlags,
 };
 use crossterm::{execute, terminal};
 
@@ -754,17 +755,28 @@ struct RawModeGuard;
 impl RawModeGuard {
     fn new() -> io::Result<Self> {
         terminal::enable_raw_mode().map_err(io::Error::other)?;
-        // Enable bracketed paste so that multi-line pastes arrive as a single
-        // Event::Paste rather than individual character/Enter events, preventing
-        // newlines in pasted text from accidentally submitting the prompt.
-        let _ = execute!(io::stdout(), EnableBracketedPaste);
+        let mut out = io::stdout();
+        let _ = execute!(out, EnableBracketedPaste);
+        // Kitty keyboard protocol: lets the terminal report modifier keys on
+        // Enter (Shift+Enter → KeyModifiers::SHIFT) so we can distinguish
+        // "new line" from "submit".  Silently ignored by terminals that don't
+        // support the protocol (e.g. Terminal.app).
+        let _ = execute!(
+            out,
+            PushKeyboardEnhancementFlags(
+                KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                    | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+            )
+        );
         Ok(Self)
     }
 }
 
 impl Drop for RawModeGuard {
     fn drop(&mut self) {
-        let _ = execute!(io::stdout(), DisableBracketedPaste);
+        let mut out = io::stdout();
+        let _ = execute!(out, PopKeyboardEnhancementFlags);
+        let _ = execute!(out, DisableBracketedPaste);
         let _ = terminal::disable_raw_mode();
     }
 }
