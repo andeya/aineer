@@ -395,7 +395,7 @@ impl EditSession {
             ("! for bash mode", "double tap esc to clear input"),
             ("/ for commands", "shift + enter for newline"),
             ("@ for file paths", "ctrl + j for newline"),
-            ("\\ + enter for newline", "ctrl + c to cancel input"),
+            ("\\ + enter for newline", "ctrl + c to clear input"),
             ("/vim to toggle vim mode", "ctrl + d to exit"),
             ("? for shortcuts", "/help for full command list"),
         ];
