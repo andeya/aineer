@@ -1,4 +1,5 @@
 mod auth;
+mod banner;
 mod cli;
 mod config_cmd;
 mod help;
@@ -103,18 +104,6 @@ pub(crate) fn logo_ascii(color: bool) -> String {
             "          ▀██▀",
         ]
         .join("\n")
-    }
-}
-
-pub(crate) fn logo_line(color: bool) -> String {
-    let p = style::Palette::new(color);
-    if color {
-        format!(
-            "{}◆{} {}❯{}▍{} {}Codineer{}",
-            p.violet, p.r, p.cyan_fg, p.amber, p.r, p.bold_white, p.r,
-        )
-    } else {
-        "◆ ❯▍ Codineer".to_string()
     }
 }
 
@@ -1479,7 +1468,7 @@ mod tests {
     }
 
     #[test]
-    fn response_to_events_ignores_thinking_blocks() {
+    fn response_to_events_maps_thinking_to_text_deltas() {
         let mut out = Vec::new();
         let events = response_to_events(
             MessageResponse {
@@ -1512,9 +1501,14 @@ mod tests {
 
         assert!(matches!(
             &events[0],
+            AssistantEvent::TextDelta(text) if text == "step 1"
+        ));
+        assert!(matches!(
+            &events[1],
             AssistantEvent::TextDelta(text) if text == "Final answer"
         ));
-        assert!(!String::from_utf8(out).expect("utf8").contains("step 1"));
+        let rendered = String::from_utf8(out).expect("utf8");
+        assert!(rendered.contains("step 1"));
     }
 
     #[test]

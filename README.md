@@ -98,6 +98,7 @@ export OPENAI_API_KEY="sk-..."                    # GPT
 export XAI_API_KEY="xai-..."                      # Grok
 export OPENROUTER_API_KEY="..."                   # OpenRouter (free models)
 export GROQ_API_KEY="..."                         # Groq Cloud (free tier)
+export DASHSCOPE_API_KEY="sk-..."                 # Alibaba DashScope (OpenAI-compatible)
 ollama serve                                      # Local AI (no key needed)
 codineer login                                    # Or OAuth login (default provider)
 codineer login anthropic --source claude-code     # Use Claude Code credentials
@@ -159,6 +160,21 @@ codineer --model ollama              # auto-pick best coding model
 
 > Models without function calling automatically fall back to text-only mode — every model works.
 
+### Alibaba Cloud DashScope (OpenAI-compatible)
+
+Use `provider/model` and configure `providers` in `settings.json` with the correct `baseUrl` (see [Model Studio docs](https://www.alibabacloud.com/help/en/model-studio/)):
+
+```bash
+export DASHSCOPE_API_KEY="sk-..."
+codineer --model dashscope/qwen-plus-2025-07-28 "one-line Rust ownership"
+```
+
+Streaming deltas may use `reasoning_content`, `thought`, or array-shaped `content`; Codineer normalizes these. If you still see **assistant stream produced no content**, the CLI automatically retries **once** with a non-streaming request. Use a current build from source or the latest release.
+
+### Azure OpenAI
+
+Set optional `apiVersion` (e.g. `2024-02-15-preview`) on a `providers.<name>` entry; Codineer appends `api-version=…` to the `chat/completions` URL. See [`settings.example.json`](https://github.com/andeya/codineer/blob/main/settings.example.json) (`azure-openai`).
+
 ### List available models
 
 ```bash
@@ -202,7 +218,7 @@ This is especially useful for zero-cost setups: set a cloud model as primary and
 codineer
 ```
 
-Type naturally. Use **slash commands** (Tab-autocomplete supported):
+A **framed welcome summary** shows workspace, directory, model, session, and a copy-paste `codineer --resume …` line. The prompt is **`>`**. Type naturally. Use **slash commands** (Tab-autocomplete supported):
 
 | Category       | Commands                                                                 |
 | -------------- | ------------------------------------------------------------------------ |
@@ -296,7 +312,7 @@ All files use the same schema. Objects like `env`, `providers`, and `mcpServers`
 | `fallbackModels`   | string[] | Ordered list of fallback models when the primary is unavailable                                                                 |
 | `permissionMode`   | string   | `"read-only"`, `"workspace-write"`, or `"danger-full-access"`                                                                   |
 | `env`              | object   | Environment variables injected at startup. Shell exports take precedence.                                                       |
-| `providers`        | object   | Custom OpenAI-compatible provider endpoints (see [example](https://github.com/andeya/codineer/blob/main/settings.example.json)) |
+| `providers`        | object   | Custom OpenAI-compatible endpoints: `baseUrl`, `apiKey` / `apiKeyEnv`, optional **`apiVersion`** (Azure), `defaultModel`, etc. (see [example](https://github.com/andeya/codineer/blob/main/settings.example.json)) |
 | `oauth`            | object   | Custom OAuth config (clientId, authorizeUrl, tokenUrl, scopes, etc.)                                                            |
 | `credentials`      | object   | Credential chain config (defaultSource, autoDiscover, claudeCode)                                                               |
 | `mcpServers`       | object   | MCP server definitions (stdio, sse, http, ws)                                                                                   |
@@ -319,6 +335,7 @@ Set via shell export **or** the `"env"` section in settings.json (shell exports 
 | `OPENAI_API_KEY`           | OpenAI API key                                      |
 | `OPENROUTER_API_KEY`       | OpenRouter API key                                  |
 | `GROQ_API_KEY`             | Groq Cloud API key                                  |
+| `DASHSCOPE_API_KEY`       | Alibaba Cloud DashScope (OpenAI-compatible)         |
 | `OLLAMA_HOST`              | Ollama endpoint (e.g. `http://192.168.1.100:11434`) |
 | `CODINEER_WORKSPACE_ROOT`  | Override workspace root                             |
 | `CODINEER_CONFIG_HOME`     | Override config dir (`~/.codineer`)                 |

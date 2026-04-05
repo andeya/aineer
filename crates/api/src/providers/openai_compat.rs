@@ -578,6 +578,10 @@ struct ChatMessage {
     #[serde(default)]
     reasoning: Option<String>,
     #[serde(default)]
+    thought: Option<String>,
+    #[serde(default)]
+    thinking: Option<String>,
+    #[serde(default)]
     tool_calls: Vec<ResponseToolCall>,
 }
 
@@ -588,6 +592,8 @@ impl ChatMessage {
             .filter(|s| !s.is_empty())
             .or_else(|| self.reasoning_content.clone().filter(|s| !s.is_empty()))
             .or_else(|| self.reasoning.clone().filter(|s| !s.is_empty()))
+            .or_else(|| self.thought.clone().filter(|s| !s.is_empty()))
+            .or_else(|| self.thinking.clone().filter(|s| !s.is_empty()))
     }
 }
 
@@ -624,6 +630,7 @@ struct ChatCompletionChunk {
 
 #[derive(Debug, Deserialize)]
 struct ChunkChoice {
+    #[serde(default)]
     delta: ChunkDelta,
     #[serde(default)]
     finish_reason: Option<String>,
@@ -651,6 +658,8 @@ where
                     Value::Object(map) => {
                         if let Some(text) = map.get("text").and_then(Value::as_str) {
                             joined.push_str(text);
+                        } else if let Some(text) = map.get("content").and_then(Value::as_str) {
+                            joined.push_str(text);
                         }
                     }
                     Value::String(s) => joined.push_str(&s),
@@ -672,6 +681,11 @@ struct ChunkDelta {
     /// Ollama and some stacks use `reasoning` instead of `reasoning_content`.
     #[serde(default)]
     reasoning: Option<String>,
+    /// Vendor aliases seen in the wild for thinking streams.
+    #[serde(default)]
+    thought: Option<String>,
+    #[serde(default)]
+    thinking: Option<String>,
     #[serde(default)]
     tool_calls: Vec<DeltaToolCall>,
 }
@@ -683,6 +697,8 @@ impl ChunkDelta {
             .filter(|s| !s.is_empty())
             .or_else(|| self.reasoning_content.clone().filter(|s| !s.is_empty()))
             .or_else(|| self.reasoning.clone().filter(|s| !s.is_empty()))
+            .or_else(|| self.thought.clone().filter(|s| !s.is_empty()))
+            .or_else(|| self.thinking.clone().filter(|s| !s.is_empty()))
     }
 }
 

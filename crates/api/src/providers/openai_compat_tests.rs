@@ -80,6 +80,18 @@ fn sse_parses_delta_with_reasoning_content_only() {
 }
 
 #[test]
+fn sse_parses_delta_with_thought_field() {
+    let frame = "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"thought\":\"x\"}}]}\n\n";
+    let parsed = super::parse_sse_frame(frame)
+        .expect("parse")
+        .expect("chunk");
+    assert_eq!(
+        parsed.choices[0].delta.stream_text_fragment(),
+        Some("x".to_string())
+    );
+}
+
+#[test]
 fn sse_parses_delta_with_content_array() {
     let frame =
         r#"data: {"id":"1","choices":[{"delta":{"content":[{"type":"text","text":"hi"}]}}]}"#

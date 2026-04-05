@@ -196,7 +196,7 @@ pub(crate) fn print_help() {
 pub(crate) fn render_repl_help() -> String {
     const HEADER: &[&str] = &[
         "Interactive REPL",
-        "  Quick start          Ask a task in plain English or use one of the core commands below.",
+        "  Quick start          Welcome panel shows context and `codineer --resume …`; prompt is `>`. Ask in plain English or use commands below.",
         "  Core commands        /help · /status · /model · /permissions · /compact",
         "  Exit                 /exit or /quit",
         "  Vim mode             /vim toggles modal editing",

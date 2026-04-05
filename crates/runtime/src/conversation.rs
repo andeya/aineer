@@ -323,7 +323,10 @@ fn build_assistant_message(
         ));
     }
     if blocks.is_empty() {
-        return Err(RuntimeError::new("assistant stream produced no content"));
+        return Err(RuntimeError::new(
+            "assistant stream produced no content (empty reply from the model API; \
+             try upgrading codineer, check provider stream vs non-stream, or verify model id and API key)",
+        ));
     }
 
     Ok((

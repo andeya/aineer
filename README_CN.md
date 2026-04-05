@@ -98,6 +98,7 @@ export OPENAI_API_KEY="sk-..."                    # GPT
 export XAI_API_KEY="xai-..."                      # Grok
 export OPENROUTER_API_KEY="..."                   # OpenRouter（免费模型）
 export GROQ_API_KEY="..."                         # Groq Cloud（免费额度）
+export DASHSCOPE_API_KEY="sk-..."                 # 阿里云通义 DashScope（兼容 OpenAI）
 ollama serve                                      # 本地 AI（无需 Key）
 codineer login                                    # 或 OAuth 登录（默认 Provider）
 codineer login anthropic --source claude-code     # 使用 Claude Code 凭据
@@ -159,6 +160,21 @@ codineer --model ollama              # 自动选择最佳编程模型
 
 > 不支持 function calling 的模型自动降级为纯文本模式——任何模型都能工作。
 
+### 阿里云通义（DashScope，OpenAI 兼容）
+
+使用 `provider/model` 形式，并在 `settings.json` 的 `providers` 中配置 `baseUrl`（国内与国际域名以[官方文档](https://help.aliyun.com/zh/model-studio/)为准）：
+
+```bash
+export DASHSCOPE_API_KEY="sk-..."
+codineer --model dashscope/qwen-plus-2025-07-28 "用一句话解释 Rust 所有权"
+```
+
+流式响应若只携带 `reasoning_content` / `thought` 等扩展字段，当前版本会一并解析；若仍出现 **assistant stream produced no content**，CLI 会自动再发**一次非流式**请求作为补偿。请尽量使用**从源码或最新 Release 构建的二进制**，旧版本可能缺少上述逻辑。
+
+### Azure OpenAI
+
+在对应 `providers.<name>` 下设置 `apiVersion`（例如 `2024-02-15-preview`），Codineer 会将其拼为 `api-version=...` 附加到 `.../chat/completions` 请求 URL。完整示例见仓库根目录 [`settings.example.json`](https://github.com/andeya/codineer/blob/main/settings.example.json) 中的 `azure-openai` 条目。
+
 ### 列出可用模型
 
 ```bash
@@ -202,7 +218,7 @@ codineer models ollama        # 显示本地 Ollama 模型
 codineer
 ```
 
-用自然语言交流。支持**斜杠命令**（Tab 自动补全）：
+启动后会显示**带边框的欢迎摘要**（工作区、目录、模型、会话与 `codineer --resume …` 提示），主提示符为 **`>`**。用自然语言交流。支持**斜杠命令**（Tab 自动补全）：
 
 | 分类      | 命令                                                                     |
 | --------- | ------------------------------------------------------------------------ |
@@ -296,7 +312,7 @@ Codineer 从多个 JSON 文件合并设置（优先级从高到低）：
 | `fallbackModels`   | string[] | 主模型不可用时依序尝试的回退模型列表                                                                             |
 | `permissionMode`   | string   | `"read-only"`、`"workspace-write"` 或 `"danger-full-access"`                                                     |
 | `env`              | object   | 启动时注入的环境变量。Shell export 优先。                                                                        |
-| `providers`        | object   | 自定义 OpenAI 兼容 Provider 端点（见[示例](https://github.com/andeya/codineer/blob/main/settings.example.json)） |
+| `providers`        | object   | 自定义 OpenAI 兼容 Provider：`baseUrl`、`apiKey` / `apiKeyEnv`、可选 **`apiVersion`**（Azure 等）、`defaultModel` 等（见[示例](https://github.com/andeya/codineer/blob/main/settings.example.json)） |
 | `oauth`            | object   | 自定义 OAuth 配置（clientId、authorizeUrl、tokenUrl、scopes 等）                                                 |
 | `credentials`      | object   | 凭据链配置（defaultSource、autoDiscover、claudeCode）                                                            |
 | `mcpServers`       | object   | MCP 服务器定义（stdio、sse、http、ws）                                                                           |
@@ -319,6 +335,7 @@ Codineer 从多个 JSON 文件合并设置（优先级从高到低）：
 | `OPENAI_API_KEY`           | OpenAI API Key                                 |
 | `OPENROUTER_API_KEY`       | OpenRouter API Key                             |
 | `GROQ_API_KEY`             | Groq Cloud API Key                             |
+| `DASHSCOPE_API_KEY`      | 阿里云通义 DashScope（OpenAI 兼容模式）        |
 | `OLLAMA_HOST`              | Ollama 端点（如 `http://192.168.1.100:11434`） |
 | `CODINEER_WORKSPACE_ROOT`  | 覆盖工作区根路径                               |
 | `CODINEER_CONFIG_HOME`     | 覆盖配置目录（`~/.codineer`）                  |

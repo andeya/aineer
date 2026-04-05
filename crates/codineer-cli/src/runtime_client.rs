@@ -512,8 +512,18 @@ impl StreamState {
                         input.push_str(&partial_json);
                     }
                 }
-                ContentBlockDelta::ThinkingDelta { .. }
-                | ContentBlockDelta::SignatureDelta { .. } => {}
+                ContentBlockDelta::ThinkingDelta { thinking } => {
+                    if !thinking.is_empty() {
+                        if let Some(reporter) = progress {
+                            reporter.mark_text_phase(&thinking);
+                        }
+                        if let Some(rendered) = self.markdown_stream.push(&self.renderer, &thinking) {
+                            write_flush(out, &rendered)?;
+                        }
+                        self.events.push(AssistantEvent::TextDelta(thinking));
+                    }
+                }
+                ContentBlockDelta::SignatureDelta { .. } => {}
             },
             ApiStreamEvent::ContentBlockStop(_) => {
                 if let Some(rendered) = self.markdown_stream.flush(&self.renderer) {
@@ -633,11 +643,28 @@ async fn stream_with_client(
     }
 
     let events = state.ensure_stop_event();
-    if events
+    let has_stop = events
         .iter()
-        .any(|event| matches!(event, AssistantEvent::MessageStop))
-    {
+        .any(|event| matches!(event, AssistantEvent::MessageStop));
+    let has_body = events.iter().any(|event| {
+        matches!(event, AssistantEvent::TextDelta(t) if !t.is_empty())
+            || matches!(event, AssistantEvent::ToolUse { .. })
+    });
+
+    if has_stop && has_body {
         return Ok(events);
+    }
+
+    // Some OpenAI-compatible providers return no text deltas on stream but a full message on non-stream.
+    if has_stop && !has_body {
+        let response = client
+            .send_message(&MessageRequest {
+                stream: false,
+                ..message_request.clone()
+            })
+            .await
+            .map_err(|error| RuntimeError::new(error.to_string()))?;
+        return response_to_events(response, out);
     }
 
     let response = client
@@ -677,7 +704,16 @@ pub(crate) fn push_output_block(
             };
             *pending_tool = Some((id, name, initial_input));
         }
-        OutputContentBlock::Thinking { .. } | OutputContentBlock::RedactedThinking { .. } => {}
+        OutputContentBlock::Thinking { thinking, .. } => {
+            if !thinking.is_empty() {
+                let rendered = TerminalRenderer::new().render_markdown(&thinking);
+                write!(out, "{rendered}")
+                    .and_then(|()| out.flush())
+                    .map_err(|error| RuntimeError::new(error.to_string()))?;
+                events.push(AssistantEvent::TextDelta(thinking));
+            }
+        }
+        OutputContentBlock::RedactedThinking { .. } => {}
     }
     Ok(())
 }

@@ -45,7 +45,8 @@ use crate::workspace::{
 };
 
 use crate::{
-    build_plugin_manager, build_system_prompt, build_system_prompt_with_lsp, logo_line, run_init,
+    banner::{welcome_banner, BannerContext},
+    build_plugin_manager, build_system_prompt, build_system_prompt_with_lsp, run_init,
 };
 pub(crate) struct LiveCli {
     model: String,
@@ -132,37 +133,18 @@ impl LiveCli {
         let has_codineer_md = cwd
             .as_ref()
             .is_some_and(|path| path.join("CODINEER.md").is_file());
-        let p = crate::style::Palette::new(color);
-        let mut lines = vec![
-            format!("{} {}· ready{}", logo_line(color), p.dim, p.r),
-            format!("   {}Your local AI coding agent{}", p.dim, p.r),
-        ];
-        lines.extend([
-            String::new(),
-            format!("  Workspace        {workspace_summary}"),
-            format!("  Directory        {cwd_display}"),
-            format!("  Model            {}", self.model),
-            format!("  Permissions      {}", self.permission_mode.as_str()),
-            format!("  Session          {}", self.session.id),
-            format!(
-                "  Quick start      {}",
-                if has_codineer_md {
-                    "/help · /status · ask for a task"
-                } else {
-                    "/init · /help · /status"
-                }
-            ),
-            "  Editor           Tab completes slash commands · /vim toggles modal editing"
-                .to_string(),
-            "  Multiline        Shift+Enter or Ctrl+J inserts a newline".to_string(),
-        ]);
-        if !has_codineer_md {
-            lines.push(
-                "  First run        /init scaffolds CODINEER.md, .codineer.json, and local session files"
-                    .to_string(),
-            );
-        }
-        lines.join("\n")
+        welcome_banner(
+            color,
+            BannerContext {
+                workspace_summary: &workspace_summary,
+                cwd_display: &cwd_display,
+                model: &self.model,
+                permissions: self.permission_mode.as_str(),
+                session_id: &self.session.id,
+                session_path: &self.session.path,
+                has_codineer_md,
+            },
+        )
     }
 
     fn run_turn(&mut self, input: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -200,6 +182,16 @@ impl LiveCli {
                     TerminalRenderer::new().color_theme(),
                     &mut stdout,
                 )?;
+                println!();
+                let p = crate::style::Palette::for_stdout();
+                println!(
+                    "  {}└{} {}{}{}",
+                    p.gray,
+                    p.r,
+                    p.red_fg,
+                    error.to_string().replace('\n', " "),
+                    p.r
+                );
                 Err(Box::new(error))
             }
         }
@@ -869,10 +861,10 @@ pub(crate) fn run_repl(
     let mut cli = LiveCli::new(model, true, allowed_tools, permission_mode)?;
     let p = crate::style::Palette::for_stdout();
     let prompt_string;
-    let prompt = if p.violet.is_empty() {
-        "❯ "
+    let prompt = if p.gray.is_empty() {
+        "> "
     } else {
-        prompt_string = format!("{}❯{} ", p.violet, p.r);
+        prompt_string = format!("{}>{} ", p.gray, p.r);
         &prompt_string
     };
     let mut editor = input::LineEditor::new(prompt, slash_command_completion_candidates());
