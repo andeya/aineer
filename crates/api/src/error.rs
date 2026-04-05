@@ -33,6 +33,11 @@ pub enum ApiError {
     ResponsePayloadTooLarge {
         limit: usize,
     },
+    /// In-stream error object from the Anthropic Messages SSE protocol (`type: "error"`).
+    StreamApplicationError {
+        error_type: Option<String>,
+        message: String,
+    },
 }
 
 impl ApiError {
@@ -59,6 +64,10 @@ impl ApiError {
             | Self::InvalidSseFrame(_)
             | Self::BackoffOverflow { .. }
             | Self::ResponsePayloadTooLarge { .. } => false,
+            Self::StreamApplicationError { error_type, .. } => matches!(
+                error_type.as_deref(),
+                Some("overloaded_error" | "rate_limit_error")
+            ),
         }
     }
 }
@@ -111,6 +120,13 @@ impl Display for ApiError {
             Self::ResponsePayloadTooLarge { limit } => {
                 write!(f, "response payload exceeded {limit} byte limit")
             }
+            Self::StreamApplicationError {
+                error_type,
+                message,
+            } => match error_type {
+                Some(t) => write!(f, "stream error ({t}): {message}"),
+                None => write!(f, "stream error: {message}"),
+            },
         }
     }
 }

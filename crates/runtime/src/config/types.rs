@@ -98,7 +98,7 @@ pub struct RuntimeFeatureConfig {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CustomProviderConfig {
     pub base_url: String,
-    /// Appended as query on `.../chat/completions` (e.g. Azure: `2024-02-15-preview` → `api-version=...`).
+    /// Appended as query on `.../chat/completions` when the server requires a version parameter (e.g. `api-version=...`).
     pub api_version: Option<String>,
     pub api_key: Option<String>,
     pub api_key_env: Option<String>,

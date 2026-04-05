@@ -7,6 +7,38 @@ use commands::{
 
 use crate::{logo_ascii, VERSION};
 
+struct ConfigFilePaths {
+    local_override: String,
+    project_settings: String,
+    project_flat: String,
+    global_settings: String,
+    global_flat: String,
+}
+
+/// Build OS-appropriate display paths for the configuration files section.
+///
+/// On Windows uses `%USERPROFILE%\...` with backslash separators.
+/// On Unix/macOS uses `~/.codineer/...` with forward-slash separators.
+fn config_file_paths() -> ConfigFilePaths {
+    if cfg!(target_os = "windows") {
+        ConfigFilePaths {
+            local_override: r".codineer\settings.local.json".to_string(),
+            project_settings: r".codineer\settings.json".to_string(),
+            project_flat: r".codineer.json".to_string(),
+            global_settings: r"%USERPROFILE%\.codineer\settings.json".to_string(),
+            global_flat: r"%USERPROFILE%\.codineer.json".to_string(),
+        }
+    } else {
+        ConfigFilePaths {
+            local_override: ".codineer/settings.local.json".to_string(),
+            project_settings: ".codineer/settings.json".to_string(),
+            project_flat: ".codineer.json".to_string(),
+            global_settings: "~/.codineer/settings.json".to_string(),
+            global_flat: "~/.codineer.json".to_string(),
+        }
+    }
+}
+
 pub(crate) fn print_help_section(
     out: &mut impl io::Write,
     title: &str,
@@ -114,16 +146,22 @@ pub(crate) fn print_help_to(out: &mut impl io::Write) -> io::Result<()> {
             "  Configure in settings.json:  {\"credentials\": {\"claudeCode\": {\"enabled\": true}}}",
         ],
     )?;
+    let cfg_paths = config_file_paths();
     print_help_section(
         out,
         "Configuration files (highest to lowest precedence)",
         &[
-            "  .codineer/settings.local.json         Local overrides (gitignored)",
-            "  .codineer/settings.json               Project settings",
-            "  .codineer.json                        Project flat config",
-            "  ~/.codineer/settings.json             Global settings",
-            "  ~/.codineer.json                      Global flat config",
-            "  CODINEER.md                           Project context and instructions",
+            &format!("  {:<38}Local overrides (gitignored)", cfg_paths.local_override),
+            &format!("  {:<38}Project settings", cfg_paths.project_settings),
+            &format!("  {:<38}Project flat config (alternative to above)", cfg_paths.project_flat),
+            &format!("  {:<38}Global settings (written by `config set`)", cfg_paths.global_settings),
+            &format!("  {:<38}Global flat config (alternative to above)", cfg_paths.global_flat),
+            &format!("  {:<38}Project context and instructions", "CODINEER.md"),
+            "",
+            "  Each scope has two optional files (directory-based and flat). They are NOT",
+            "  duplicates: the directory-based file wins when both are present. Use whichever",
+            "  layout you prefer; `codineer config set` always writes the directory-based file.",
+            "  Override the global config dir via CODINEER_CONFIG_HOME.",
             "",
             "  Supported keys: model, fallbackModels, env, hooks, enabledPlugins, plugins, mcpServers, permissionMode, providers, credentials",
             "  Example: {\"model\": \"sonnet\", \"fallbackModels\": [\"ollama/qwen3-coder\"]}",
@@ -236,6 +274,35 @@ pub(crate) fn render_unknown_repl_command(name: &str) -> String {
     ];
     append_suggestions(&mut lines, suggest_repl_commands(name));
     lines.join("\n")
+}
+
+pub(crate) fn slash_command_entries() -> Vec<crate::input::CommandEntry> {
+    use crate::input::CommandEntry;
+    let mut entries: Vec<CommandEntry> = slash_command_specs()
+        .iter()
+        .map(|s| CommandEntry {
+            name: format!("/{}", s.name),
+            description: s.summary.to_string(),
+            has_args: s.argument_hint.is_some(),
+        })
+        .collect();
+    entries.push(CommandEntry {
+        name: "/vim".into(),
+        description: "Toggle modal editing".into(),
+        has_args: false,
+    });
+    entries.push(CommandEntry {
+        name: "/exit".into(),
+        description: "Exit the REPL".into(),
+        has_args: false,
+    });
+    entries.push(CommandEntry {
+        name: "/quit".into(),
+        description: "Exit the REPL".into(),
+        has_args: false,
+    });
+    entries.sort_by(|a, b| a.name.cmp(&b.name));
+    entries
 }
 
 pub(crate) fn slash_command_completion_candidates() -> Vec<String> {

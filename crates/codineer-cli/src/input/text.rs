@@ -142,19 +142,6 @@ pub(super) fn render_selected_text(text: &str, start: usize, end: usize) -> Stri
     rendered
 }
 
-pub(super) fn slash_command_prefix(line: &str, pos: usize) -> Option<&str> {
-    if pos != line.len() {
-        return None;
-    }
-
-    let prefix = &line[..pos];
-    if prefix.contains(char::is_whitespace) || !prefix.starts_with('/') {
-        return None;
-    }
-
-    Some(prefix)
-}
-
 pub(super) fn to_u16(value: usize) -> io::Result<u16> {
     u16::try_from(value).map_err(|_| {
         io::Error::new(

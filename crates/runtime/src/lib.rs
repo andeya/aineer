@@ -24,9 +24,9 @@ pub use compact::{
     get_compact_continuation_message, should_compact, CompactionConfig, CompactionResult,
 };
 pub use config::{
-    ConfigEntry, ConfigError, ConfigLoader, ConfigSource, CredentialConfig, CustomProviderConfig,
-    McpConfigCollection, McpManagedProxyServerConfig, McpOAuthConfig, McpRemoteServerConfig,
-    McpSdkServerConfig, McpServerConfig, McpStdioServerConfig, McpTransport,
+    default_config_home, ConfigEntry, ConfigError, ConfigLoader, ConfigSource, CredentialConfig,
+    CustomProviderConfig, McpConfigCollection, McpManagedProxyServerConfig, McpOAuthConfig,
+    McpRemoteServerConfig, McpSdkServerConfig, McpServerConfig, McpStdioServerConfig, McpTransport,
     McpWebSocketServerConfig, OAuthConfig, ResolvedPermissionMode, RuntimeConfig,
     RuntimeFeatureConfig, RuntimeHookConfig, RuntimePluginConfig, ScopedMcpServerConfig,
     CODINEER_SETTINGS_SCHEMA_NAME,

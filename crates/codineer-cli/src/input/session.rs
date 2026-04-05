@@ -3,13 +3,17 @@ use std::io::Write;
 
 use crossterm::cursor::{MoveToColumn, MoveUp};
 use crossterm::queue;
-use crossterm::terminal::{Clear, ClearType};
+use crossterm::terminal::{self, Clear, ClearType};
+
+use super::suggestions::SuggestionState;
 
 use super::text::{
     is_vim_toggle, line_end, line_start, move_vertical, next_boundary, previous_boundary,
     previous_command_boundary, remove_previous_char, render_selected_text, selection_bounds,
     to_u16,
 };
+use crate::terminal_width::strip_ansi;
+use unicode_width::UnicodeWidthStr;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReadOutcome {
@@ -185,11 +189,12 @@ impl EditSession {
         out.flush()
     }
 
-    pub(super) fn render(
+    pub(super) fn render_with_suggestions(
         &mut self,
         out: &mut impl Write,
         base_prompt: &str,
         vim_enabled: bool,
+        suggestions: Option<&SuggestionState>,
     ) -> std::io::Result<()> {
         self.clear_render(out)?;
 
@@ -198,9 +203,16 @@ impl EditSession {
         write!(out, "{prompt}{buffer}")?;
 
         let (cursor_row, cursor_col, total_lines) = self.cursor_layout(prompt.as_ref());
-        let rows_to_move_up = total_lines.saturating_sub(cursor_row + 1);
-        if rows_to_move_up > 0 {
-            queue!(out, MoveUp(to_u16(rows_to_move_up)?))?;
+
+        let suggestion_lines = if let Some(state) = suggestions.filter(|s| !s.items.is_empty()) {
+            self.draw_suggestions(out, state)?
+        } else {
+            0
+        };
+
+        let rows_below = total_lines.saturating_sub(cursor_row + 1) + suggestion_lines;
+        if rows_below > 0 {
+            queue!(out, MoveUp(to_u16(rows_below)?))?;
         }
         queue!(out, MoveToColumn(to_u16(cursor_col)?))?;
         out.flush()?;
@@ -208,6 +220,67 @@ impl EditSession {
         self.rendered_cursor_row = cursor_row;
         self.rendered_lines = total_lines;
         Ok(())
+    }
+
+    fn draw_suggestions(
+        &self,
+        out: &mut impl Write,
+        state: &SuggestionState,
+    ) -> std::io::Result<usize> {
+        let (cols, rows) = terminal::size().unwrap_or((80, 24));
+        let cols = cols as usize;
+        let max_visible = std::cmp::min(6, (rows as usize).saturating_sub(3)).max(1);
+
+        let total = state.items.len();
+        let start = if total <= max_visible {
+            0
+        } else {
+            let center = max_visible / 2;
+            state
+                .selected
+                .saturating_sub(center)
+                .min(total - max_visible)
+        };
+        let end = (start + max_visible).min(total);
+
+        let p = crate::style::Palette::for_stdout();
+
+        write!(out, "\r\n{}{}{}", p.dim, "─".repeat(cols), p.r)?;
+        let mut lines_drawn: usize = 1;
+
+        let name_col = (cols * 40 / 100).clamp(12, 30);
+
+        for (i, item) in state.items[start..end].iter().enumerate() {
+            let idx = start + i;
+            let is_selected = idx == state.selected;
+
+            let display_w = crate::terminal_width::display_width(&item.display);
+            let pad = name_col.saturating_sub(display_w);
+
+            if is_selected {
+                write!(out, "\r\n  {}{}{}", p.violet, item.display, p.r)?;
+            } else {
+                write!(out, "\r\n  {}", item.display)?;
+            }
+
+            if !item.description.is_empty() {
+                let desc_max = cols.saturating_sub(name_col + 4);
+                let desc = if item.description.len() > desc_max {
+                    &item.description[..desc_max]
+                } else {
+                    &item.description
+                };
+                if is_selected {
+                    write!(out, "{}{}{}{}", " ".repeat(pad), p.violet, desc, p.r)?;
+                } else {
+                    write!(out, "{}{}{}{}", " ".repeat(pad), p.dim, desc, p.r)?;
+                }
+            }
+
+            lines_drawn += 1;
+        }
+
+        Ok(lines_drawn)
     }
 
     pub(super) fn finalize_render(
@@ -220,7 +293,12 @@ impl EditSession {
         let prompt = self.prompt(base_prompt, vim_enabled);
         let buffer = self.visible_buffer();
         write!(out, "{prompt}{buffer}")?;
-        writeln!(out)
+        // In raw mode `\n` only moves down without resetting the column.
+        // Use `\r\n` so the cursor lands at column 0 on the new line before
+        // raw mode is disabled, ensuring any subsequent output starts at the
+        // left margin.
+        write!(out, "\r\n")?;
+        out.flush()
     }
 
     fn cursor_layout(&self, prompt: &str) -> (usize, usize, usize) {
@@ -238,8 +316,8 @@ impl EditSession {
         let cursor_prefix = &active_text[..cursor];
         let cursor_row = cursor_prefix.bytes().filter(|byte| *byte == b'\n').count();
         let cursor_col = match cursor_prefix.rsplit_once('\n') {
-            Some((_, suffix)) => suffix.chars().count(),
-            None => prompt.chars().count() + cursor_prefix.chars().count(),
+            Some((_, suffix)) => strip_ansi(suffix).width(),
+            None => strip_ansi(prompt).width() + strip_ansi(cursor_prefix).width(),
         };
         let total_lines = active_text.bytes().filter(|byte| *byte == b'\n').count() + 1;
         (cursor_row, cursor_col, total_lines)

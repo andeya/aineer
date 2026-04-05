@@ -274,15 +274,17 @@ codineer -p "check for security issues" \
 
 Codineer merges JSON settings from multiple files (highest to lowest precedence):
 
-| File                            | Scope                     | Committed?      |
-| ------------------------------- | ------------------------- | --------------- |
-| `.codineer/settings.local.json` | Project — local overrides | No (gitignored) |
-| `.codineer/settings.json`       | Project — team settings   | Yes             |
-| `.codineer.json`                | Project — flat config     | Yes             |
-| `~/.codineer/settings.json`     | User — global             | —               |
-| `~/.codineer.json`              | User — global flat config | —               |
+| File                            | Scope                          | Committed?      |
+| ------------------------------- | ------------------------------ | --------------- |
+| `.codineer/settings.local.json` | Project — local overrides      | No (gitignored) |
+| `.codineer/settings.json`       | Project — directory config     | Yes             |
+| `.codineer.json`                | Project — flat config          | Yes             |
+| `~/.codineer/settings.json`     | User — global directory config | —               |
+| `~/.codineer.json`              | User — global flat config      | —               |
 
-All files use the same schema. Objects like `env`, `providers`, and `mcpServers` are deep-merged across layers.
+Each scope has two **optional** files: a directory-based form (`settings.json`) and a flat form (`.codineer.json`). **They are not duplicates** — they are two layout choices for the same scope; when both exist the directory-based file wins. Use whichever layout you prefer; `codineer config set` always writes the directory-based file.
+
+All files use the same schema. `env`, `providers`, and `mcpServers` objects are deep-merged across layers. For `mcpServers`, a server name defined in a later file replaces (not deep-merges) the earlier definition.
 
 ### Settings reference
 
@@ -338,7 +340,7 @@ Set via shell export **or** the `"env"` section in settings.json (shell exports 
 | `DASHSCOPE_API_KEY`       | Alibaba Cloud DashScope (OpenAI-compatible)         |
 | `OLLAMA_HOST`              | Ollama endpoint (e.g. `http://192.168.1.100:11434`) |
 | `CODINEER_WORKSPACE_ROOT`  | Override workspace root                             |
-| `CODINEER_CONFIG_HOME`     | Override config dir (`~/.codineer`)                 |
+| `CODINEER_CONFIG_HOME`     | Override global config dir (default `~/.codineer`); the global flat config moves to the parent of this dir |
 | `CODINEER_PERMISSION_MODE` | Default permission mode                             |
 | `NO_COLOR`                 | Disable ANSI colors                                 |
 | `CLICOLOR=0`               | Disable ANSI colors (alternative)                   |

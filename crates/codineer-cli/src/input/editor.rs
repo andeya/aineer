@@ -4,36 +4,30 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifier
 use crossterm::terminal;
 
 use super::session::{EditSession, EditorMode, KeyAction, ReadOutcome, YankBuffer, YankShape};
-use super::text::{
-    current_line_delete_range, is_vim_toggle, line_end, next_boundary, slash_command_prefix,
-};
+use super::suggestions::{self, CommandEntry, SuggestionState, SuggestionTrigger};
+use super::text::{current_line_delete_range, is_vim_toggle, line_end, next_boundary};
 
 pub struct LineEditor {
     prompt: String,
-    completions: Vec<String>,
+    command_specs: Vec<CommandEntry>,
     pub(super) history: Vec<String>,
     yank_buffer: YankBuffer,
     pub(super) vim_enabled: bool,
-    completion_state: Option<CompletionState>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct CompletionState {
-    prefix: String,
-    matches: Vec<String>,
-    next_index: usize,
+    suggestion_state: Option<SuggestionState>,
+    dismissed_for_input: Option<String>,
 }
 
 impl LineEditor {
     #[must_use]
-    pub fn new(prompt: impl Into<String>, completions: Vec<String>) -> Self {
+    pub fn new(prompt: impl Into<String>, command_specs: Vec<CommandEntry>) -> Self {
         Self {
             prompt: prompt.into(),
-            completions,
+            command_specs,
             history: Vec::new(),
             yank_buffer: YankBuffer::default(),
             vim_enabled: false,
-            completion_state: None,
+            suggestion_state: None,
+            dismissed_for_input: None,
         }
     }
 
@@ -54,7 +48,7 @@ impl LineEditor {
         let _raw_mode = RawModeGuard::new()?;
         let mut stdout = io::stdout();
         let mut session = EditSession::new(self.vim_enabled);
-        session.render(&mut stdout, &self.prompt, self.vim_enabled)?;
+        session.render_with_suggestions(&mut stdout, &self.prompt, self.vim_enabled, None)?;
 
         loop {
             let Event::Key(key) = event::read()? else {
@@ -66,7 +60,13 @@ impl LineEditor {
 
             match self.handle_key_event(&mut session, key) {
                 KeyAction::Continue => {
-                    session.render(&mut stdout, &self.prompt, self.vim_enabled)?;
+                    self.update_suggestions(&session);
+                    session.render_with_suggestions(
+                        &mut stdout,
+                        &self.prompt,
+                        self.vim_enabled,
+                        self.suggestion_state.as_ref(),
+                    )?;
                 }
                 KeyAction::Submit(line) => {
                     session.finalize_render(&mut stdout, &self.prompt, self.vim_enabled)?;
@@ -95,7 +95,12 @@ impl LineEditor {
                         }
                     )?;
                     session = EditSession::new(self.vim_enabled);
-                    session.render(&mut stdout, &self.prompt, self.vim_enabled)?;
+                    session.render_with_suggestions(
+                        &mut stdout,
+                        &self.prompt,
+                        self.vim_enabled,
+                        None,
+                    )?;
                 }
             }
         }
@@ -135,15 +140,152 @@ impl LineEditor {
         }
     }
 
+    // --- Suggestion handling (Claude Code aligned) ---
+
+    fn update_suggestions(&mut self, session: &EditSession) {
+        if self.dismissed_for_input.as_deref() == Some(&session.text) {
+            return;
+        }
+        if self.dismissed_for_input.is_some() {
+            self.dismissed_for_input = None;
+        }
+
+        let prev = self
+            .suggestion_state
+            .as_ref()
+            .map(|s| (s.trigger, s.items.len(), s.selected));
+
+        if let Some(mut state) =
+            suggestions::slash_suggestions(&session.text, session.cursor, &self.command_specs)
+        {
+            Self::restore_selection(&mut state, prev);
+            self.suggestion_state = Some(state);
+            return;
+        }
+
+        if session.mode != EditorMode::Command {
+            if let Some(mut state) = suggestions::file_suggestions(&session.text, session.cursor) {
+                Self::restore_selection(&mut state, prev);
+                self.suggestion_state = Some(state);
+                return;
+            }
+        }
+
+        self.suggestion_state = None;
+    }
+
+    fn restore_selection(
+        state: &mut SuggestionState,
+        prev: Option<(SuggestionTrigger, usize, usize)>,
+    ) {
+        if let Some((trigger, count, idx)) = prev {
+            if trigger == state.trigger && count == state.items.len() && idx < state.items.len() {
+                state.selected = idx;
+            }
+        }
+    }
+
+    fn accept_suggestion(&mut self, session: &mut EditSession) {
+        let Some(state) = self.suggestion_state.take() else {
+            return;
+        };
+        let item = &state.items[state.selected];
+        match state.trigger {
+            SuggestionTrigger::Slash => {
+                session.text = item.completion.clone();
+                session.cursor = session.text.len();
+            }
+            SuggestionTrigger::At {
+                token_start,
+                token_len,
+            } => {
+                session
+                    .text
+                    .replace_range(token_start..token_start + token_len, &item.completion);
+                session.cursor = token_start + item.completion.len();
+            }
+        }
+    }
+
+    fn accept_suggestion_and_maybe_submit(&mut self, session: &mut EditSession) -> KeyAction {
+        let Some(state) = self.suggestion_state.take() else {
+            return session.submit_or_toggle();
+        };
+        let item = state.items[state.selected].clone();
+
+        match state.trigger {
+            SuggestionTrigger::Slash => {
+                session.text = item.completion.clone();
+                session.cursor = session.text.len();
+                if item.execute_on_enter {
+                    KeyAction::Submit(session.text.trim().to_string())
+                } else {
+                    KeyAction::Continue
+                }
+            }
+            SuggestionTrigger::At {
+                token_start,
+                token_len,
+            } => {
+                // On Enter, always append a space so the accepted token is
+                // cleanly separated from any following text the user types.
+                // Tab keeps the raw completion (allowing directory drill-down).
+                let completion = ensure_trailing_space(&item.completion);
+                session
+                    .text
+                    .replace_range(token_start..token_start + token_len, &completion);
+                session.cursor = token_start + completion.len();
+                KeyAction::Continue
+            }
+        }
+    }
+
+    // --- Key event dispatch ---
+
     pub(super) fn handle_key_event(
         &mut self,
         session: &mut EditSession,
         key: KeyEvent,
     ) -> KeyAction {
-        if key.code != KeyCode::Tab {
-            self.completion_state = None;
+        // When suggestions are visible, intercept navigation keys
+        if self.suggestion_state.is_some() {
+            match key.code {
+                KeyCode::Up if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    if let Some(state) = &mut self.suggestion_state {
+                        state.selected = if state.selected == 0 {
+                            state.items.len() - 1
+                        } else {
+                            state.selected - 1
+                        };
+                    }
+                    return KeyAction::Continue;
+                }
+                KeyCode::Down if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    if let Some(state) = &mut self.suggestion_state {
+                        state.selected = (state.selected + 1) % state.items.len();
+                    }
+                    return KeyAction::Continue;
+                }
+                KeyCode::Tab => {
+                    self.accept_suggestion(session);
+                    return KeyAction::Continue;
+                }
+                KeyCode::Enter if !key.modifiers.contains(KeyModifiers::SHIFT) => {
+                    return self.accept_suggestion_and_maybe_submit(session);
+                }
+                KeyCode::Esc => {
+                    self.dismissed_for_input = Some(session.text.clone());
+                    self.suggestion_state = None;
+                    return KeyAction::Continue;
+                }
+                _ => {
+                    // Fall through to normal handling; suggestions will be
+                    // re-evaluated after the key is processed via update_suggestions.
+                }
+            }
         }
 
+        // Normal key handling (unchanged from original)
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             match key.code {
                 KeyCode::Char('c' | 'C') => {
@@ -211,10 +353,7 @@ impl LineEditor {
                 session.move_line_end();
                 KeyAction::Continue
             }
-            KeyCode::Tab => {
-                self.complete_slash_command(session);
-                KeyAction::Continue
-            }
+            KeyCode::Tab => KeyAction::Continue,
             KeyCode::Char(ch) => {
                 self.handle_char(session, ch);
                 KeyAction::Continue
@@ -325,65 +464,6 @@ impl LineEditor {
         session.cursor = insert_at + self.yank_buffer.text.len();
     }
 
-    pub(super) fn complete_slash_command(&mut self, session: &mut EditSession) {
-        if session.mode == EditorMode::Command {
-            self.completion_state = None;
-            return;
-        }
-        if let Some(state) = self
-            .completion_state
-            .as_mut()
-            .filter(|_| session.cursor == session.text.len())
-            .filter(|state| {
-                state
-                    .matches
-                    .iter()
-                    .any(|candidate| candidate == &session.text)
-            })
-        {
-            let candidate = state.matches[state.next_index % state.matches.len()].clone();
-            state.next_index += 1;
-            session.text.replace_range(..session.cursor, &candidate);
-            session.cursor = candidate.len();
-            return;
-        }
-        let Some(prefix) = slash_command_prefix(&session.text, session.cursor) else {
-            self.completion_state = None;
-            return;
-        };
-        let matches = self
-            .completions
-            .iter()
-            .filter(|candidate| candidate.starts_with(prefix) && candidate.as_str() != prefix)
-            .cloned()
-            .collect::<Vec<_>>();
-        if matches.is_empty() {
-            self.completion_state = None;
-            return;
-        }
-
-        let candidate = if let Some(state) = self
-            .completion_state
-            .as_mut()
-            .filter(|state| state.prefix == prefix && state.matches == matches)
-        {
-            let index = state.next_index % state.matches.len();
-            state.next_index += 1;
-            state.matches[index].clone()
-        } else {
-            let candidate = matches[0].clone();
-            self.completion_state = Some(CompletionState {
-                prefix: prefix.to_string(),
-                matches,
-                next_index: 1,
-            });
-            candidate
-        };
-
-        session.text.replace_range(..session.cursor, &candidate);
-        session.cursor = candidate.len();
-    }
-
     fn history_up(&self, session: &mut EditSession) {
         if session.mode == EditorMode::Command || self.history.is_empty() {
             return;
@@ -424,6 +504,15 @@ impl LineEditor {
         } else {
             session.mode = EditorMode::Plain;
         }
+    }
+}
+
+/// Return `s` with exactly one trailing space, adding one only if absent.
+fn ensure_trailing_space(s: &str) -> String {
+    if s.ends_with(' ') {
+        s.to_string()
+    } else {
+        format!("{s} ")
     }
 }
 

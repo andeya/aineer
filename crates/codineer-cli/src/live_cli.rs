@@ -1,19 +1,17 @@
 use std::env;
 use std::fs;
-use std::io;
 use std::process::Command;
 use std::sync::Arc;
 
 use crate::input;
-use crate::render::{Spinner, TerminalRenderer};
 use commands::{
     handle_agents_slash_command, handle_branch_slash_command, handle_commit_push_pr_slash_command,
     handle_plugins_slash_command, handle_skills_slash_command, handle_worktree_slash_command,
     CommitPushPrRequest, SlashCommand,
 };
 use runtime::{
-    CompactionConfig, ConfigLoader, ContentBlock, ConversationRuntime, LspContextEnrichment,
-    LspManager, LspServerConfig, PermissionMode, Session,
+    CompactionConfig, ConfigLoader, ConversationRuntime, LspContextEnrichment, LspManager,
+    PermissionMode, Session,
 };
 use serde_json::json;
 
@@ -21,9 +19,7 @@ use crate::cli::{
     create_mcp_manager, permission_mode_from_label, resolve_model_alias, AllowedToolSet,
     CliOutputFormat, SharedMcpManager,
 };
-use crate::help::{
-    render_repl_help, render_unknown_repl_command, slash_command_completion_candidates,
-};
+use crate::help::{render_repl_help, render_unknown_repl_command, slash_command_entries};
 use crate::progress::{InternalPromptProgressReporter, InternalPromptProgressRun};
 use crate::reports::{
     format_compact_report, format_cost_report, format_model_report, format_model_switch_report,
@@ -45,7 +41,7 @@ use crate::workspace::{
 };
 
 use crate::{
-    banner::{welcome_banner, BannerContext},
+    banner::{welcome_banner, BannerContext, BANNER_INNER_WIDTH},
     build_plugin_manager, build_system_prompt, build_system_prompt_with_lsp, run_init,
 };
 pub(crate) struct LiveCli {
@@ -96,7 +92,7 @@ impl LiveCli {
         })?;
         let lsp_manager = env::current_dir()
             .ok()
-            .and_then(|cwd| detect_lsp_servers(&cwd));
+            .and_then(|cwd| crate::lsp_detect::detect_lsp_servers(&cwd));
         let cli = Self {
             model,
             allowed_tools,
@@ -156,37 +152,22 @@ impl LiveCli {
             }
         }
 
-        let mut spinner = Spinner::new();
-        let mut stdout = io::stdout();
-        spinner.tick(
-            "🦀 Thinking...",
-            TerminalRenderer::new().color_theme(),
-            &mut stdout,
-        )?;
+        let pe = crate::style::Palette::for_stderr();
+        eprintln!("{}  ⎿  thinking…{}", pe.dim, pe.r);
         let mut permission_prompter = CliPermissionPrompter::new(self.permission_mode);
         let result = self.runtime.run_turn(input, Some(&mut permission_prompter));
         match result {
             Ok(_) => {
-                spinner.finish(
-                    "✨ Done",
-                    TerminalRenderer::new().color_theme(),
-                    &mut stdout,
-                )?;
                 println!();
                 self.persist_session()?;
                 Ok(())
             }
             Err(error) => {
-                spinner.fail(
-                    "❌ Request failed",
-                    TerminalRenderer::new().color_theme(),
-                    &mut stdout,
-                )?;
                 println!();
                 let p = crate::style::Palette::for_stdout();
                 println!(
-                    "  {}└{} {}{}{}",
-                    p.gray,
+                    "{}  ⎿  {}{}{}{}",
+                    p.dim,
                     p.r,
                     p.red_fg,
                     error.to_string().replace('\n', " "),
@@ -862,13 +843,22 @@ pub(crate) fn run_repl(
     let p = crate::style::Palette::for_stdout();
     let prompt_string;
     let prompt = if p.gray.is_empty() {
-        "> "
+        "❯ "
     } else {
-        prompt_string = format!("{}>{} ", p.gray, p.r);
+        prompt_string = format!("{}❯{} ", p.violet, p.r);
         &prompt_string
     };
-    let mut editor = input::LineEditor::new(prompt, slash_command_completion_candidates());
+    let mut editor = input::LineEditor::new(prompt, slash_command_entries());
     println!("{}", cli.startup_banner());
+    if p.gray.is_empty() {
+        println!("{}", "-".repeat(BANNER_INNER_WIDTH + 2));
+    } else {
+        println!("{}{}{}", p.violet, "─".repeat(BANNER_INNER_WIDTH + 2), p.r);
+    }
+    println!(
+        "{}{}? for shortcuts · /help · Esc cancels line{}",
+        p.dim, p.gray, p.r
+    );
 
     loop {
         match editor.read_line()? {
@@ -889,7 +879,8 @@ pub(crate) fn run_repl(
                     continue;
                 }
                 editor.push_history(&input);
-                cli.run_turn(&input)?;
+                let enriched = process_at_mentioned_files(&input);
+                cli.run_turn(&enriched)?;
             }
             input::ReadOutcome::Cancel => {}
             input::ReadOutcome::Exit => {
@@ -904,152 +895,6 @@ pub(crate) fn run_repl(
     cli.shutdown_mcp();
     Ok(())
 }
-fn final_assistant_text(summary: &runtime::TurnSummary) -> String {
-    summary
-        .assistant_messages
-        .last()
-        .map(|message| {
-            message
-                .blocks
-                .iter()
-                .filter_map(|block| match block {
-                    ContentBlock::Text { text } => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join("")
-        })
-        .unwrap_or_default()
-}
-
-fn add_lsp_if_found(
-    configs: &mut Vec<LspServerConfig>,
-    workspace_root: &std::path::Path,
-    name: &str,
-    command: &str,
-    args: &[&str],
-    extensions: &[(&str, &str)],
-) {
-    use std::collections::BTreeMap;
-    if which_command(command) {
-        configs.push(LspServerConfig {
-            name: name.to_string(),
-            command: command.to_string(),
-            args: args.iter().map(|a| (*a).to_string()).collect(),
-            env: BTreeMap::new(),
-            workspace_root: workspace_root.to_path_buf(),
-            initialization_options: None,
-            extension_to_language: extensions
-                .iter()
-                .map(|(ext, lang)| ((*ext).to_string(), (*lang).to_string()))
-                .collect(),
-        });
-    }
-}
-
-fn detect_lsp_servers(workspace_root: &std::path::Path) -> Option<LspManager> {
-    let mut configs = Vec::new();
-
-    add_lsp_if_found(
-        &mut configs,
-        workspace_root,
-        "rust-analyzer",
-        "rust-analyzer",
-        &[],
-        &[(".rs", "rust")],
-    );
-    add_lsp_if_found(
-        &mut configs,
-        workspace_root,
-        "typescript-language-server",
-        "typescript-language-server",
-        &["--stdio"],
-        &[
-            (".ts", "typescript"),
-            (".tsx", "typescriptreact"),
-            (".js", "javascript"),
-            (".jsx", "javascriptreact"),
-        ],
-    );
-    add_lsp_if_found(
-        &mut configs,
-        workspace_root,
-        "pyright",
-        "pyright-langserver",
-        &["--stdio"],
-        &[(".py", "python")],
-    );
-    add_lsp_if_found(
-        &mut configs,
-        workspace_root,
-        "gopls",
-        "gopls",
-        &["serve"],
-        &[(".go", "go")],
-    );
-
-    if configs.is_empty() {
-        return None;
-    }
-    LspManager::new(configs).ok()
-}
-
-fn which_command(name: &str) -> bool {
-    #[cfg(windows)]
-    {
-        Command::new("where")
-            .arg(name)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .is_ok_and(|s| s.success())
-    }
-    #[cfg(not(windows))]
-    {
-        Command::new("sh")
-            .arg("-c")
-            .arg(format!("command -v {name} >/dev/null 2>&1"))
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .is_ok_and(|s| s.success())
-    }
-}
-
-fn collect_tool_uses(summary: &runtime::TurnSummary) -> Vec<serde_json::Value> {
-    summary
-        .assistant_messages
-        .iter()
-        .flat_map(|message| message.blocks.iter())
-        .filter_map(|block| match block {
-            ContentBlock::ToolUse { id, name, input } => Some(json!({
-                "id": id,
-                "name": name,
-                "input": input,
-            })),
-            _ => None,
-        })
-        .collect()
-}
-
-fn collect_tool_results(summary: &runtime::TurnSummary) -> Vec<serde_json::Value> {
-    summary
-        .tool_results
-        .iter()
-        .flat_map(|message| message.blocks.iter())
-        .filter_map(|block| match block {
-            ContentBlock::ToolResult {
-                tool_use_id,
-                tool_name,
-                output,
-                is_error,
-            } => Some(json!({
-                "tool_use_id": tool_use_id,
-                "tool_name": tool_name,
-                "output": output,
-                "is_error": is_error,
-            })),
-            _ => None,
-        })
-        .collect()
-}
+use crate::turn_helpers::{
+    collect_tool_results, collect_tool_uses, final_assistant_text, process_at_mentioned_files,
+};

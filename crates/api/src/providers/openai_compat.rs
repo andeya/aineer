@@ -1,4 +1,9 @@
-use std::collections::{BTreeMap, VecDeque};
+#[path = "openai_compat_sse.rs"]
+mod openai_compat_sse;
+#[path = "openai_compat_stream.rs"]
+mod openai_compat_stream;
+
+use std::collections::VecDeque;
 
 use serde::{Deserialize, Deserializer};
 use serde_json::{json, Value};
@@ -6,11 +11,14 @@ use serde_json::{json, Value};
 use crate::error::ApiError;
 use crate::providers::{parse_custom_provider_prefix, RetryPolicy};
 use crate::types::{
-    ContentBlockDelta, ContentBlockDeltaEvent, ContentBlockStartEvent, ContentBlockStopEvent,
-    InputContentBlock, InputMessage, MessageDelta, MessageDeltaEvent, MessageRequest,
-    MessageResponse, MessageStartEvent, MessageStopEvent, OutputContentBlock, StreamEvent,
+    InputContentBlock, InputMessage, MessageRequest, MessageResponse, OutputContentBlock,
     ToolChoice, ToolDefinition, ToolResultContentBlock, Usage,
 };
+
+use openai_compat_sse::{first_non_empty_field, OpenAiSseParser};
+use openai_compat_stream::StreamState;
+
+pub use openai_compat_stream::MessageStream;
 
 pub const DEFAULT_XAI_BASE_URL: &str = "https://api.x.ai/v1";
 pub const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
@@ -63,7 +71,6 @@ pub struct OpenAiCompatClient {
     http: reqwest::Client,
     api_key: String,
     base_url: String,
-    /// Extra query segment for the chat-completions URL, e.g. `api-version=2024-02-15-preview`.
     endpoint_query: Option<String>,
     retry: RetryPolicy,
 }
@@ -90,8 +97,6 @@ impl OpenAiCompatClient {
         }
     }
 
-    /// Construct a client for a custom / local provider.
-    /// `api_key` may be empty for local providers like Ollama and LM Studio.
     #[must_use]
     pub fn new_custom(base_url: impl Into<String>, api_key: impl Into<String>) -> Self {
         Self {
@@ -103,8 +108,6 @@ impl OpenAiCompatClient {
         }
     }
 
-    /// Merged into the chat-completions request URL after any query string already present on `base_url`.
-    /// Pass a single segment such as `api-version=2024-02-15-preview` (no leading `?`).
     #[must_use]
     pub fn with_endpoint_query(mut self, endpoint_query: Option<String>) -> Self {
         self.endpoint_query = endpoint_query
@@ -242,315 +245,9 @@ impl OpenAiCompatClient {
     }
 }
 
-#[derive(Debug)]
-pub struct MessageStream {
-    request_id: Option<String>,
-    response: reqwest::Response,
-    parser: OpenAiSseParser,
-    pending: VecDeque<StreamEvent>,
-    done: bool,
-    state: StreamState,
-}
-
-impl MessageStream {
-    #[must_use]
-    pub fn request_id(&self) -> Option<&str> {
-        self.request_id.as_deref()
-    }
-
-    pub async fn next_event(&mut self) -> Result<Option<StreamEvent>, ApiError> {
-        loop {
-            if let Some(event) = self.pending.pop_front() {
-                return Ok(Some(event));
-            }
-
-            if self.done {
-                self.pending.extend(self.state.finish());
-                if let Some(event) = self.pending.pop_front() {
-                    return Ok(Some(event));
-                }
-                return Ok(None);
-            }
-
-            match self.response.chunk().await? {
-                Some(chunk) => {
-                    for parsed in self.parser.push(&chunk)? {
-                        self.pending.extend(self.state.ingest_chunk(parsed));
-                    }
-                }
-                None => {
-                    self.done = true;
-                }
-            }
-        }
-    }
-}
-
-#[derive(Debug, Default)]
-struct OpenAiSseParser {
-    buffer: Vec<u8>,
-}
-
-impl OpenAiSseParser {
-    fn new() -> Self {
-        Self::default()
-    }
-
-    fn push(&mut self, chunk: &[u8]) -> Result<Vec<ChatCompletionChunk>, ApiError> {
-        self.buffer.extend_from_slice(chunk);
-        if self.buffer.len() > 16 * 1024 * 1024 {
-            return Err(ApiError::ResponsePayloadTooLarge {
-                limit: 16 * 1024 * 1024,
-            });
-        }
-        let mut events = Vec::new();
-
-        while let Some(frame) = next_sse_frame(&mut self.buffer) {
-            if let Some(event) = parse_sse_frame(&frame)? {
-                events.push(event);
-            }
-        }
-
-        Ok(events)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TextPhase {
-    Pending,
-    Active,
-    Done,
-}
-
-#[derive(Debug)]
-struct StreamState {
-    model: String,
-    message_started: bool,
-    text_phase: TextPhase,
-    finished: bool,
-    stop_reason: Option<String>,
-    usage: Option<Usage>,
-    tool_calls: BTreeMap<u32, ToolCallState>,
-}
-
-impl StreamState {
-    fn new(model: String) -> Self {
-        Self {
-            model,
-            message_started: false,
-            text_phase: TextPhase::Pending,
-            finished: false,
-            stop_reason: None,
-            usage: None,
-            tool_calls: BTreeMap::new(),
-        }
-    }
-
-    fn ingest_chunk(&mut self, chunk: ChatCompletionChunk) -> Vec<StreamEvent> {
-        let mut events = Vec::new();
-        if !self.message_started {
-            self.message_started = true;
-            events.push(StreamEvent::MessageStart(MessageStartEvent {
-                message: MessageResponse {
-                    id: chunk.id.clone(),
-                    kind: "message".to_string(),
-                    role: "assistant".to_string(),
-                    content: Vec::new(),
-                    model: chunk.model.clone().unwrap_or_else(|| self.model.clone()),
-                    stop_reason: None,
-                    stop_sequence: None,
-                    usage: Usage {
-                        input_tokens: 0,
-                        cache_creation_input_tokens: 0,
-                        cache_read_input_tokens: 0,
-                        output_tokens: 0,
-                    },
-                    request_id: None,
-                },
-            }));
-        }
-
-        if let Some(usage) = chunk.usage {
-            self.usage = Some(Usage {
-                input_tokens: usage.prompt_tokens,
-                cache_creation_input_tokens: 0,
-                cache_read_input_tokens: 0,
-                output_tokens: usage.completion_tokens,
-            });
-        }
-
-        for choice in chunk.choices {
-            if let Some(content) = choice.delta.stream_text_fragment() {
-                if self.text_phase == TextPhase::Pending {
-                    self.text_phase = TextPhase::Active;
-                    events.push(StreamEvent::ContentBlockStart(ContentBlockStartEvent {
-                        index: 0,
-                        content_block: OutputContentBlock::Text {
-                            text: String::new(),
-                        },
-                    }));
-                }
-                events.push(StreamEvent::ContentBlockDelta(ContentBlockDeltaEvent {
-                    index: 0,
-                    delta: ContentBlockDelta::TextDelta { text: content },
-                }));
-            }
-
-            for tool_call in choice.delta.tool_calls {
-                let state = self.tool_calls.entry(tool_call.index).or_default();
-                state.apply(tool_call);
-                let block_index = state.block_index();
-                if !state.started {
-                    if let Some(start_event) = state.start_event() {
-                        state.started = true;
-                        events.push(StreamEvent::ContentBlockStart(start_event));
-                    } else {
-                        continue;
-                    }
-                }
-                if let Some(delta_event) = state.delta_event() {
-                    events.push(StreamEvent::ContentBlockDelta(delta_event));
-                }
-                if choice.finish_reason.as_deref() == Some("tool_calls") && !state.stopped {
-                    state.stopped = true;
-                    events.push(StreamEvent::ContentBlockStop(ContentBlockStopEvent {
-                        index: block_index,
-                    }));
-                }
-            }
-
-            if let Some(finish_reason) = choice.finish_reason {
-                self.stop_reason = Some(normalize_finish_reason(&finish_reason));
-                if finish_reason == "tool_calls" {
-                    for state in self.tool_calls.values_mut() {
-                        if state.started && !state.stopped {
-                            state.stopped = true;
-                            events.push(StreamEvent::ContentBlockStop(ContentBlockStopEvent {
-                                index: state.block_index(),
-                            }));
-                        }
-                    }
-                }
-            }
-        }
-
-        events
-    }
-
-    fn finish(&mut self) -> Vec<StreamEvent> {
-        if self.finished {
-            return Vec::new();
-        }
-        self.finished = true;
-
-        let mut events = Vec::new();
-        if self.text_phase == TextPhase::Active {
-            self.text_phase = TextPhase::Done;
-            events.push(StreamEvent::ContentBlockStop(ContentBlockStopEvent {
-                index: 0,
-            }));
-        }
-
-        for state in self.tool_calls.values_mut() {
-            if !state.started {
-                if let Some(start_event) = state.start_event() {
-                    state.started = true;
-                    events.push(StreamEvent::ContentBlockStart(start_event));
-                    if let Some(delta_event) = state.delta_event() {
-                        events.push(StreamEvent::ContentBlockDelta(delta_event));
-                    }
-                }
-            }
-            if state.started && !state.stopped {
-                state.stopped = true;
-                events.push(StreamEvent::ContentBlockStop(ContentBlockStopEvent {
-                    index: state.block_index(),
-                }));
-            }
-        }
-
-        if self.message_started {
-            events.push(StreamEvent::MessageDelta(MessageDeltaEvent {
-                delta: MessageDelta {
-                    stop_reason: Some(
-                        self.stop_reason
-                            .clone()
-                            .unwrap_or_else(|| "end_turn".to_string()),
-                    ),
-                    stop_sequence: None,
-                },
-                usage: self.usage.clone().unwrap_or(Usage {
-                    input_tokens: 0,
-                    cache_creation_input_tokens: 0,
-                    cache_read_input_tokens: 0,
-                    output_tokens: 0,
-                }),
-            }));
-            events.push(StreamEvent::MessageStop(MessageStopEvent {}));
-        }
-        events
-    }
-}
-
-#[derive(Debug, Default)]
-struct ToolCallState {
-    openai_index: u32,
-    id: Option<String>,
-    name: Option<String>,
-    arguments: String,
-    emitted_len: usize,
-    started: bool,
-    stopped: bool,
-}
-
-impl ToolCallState {
-    fn apply(&mut self, tool_call: DeltaToolCall) {
-        self.openai_index = tool_call.index;
-        if let Some(id) = tool_call.id {
-            self.id = Some(id);
-        }
-        if let Some(name) = tool_call.function.name {
-            self.name = Some(name);
-        }
-        if let Some(arguments) = tool_call.function.arguments {
-            self.arguments.push_str(&arguments);
-        }
-    }
-
-    const fn block_index(&self) -> u32 {
-        self.openai_index + 1
-    }
-
-    fn start_event(&self) -> Option<ContentBlockStartEvent> {
-        let name = self.name.clone()?;
-        let id = self
-            .id
-            .clone()
-            .unwrap_or_else(|| format!("tool_call_{}", self.openai_index));
-        Some(ContentBlockStartEvent {
-            index: self.block_index(),
-            content_block: OutputContentBlock::ToolUse {
-                id,
-                name,
-                input: json!({}),
-            },
-        })
-    }
-
-    fn delta_event(&mut self) -> Option<ContentBlockDeltaEvent> {
-        if self.emitted_len >= self.arguments.len() {
-            return None;
-        }
-        let delta = self.arguments[self.emitted_len..].to_string();
-        self.emitted_len = self.arguments.len();
-        Some(ContentBlockDeltaEvent {
-            index: self.block_index(),
-            delta: ContentBlockDelta::InputJsonDelta {
-                partial_json: delta,
-            },
-        })
-    }
-}
+// ---------------------------------------------------------------------------
+// Non-streaming DTOs
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Deserialize)]
 struct ChatCompletionResponse {
@@ -587,13 +284,13 @@ struct ChatMessage {
 
 impl ChatMessage {
     fn assistant_visible_text(&self) -> Option<String> {
-        self.content
-            .clone()
-            .filter(|s| !s.is_empty())
-            .or_else(|| self.reasoning_content.clone().filter(|s| !s.is_empty()))
-            .or_else(|| self.reasoning.clone().filter(|s| !s.is_empty()))
-            .or_else(|| self.thought.clone().filter(|s| !s.is_empty()))
-            .or_else(|| self.thinking.clone().filter(|s| !s.is_empty()))
+        first_non_empty_field(&[
+            &self.content,
+            &self.reasoning_content,
+            &self.reasoning,
+            &self.thought,
+            &self.thinking,
+        ])
     }
 }
 
@@ -610,114 +307,11 @@ struct ResponseToolFunction {
 }
 
 #[derive(Debug, Deserialize)]
-struct OpenAiUsage {
+pub(super) struct OpenAiUsage {
     #[serde(default)]
-    prompt_tokens: u32,
+    pub prompt_tokens: u32,
     #[serde(default)]
-    completion_tokens: u32,
-}
-
-#[derive(Debug, Deserialize)]
-struct ChatCompletionChunk {
-    id: String,
-    #[serde(default)]
-    model: Option<String>,
-    #[serde(default)]
-    choices: Vec<ChunkChoice>,
-    #[serde(default)]
-    usage: Option<OpenAiUsage>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ChunkChoice {
-    #[serde(default)]
-    delta: ChunkDelta,
-    #[serde(default)]
-    finish_reason: Option<String>,
-}
-
-/// OpenAI uses a string; some providers (DashScope, Qwen) may send an array of `{type,text}` parts.
-fn deserialize_openai_text_content<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum Raw {
-        Str(String),
-        Arr(Vec<Value>),
-    }
-    match Option::<Raw>::deserialize(deserializer)? {
-        None => Ok(None),
-        Some(Raw::Str(s)) if s.is_empty() => Ok(None),
-        Some(Raw::Str(s)) => Ok(Some(s)),
-        Some(Raw::Arr(parts)) => {
-            let mut joined = String::new();
-            for part in parts {
-                match part {
-                    Value::Object(map) => {
-                        if let Some(text) = map.get("text").and_then(Value::as_str) {
-                            joined.push_str(text);
-                        } else if let Some(text) = map.get("content").and_then(Value::as_str) {
-                            joined.push_str(text);
-                        }
-                    }
-                    Value::String(s) => joined.push_str(&s),
-                    _ => {}
-                }
-            }
-            Ok((!joined.is_empty()).then_some(joined))
-        }
-    }
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct ChunkDelta {
-    #[serde(default, deserialize_with = "deserialize_openai_text_content")]
-    content: Option<String>,
-    /// Qwen / DashScope reasoning models stream thinking here before `content`.
-    #[serde(default)]
-    reasoning_content: Option<String>,
-    /// Ollama and some stacks use `reasoning` instead of `reasoning_content`.
-    #[serde(default)]
-    reasoning: Option<String>,
-    /// Vendor aliases seen in the wild for thinking streams.
-    #[serde(default)]
-    thought: Option<String>,
-    #[serde(default)]
-    thinking: Option<String>,
-    #[serde(default)]
-    tool_calls: Vec<DeltaToolCall>,
-}
-
-impl ChunkDelta {
-    fn stream_text_fragment(&self) -> Option<String> {
-        self.content
-            .clone()
-            .filter(|s| !s.is_empty())
-            .or_else(|| self.reasoning_content.clone().filter(|s| !s.is_empty()))
-            .or_else(|| self.reasoning.clone().filter(|s| !s.is_empty()))
-            .or_else(|| self.thought.clone().filter(|s| !s.is_empty()))
-            .or_else(|| self.thinking.clone().filter(|s| !s.is_empty()))
-    }
-}
-
-#[derive(Debug, Deserialize)]
-struct DeltaToolCall {
-    #[serde(default)]
-    index: u32,
-    #[serde(default)]
-    id: Option<String>,
-    #[serde(default)]
-    function: DeltaFunction,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct DeltaFunction {
-    #[serde(default)]
-    name: Option<String>,
-    #[serde(default)]
-    arguments: Option<String>,
+    pub completion_tokens: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -732,7 +326,10 @@ struct ErrorBody {
     message: Option<String>,
 }
 
-/// Model name sent to upstream OpenAI-compatible APIs (strip `provider/` prefix).
+// ---------------------------------------------------------------------------
+// Request / response mapping
+// ---------------------------------------------------------------------------
+
 fn upstream_openai_model(model: &str) -> String {
     parse_custom_provider_prefix(model)
         .map(|(_, rest)| rest.to_string())
@@ -752,9 +349,11 @@ fn build_chat_completion_request(request: &MessageRequest) -> Value {
     }
 
     let upstream_model = upstream_openai_model(&request.model);
+    const MAX_TOKENS_OPENAI_COMPAT_CAP: u32 = 32_768;
+    let max_tokens = request.max_tokens.clamp(1, MAX_TOKENS_OPENAI_COMPAT_CAP);
     let mut payload = json!({
         "model": upstream_model,
-        "max_tokens": request.max_tokens,
+        "max_tokens": max_tokens,
         "messages": messages,
         "stream": request.stream,
     });
@@ -909,50 +508,48 @@ fn parse_tool_arguments(arguments: &str) -> Value {
     serde_json::from_str(arguments).unwrap_or_else(|_| json!({ "raw": arguments }))
 }
 
-fn next_sse_frame(buffer: &mut Vec<u8>) -> Option<String> {
-    let separator = buffer
-        .windows(2)
-        .position(|window| window == b"\n\n")
-        .map(|position| (position, 2))
-        .or_else(|| {
-            buffer
-                .windows(4)
-                .position(|window| window == b"\r\n\r\n")
-                .map(|position| (position, 4))
-        })?;
+// ---------------------------------------------------------------------------
+// Deserialization helpers
+// ---------------------------------------------------------------------------
 
-    let (position, separator_len) = separator;
-    let frame = buffer.drain(..position + separator_len).collect::<Vec<_>>();
-    let frame_len = frame.len().saturating_sub(separator_len);
-    Some(String::from_utf8_lossy(&frame[..frame_len]).into_owned())
+/// OpenAI-compatible APIs usually send a string; some use `[{type,text}]`-style array parts.
+fn deserialize_openai_text_content<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Raw {
+        Str(String),
+        Arr(Vec<Value>),
+    }
+    match Option::<Raw>::deserialize(deserializer)? {
+        None => Ok(None),
+        Some(Raw::Str(s)) if s.is_empty() => Ok(None),
+        Some(Raw::Str(s)) => Ok(Some(s)),
+        Some(Raw::Arr(parts)) => {
+            let mut joined = String::new();
+            for part in parts {
+                match part {
+                    Value::Object(map) => {
+                        if let Some(text) = map.get("text").and_then(Value::as_str) {
+                            joined.push_str(text);
+                        } else if let Some(text) = map.get("content").and_then(Value::as_str) {
+                            joined.push_str(text);
+                        }
+                    }
+                    Value::String(s) => joined.push_str(&s),
+                    _ => {}
+                }
+            }
+            Ok((!joined.is_empty()).then_some(joined))
+        }
+    }
 }
 
-fn parse_sse_frame(frame: &str) -> Result<Option<ChatCompletionChunk>, ApiError> {
-    let trimmed = frame.trim();
-    if trimmed.is_empty() {
-        return Ok(None);
-    }
-
-    let mut data_lines = Vec::new();
-    for line in trimmed.lines() {
-        if line.starts_with(':') {
-            continue;
-        }
-        if let Some(data) = line.strip_prefix("data:") {
-            data_lines.push(data.trim_start());
-        }
-    }
-    if data_lines.is_empty() {
-        return Ok(None);
-    }
-    let payload = data_lines.join("\n");
-    if payload == "[DONE]" {
-        return Ok(None);
-    }
-    serde_json::from_str(&payload)
-        .map(Some)
-        .map_err(ApiError::from)
-}
+// ---------------------------------------------------------------------------
+// Env / URL / HTTP helpers
+// ---------------------------------------------------------------------------
 
 fn read_env_non_empty(key: &str) -> Result<Option<String>, ApiError> {
     match std::env::var(key) {

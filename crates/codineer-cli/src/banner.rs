@@ -1,10 +1,17 @@
-//! Welcome panel for the REPL (layout inspired by Claude Code: framed summary + resume hint).
+//! Welcome panel (Claude Code-style: border-title + two-column layout).
 
 use std::path::Path;
 
 use crate::style::Palette;
+use crate::terminal_width::{display_width, fit_display_width, truncate_display};
 
-const INNER_WIDTH: usize = 58;
+/// Inner width of framed lines (between side borders), shared with REPL chrome below the banner.
+pub(crate) const BANNER_INNER_WIDTH: usize = 76;
+
+const LEFT_COL: usize = 36;
+const DIVIDER: usize = 3; // " │ "
+const RIGHT_COL: usize = BANNER_INNER_WIDTH - LEFT_COL - DIVIDER;
+const LOGO_WIDTH: usize = 12;
 
 pub(crate) struct BannerContext<'a> {
     pub workspace_summary: &'a str,
@@ -16,97 +23,179 @@ pub(crate) struct BannerContext<'a> {
     pub has_codineer_md: bool,
 }
 
-fn fit_line(text: &str) -> String {
-    let mut t = text.to_string();
-    if t.chars().count() > INNER_WIDTH {
-        t = t
-            .chars()
-            .take(INNER_WIDTH.saturating_sub(1))
-            .chain("…".chars())
-            .collect();
+pub(crate) fn welcome_banner(color: bool, ctx: BannerContext<'_>) -> String {
+    let p = Palette::new(color);
+    let version = crate::VERSION;
+
+    let top = border_top(color, &p, version);
+    let bot = border_bottom(color, &p);
+    let left = left_column(color, &p, &ctx);
+    let right = right_column(color, &p, &ctx);
+
+    let div = if color {
+        format!(" {}│{} ", p.gray, p.r)
+    } else {
+        " | ".to_string()
+    };
+
+    let row_count = left.len().max(right.len());
+    let mut rows = Vec::with_capacity(row_count + 2);
+    rows.push(top);
+    for i in 0..row_count {
+        let l = left.get(i).map(String::as_str).unwrap_or("");
+        let r = right.get(i).map(String::as_str).unwrap_or("");
+        let lp = fit_display_width(l, LEFT_COL);
+        let rp = fit_display_width(r, RIGHT_COL);
+        let inner = fit_display_width(&format!("{lp}{div}{rp}"), BANNER_INNER_WIDTH);
+        rows.push(border_row(color, &p, &inner));
     }
-    let pad = INNER_WIDTH.saturating_sub(t.chars().count());
-    format!("{t}{}", " ".repeat(pad))
+    rows.push(bot);
+    rows.join("\n")
 }
 
-fn framed_row(color: bool, p: &Palette, text: &str) -> String {
-    let inner = fit_line(text);
+fn center_in(text: &str, width: usize) -> String {
+    let w = display_width(text);
+    if w >= width {
+        return truncate_display(text, width);
+    }
+    let pad_left = (width - w) / 2;
+    let pad_right = width - w - pad_left;
+    format!("{}{}{}", " ".repeat(pad_left), text, " ".repeat(pad_right))
+}
+
+fn border_top(color: bool, p: &Palette, version: &str) -> String {
+    // Display: ╭─ Codineer vX.Y.Z ──────...──╮
+    // Visible chars between ╭ and ╮: "─ Codineer vX.Y.Z " + bar
+    let title_visible_len = 13 + version.len();
+    let bar_len = BANNER_INNER_WIDTH.saturating_sub(title_visible_len);
     if color {
-        let b = p.amber;
-        let r = p.r;
-        format!("{b}│{r}{inner}{b}│{r}")
+        format!(
+            "{v}╭─ Codineer{r} {g}v{ver}{r} {v}{bar}╮{r}",
+            v = p.violet,
+            g = p.gray,
+            r = p.r,
+            ver = version,
+            bar = "─".repeat(bar_len),
+        )
+    } else {
+        format!("+- Codineer v{ver} {}+", "-".repeat(bar_len), ver = version,)
+    }
+}
+
+fn border_bottom(color: bool, p: &Palette) -> String {
+    if color {
+        format!("{}╰{}╯{}", p.violet, "─".repeat(BANNER_INNER_WIDTH), p.r)
+    } else {
+        format!("+{}+", "-".repeat(BANNER_INNER_WIDTH))
+    }
+}
+
+fn border_row(color: bool, p: &Palette, inner: &str) -> String {
+    if color {
+        format!("{v}│{r}{inner}{v}│{r}", v = p.violet, r = p.r)
     } else {
         format!("|{inner}|")
     }
 }
 
-fn framed_top_bottom(color: bool, p: &Palette) -> (String, String) {
-    if color {
-        let b = p.amber;
-        let r = p.r;
-        let bar = format!("{b}{}{r}", "─".repeat(INNER_WIDTH));
-        (format!("{b}╭{bar}╮{r}"), format!("{b}╰{bar}╯{r}"))
+fn left_column(color: bool, p: &Palette, ctx: &BannerContext<'_>) -> Vec<String> {
+    let welcome = if color {
+        format!("{}Welcome back · Codineer{}", p.bold_white, p.r)
     } else {
-        let bar = "-".repeat(INNER_WIDTH);
-        (format!("+{bar}+"), format!("+{bar}+"))
-    }
-}
-
-pub(crate) fn welcome_banner(color: bool, ctx: BannerContext<'_>) -> String {
-    let p = Palette::new(color);
-    let (top, bot) = framed_top_bottom(color, &p);
-
-    let title = if color {
-        let bw = p.bold_white;
-        let r = p.r;
-        format!("  {bw}Welcome back{r} · Codineer")
-    } else {
-        "  Welcome back · Codineer".to_string()
+        "Welcome back · Codineer".to_string()
     };
 
-    let tip = if ctx.has_codineer_md {
-        "Tips   /help · Tab completes slash commands · /vim for modal edit"
+    let logo: Vec<String> = if color {
+        vec![
+            format!("{}    ▄██▄{}", p.violet, p.r),
+            format!("{} ▄██▀  ▀██▄{}", p.violet, p.r),
+            format!("{}██  {}❯{}     ██{}", p.violet, p.cyan_fg, p.violet, p.r),
+            format!("{}██     {}▍{}  ██{}", p.violet, p.amber, p.violet, p.r),
+            format!("{} ▀██▄  ▄██▀{}", p.violet, p.r),
+            format!("{}    ▀██▀{}", p.violet, p.r),
+        ]
     } else {
-        "Tips   /init · /help · /status — then ask for a task"
+        vec![
+            "    ▄██▄".to_string(),
+            " ▄██▀  ▀██▄".to_string(),
+            "██  ❯     ██".to_string(),
+            "██     ▍  ██".to_string(),
+            " ▀██▄  ▄██▀".to_string(),
+            "    ▀██▀".to_string(),
+        ]
+    };
+
+    let model_line = format!("{} · {}", ctx.model, ctx.permissions);
+    let model_styled = if color {
+        format!("{}{}{}", p.dim, model_line, p.r)
+    } else {
+        model_line
+    };
+
+    let cwd_truncated = truncate_display(ctx.cwd_display, LEFT_COL - 4);
+    let cwd_styled = if color {
+        format!("{}{}{}", p.dim, cwd_truncated, p.r)
+    } else {
+        cwd_truncated
+    };
+
+    let mut lines = Vec::new();
+    lines.push(String::new());
+    lines.push(center_in(&welcome, LEFT_COL));
+    lines.push(String::new());
+    for l in &logo {
+        let padded = fit_display_width(l, LOGO_WIDTH);
+        lines.push(center_in(&padded, LEFT_COL));
+    }
+    lines.push(String::new());
+    lines.push(center_in(&model_styled, LEFT_COL));
+    lines.push(center_in(&cwd_styled, LEFT_COL));
+    lines
+}
+
+fn right_column(color: bool, p: &Palette, ctx: &BannerContext<'_>) -> Vec<String> {
+    let header = |text: &str| -> String {
+        if color {
+            format!("{}{}{}", p.violet, text, p.r)
+        } else {
+            text.to_string()
+        }
+    };
+
+    let tips: Vec<&str> = if ctx.has_codineer_md {
+        vec!["/help · Tab completes slash", "/vim for modal edit"]
+    } else {
+        vec!["/init · /help · /status", "— then ask for a task"]
     };
 
     let resume = tilde_session_path(ctx.session_path);
     let resume_cmd = format!("codineer --resume {}", resume.display());
+    let resume_display = truncate_display(&resume_cmd, RIGHT_COL - 1);
 
-    [
-        top,
-        framed_row(color, &p, &title),
-        framed_row(color, &p, ""),
-        framed_row(
-            color,
-            &p,
-            &format!("  Model      {}", ctx.model),
-        ),
-        framed_row(
-            color,
-            &p,
-            &format!("  Directory  {}", ctx.cwd_display),
-        ),
-        framed_row(
-            color,
-            &p,
-            &format!(
-                "  Workspace  {} · {}",
-                ctx.workspace_summary, ctx.permissions
-            ),
-        ),
-        framed_row(
-            color,
-            &p,
-            &format!("  Session    {}", ctx.session_id),
-        ),
-        framed_row(color, &p, ""),
-        framed_row(color, &p, tip),
-        framed_row(color, &p, ""),
-        framed_row(color, &p, &format!("  Resume     {resume_cmd}")),
-        bot,
-    ]
-    .join("\n")
+    let separator = if color {
+        let w = RIGHT_COL.min(30);
+        format!("{}{}{}", p.dim, "─".repeat(w), p.r)
+    } else {
+        "-".repeat(RIGHT_COL.min(30))
+    };
+
+    let sid = truncate_display(ctx.session_id, RIGHT_COL - 1);
+    let ws = truncate_display(ctx.workspace_summary, RIGHT_COL - 1);
+
+    let mut lines = Vec::new();
+    lines.push(header("Tips for getting started"));
+    for t in &tips {
+        lines.push(format!(" {t}"));
+    }
+    lines.push(String::new());
+    lines.push(separator);
+    lines.push(header("Session"));
+    lines.push(format!(" {sid}"));
+    lines.push(format!(" {ws}"));
+    lines.push(String::new());
+    lines.push(header("Resume"));
+    lines.push(format!(" {resume_display}"));
+    lines
 }
 
 fn tilde_session_path(path: &Path) -> std::path::PathBuf {

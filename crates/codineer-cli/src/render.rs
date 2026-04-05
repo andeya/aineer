@@ -77,6 +77,7 @@ pub struct Spinner {
     frame_index: usize,
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 impl Spinner {
     const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -117,6 +118,8 @@ impl Spinner {
         out.flush()
     }
 
+    // Not used by the REPL: clearing the current stdout line would erase streamed assistant text.
+    #[allow(dead_code)]
     pub fn finish(
         &mut self,
         label: &str,
@@ -144,6 +147,7 @@ impl Spinner {
         out.flush()
     }
 
+    #[allow(dead_code)]
     pub fn fail(
         &mut self,
         label: &str,
@@ -304,6 +308,7 @@ impl TerminalRenderer {
     }
 
     #[must_use]
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn color_theme(&self) -> &ColorTheme {
         &self.color_theme
     }
@@ -677,6 +682,65 @@ impl MarkdownStreamState {
             Some(renderer.render_markdown(&pending))
         }
     }
+}
+
+/// Writer wrapper that prepends a gutter prefix (`  ⎿  `) to each output line,
+/// matching Claude Code's `MessageResponse` layout.
+pub(crate) struct GutterWriter<W> {
+    inner: W,
+    first_prefix: Vec<u8>,
+    cont_prefix: Vec<u8>,
+    at_line_start: bool,
+    first_line: bool,
+}
+
+impl<W: Write> GutterWriter<W> {
+    pub(crate) fn new(inner: W, first_prefix: String, cont_prefix: String) -> Self {
+        Self {
+            inner,
+            first_prefix: first_prefix.into_bytes(),
+            cont_prefix: cont_prefix.into_bytes(),
+            at_line_start: true,
+            first_line: true,
+        }
+    }
+}
+
+impl<W: Write> Write for GutterWriter<W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        for &byte in buf {
+            if self.at_line_start && byte != b'\n' {
+                let prefix = if self.first_line {
+                    self.first_line = false;
+                    &self.first_prefix
+                } else {
+                    &self.cont_prefix
+                };
+                self.inner.write_all(prefix)?;
+                self.at_line_start = false;
+            }
+            self.inner.write_all(std::slice::from_ref(&byte))?;
+            if byte == b'\n' {
+                self.at_line_start = true;
+            }
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+pub(crate) fn gutter_prefixes() -> (String, String) {
+    let p = crate::style::Palette::new(crate::style::color_for_stdout());
+    let first = if p.dim.is_empty() {
+        "  ⎿  ".to_string()
+    } else {
+        format!("{}  ⎿  {}", p.dim, p.r)
+    };
+    let cont = "     ".to_string();
+    (first, cont)
 }
 
 fn apply_code_block_background(line: &str) -> String {

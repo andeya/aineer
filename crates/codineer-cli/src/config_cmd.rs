@@ -5,10 +5,8 @@ use std::path::PathBuf;
 use runtime::JsonValue;
 
 fn global_settings_path() -> PathBuf {
-    runtime::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".codineer")
-        .join("settings.json")
+    // Respect CODINEER_CONFIG_HOME just like the runtime config loader does.
+    runtime::default_config_home().join("settings.json")
 }
 
 fn load_global_settings() -> Result<BTreeMap<String, JsonValue>, Box<dyn std::error::Error>> {
@@ -36,7 +34,8 @@ fn save_global_settings(
     Ok(())
 }
 
-/// Set a value in `~/.codineer/settings.json`.
+/// Set a value in the global settings file (`$CODINEER_CONFIG_HOME/settings.json`,
+/// defaulting to `~/.codineer/settings.json`).
 ///
 /// Supports dotted keys: `credentials.defaultSource` → `{ "credentials": { "defaultSource": ... } }`
 pub fn run_config_set(key: &str, value: &str) -> Result<(), Box<dyn std::error::Error>> {

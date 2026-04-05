@@ -4,5 +4,5 @@ mod types;
 #[cfg(test)]
 mod tests;
 
-pub use loader::ConfigLoader;
+pub use loader::{default_config_home, ConfigLoader};
 pub use types::*;

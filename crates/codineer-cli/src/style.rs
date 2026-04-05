@@ -107,7 +107,7 @@ impl Palette {
                 gray: "\x1b[38;5;245m",
                 red_fg: "\x1b[38;5;203m",
                 green_fg: "\x1b[38;5;70m",
-                violet: "\x1b[38;5;99m",
+                violet: "\x1b[38;5;141m",
                 cyan_fg: "\x1b[38;5;81m",
                 amber: "\x1b[38;5;214m",
                 bash_bg: "\x1b[48;5;236;38;5;255m",

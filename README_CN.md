@@ -277,12 +277,14 @@ Codineer 从多个 JSON 文件合并设置（优先级从高到低）：
 | 文件                            | 作用域              | 是否提交         |
 | ------------------------------- | ------------------- | ---------------- |
 | `.codineer/settings.local.json` | 项目 — 本地覆盖     | 否（gitignored） |
-| `.codineer/settings.json`       | 项目 — 团队配置     | 是               |
+| `.codineer/settings.json`       | 项目 — 目录配置     | 是               |
 | `.codineer.json`                | 项目 — 扁平配置     | 是               |
-| `~/.codineer/settings.json`     | 用户 — 全局         | —                |
+| `~/.codineer/settings.json`     | 用户 — 全局目录配置 | —                |
 | `~/.codineer.json`              | 用户 — 全局扁平配置 | —                |
 
-所有文件使用相同 schema。`env`、`providers`、`mcpServers` 等对象跨层级深度合并。
+每个作用域（项目/全局）各有两个**可选**文件：目录形式（`settings.json`）和扁平形式（`.codineer.json`）。**两者并不重复**——它们是同一作用域下的两种布局选择，同时存在时目录形式优先级更高。选择你偏好的任一种即可；`codineer config set` 始终写入目录形式（`~/.codineer/settings.json`）。
+
+所有文件使用相同 schema。`env`、`providers`、`mcpServers` 等对象跨层级深度合并；`mcpServers` 中同名服务器以后加载的文件为准（完整替换，不深度合并）。
 
 ### 配置参考
 
@@ -306,20 +308,20 @@ Codineer 从多个 JSON 文件合并设置（优先级从高到低）：
 }
 ```
 
-| 字段               | 类型     | 说明                                                                                                             |
-| ------------------ | -------- | ---------------------------------------------------------------------------------------------------------------- |
-| `model`            | string   | 默认模型（如 `"sonnet"`、`"ollama/qwen3-coder"`）                                                                |
-| `fallbackModels`   | string[] | 主模型不可用时依序尝试的回退模型列表                                                                             |
-| `permissionMode`   | string   | `"read-only"`、`"workspace-write"` 或 `"danger-full-access"`                                                     |
-| `env`              | object   | 启动时注入的环境变量。Shell export 优先。                                                                        |
-| `providers`        | object   | 自定义 OpenAI 兼容 Provider：`baseUrl`、`apiKey` / `apiKeyEnv`、可选 **`apiVersion`**（Azure 等）、`defaultModel` 等（见[示例](https://github.com/andeya/codineer/blob/main/settings.example.json)） |
-| `oauth`            | object   | 自定义 OAuth 配置（clientId、authorizeUrl、tokenUrl、scopes 等）                                                 |
-| `credentials`      | object   | 凭据链配置（defaultSource、autoDiscover、claudeCode）                                                            |
-| `mcpServers`       | object   | MCP 服务器定义（stdio、sse、http、ws）                                                                           |
-| `sandbox`          | object   | 沙箱安全设置（enabled、filesystemMode、allowedMounts）                                                           |
-| `enabledPlugins`   | object   | 启用的插件（插件名 → 布尔值的映射）                                                                             |
-| `plugins`          | object   | 插件管理（externalDirectories、installRoot）                                                                     |
-| `hooks`            | object   | `PreToolUse` / `PostToolUse` Hook 的 Shell 命令                                                                  |
+| 字段             | 类型     | 说明                                                                                                                                                                                                 |
+| ---------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `model`          | string   | 默认模型（如 `"sonnet"`、`"ollama/qwen3-coder"`）                                                                                                                                                    |
+| `fallbackModels` | string[] | 主模型不可用时依序尝试的回退模型列表                                                                                                                                                                 |
+| `permissionMode` | string   | `"read-only"`、`"workspace-write"` 或 `"danger-full-access"`                                                                                                                                         |
+| `env`            | object   | 启动时注入的环境变量。Shell export 优先。                                                                                                                                                            |
+| `providers`      | object   | 自定义 OpenAI 兼容 Provider：`baseUrl`、`apiKey` / `apiKeyEnv`、可选 **`apiVersion`**（Azure 等）、`defaultModel` 等（见[示例](https://github.com/andeya/codineer/blob/main/settings.example.json)） |
+| `oauth`          | object   | 自定义 OAuth 配置（clientId、authorizeUrl、tokenUrl、scopes 等）                                                                                                                                     |
+| `credentials`    | object   | 凭据链配置（defaultSource、autoDiscover、claudeCode）                                                                                                                                                |
+| `mcpServers`     | object   | MCP 服务器定义（stdio、sse、http、ws）                                                                                                                                                               |
+| `sandbox`        | object   | 沙箱安全设置（enabled、filesystemMode、allowedMounts）                                                                                                                                               |
+| `enabledPlugins` | object   | 启用的插件（插件名 → 布尔值的映射）                                                                                                                                                                  |
+| `plugins`        | object   | 插件管理（externalDirectories、installRoot）                                                                                                                                                         |
+| `hooks`          | object   | `PreToolUse` / `PostToolUse` Hook 的 Shell 命令                                                                                                                                                      |
 
 运行时查看合并配置：`/config`、`/config env`、`/config model`
 
@@ -327,21 +329,21 @@ Codineer 从多个 JSON 文件合并设置（优先级从高到低）：
 
 通过 Shell export **或** settings.json 的 `"env"` 字段设置（Shell export 优先）：
 
-| 变量                       | 用途                                           |
-| -------------------------- | ---------------------------------------------- |
-| `ANTHROPIC_API_KEY`        | Claude API Key                                 |
-| `ANTHROPIC_AUTH_TOKEN`     | Bearer Token（替代方式）                       |
-| `XAI_API_KEY`              | xAI / Grok API Key                             |
-| `OPENAI_API_KEY`           | OpenAI API Key                                 |
-| `OPENROUTER_API_KEY`       | OpenRouter API Key                             |
-| `GROQ_API_KEY`             | Groq Cloud API Key                             |
-| `DASHSCOPE_API_KEY`      | 阿里云通义 DashScope（OpenAI 兼容模式）        |
-| `OLLAMA_HOST`              | Ollama 端点（如 `http://192.168.1.100:11434`） |
-| `CODINEER_WORKSPACE_ROOT`  | 覆盖工作区根路径                               |
-| `CODINEER_CONFIG_HOME`     | 覆盖配置目录（`~/.codineer`）                  |
-| `CODINEER_PERMISSION_MODE` | 默认权限模式                                   |
-| `NO_COLOR`                 | 禁用 ANSI 颜色                                 |
-| `CLICOLOR=0`               | 禁用 ANSI 颜色（替代方式）                     |
+| 变量                       | 用途                                                                           |
+| -------------------------- | ------------------------------------------------------------------------------ |
+| `ANTHROPIC_API_KEY`        | Claude API Key                                                                 |
+| `ANTHROPIC_AUTH_TOKEN`     | Bearer Token（替代方式）                                                       |
+| `XAI_API_KEY`              | xAI / Grok API Key                                                             |
+| `OPENAI_API_KEY`           | OpenAI API Key                                                                 |
+| `OPENROUTER_API_KEY`       | OpenRouter API Key                                                             |
+| `GROQ_API_KEY`             | Groq Cloud API Key                                                             |
+| `DASHSCOPE_API_KEY`        | 阿里云通义 DashScope（OpenAI 兼容模式）                                        |
+| `OLLAMA_HOST`              | Ollama 端点（如 `http://192.168.1.100:11434`）                                 |
+| `CODINEER_WORKSPACE_ROOT`  | 覆盖工作区根路径                                                               |
+| `CODINEER_CONFIG_HOME`     | 覆盖全局配置目录（默认 `~/.codineer`）；同时将全局扁平配置移至该目录的父目录下 |
+| `CODINEER_PERMISSION_MODE` | 默认权限模式                                                                   |
+| `NO_COLOR`                 | 禁用 ANSI 颜色                                                                 |
+| `CLICOLOR=0`               | 禁用 ANSI 颜色（替代方式）                                                     |
 
 **凭据链（按 Provider 分别管理，优先级从高到低）：**
 

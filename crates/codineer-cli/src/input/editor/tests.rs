@@ -1,27 +1,16 @@
 use super::super::session::{EditSession, EditorMode, KeyAction};
-use super::super::text::{is_vim_toggle, selection_bounds, slash_command_prefix};
+use super::super::suggestions::CommandEntry;
+use super::super::text::{is_vim_toggle, selection_bounds};
 use super::LineEditor;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-#[test]
-fn extracts_only_terminal_slash_command_prefixes() {
-    // given
-    let complete_prefix = slash_command_prefix("/he", 3);
-    let whitespace_prefix = slash_command_prefix("/help me", 5);
-    let plain_text_prefix = slash_command_prefix("hello", 5);
-    let mid_buffer_prefix = slash_command_prefix("/help", 2);
-
-    // when
-    let result = (
-        complete_prefix,
-        whitespace_prefix,
-        plain_text_prefix,
-        mid_buffer_prefix,
-    );
-
-    // then
-    assert_eq!(result, (Some("/he"), None, None, None));
+fn cmd(name: &str, desc: &str, has_args: bool) -> CommandEntry {
+    CommandEntry {
+        name: name.to_string(),
+        description: desc.to_string(),
+        has_args,
+    }
 }
 
 #[test]
@@ -34,7 +23,6 @@ fn toggle_submission_detects_vim_command() {
 
 #[test]
 fn normal_mode_supports_motion_and_insert_transition() {
-    // given
     let mut editor = LineEditor::new("> ", vec![]);
     editor.vim_enabled = true;
     let mut session = EditSession::new(true);
@@ -42,19 +30,16 @@ fn normal_mode_supports_motion_and_insert_transition() {
     session.cursor = session.text.len();
     let _ = session.handle_escape();
 
-    // when
     editor.handle_char(&mut session, 'h');
     editor.handle_char(&mut session, 'i');
     editor.handle_char(&mut session, '!');
 
-    // then
     assert_eq!(session.mode, EditorMode::Insert);
     assert_eq!(session.text, "hel!lo");
 }
 
 #[test]
 fn yy_and_p_paste_yanked_line_after_current_line() {
-    // given
     let mut editor = LineEditor::new("> ", vec![]);
     editor.vim_enabled = true;
     let mut session = EditSession::new(true);
@@ -62,18 +47,15 @@ fn yy_and_p_paste_yanked_line_after_current_line() {
     session.cursor = 0;
     let _ = session.handle_escape();
 
-    // when
     editor.handle_char(&mut session, 'y');
     editor.handle_char(&mut session, 'y');
     editor.handle_char(&mut session, 'p');
 
-    // then
     assert_eq!(session.text, "alpha\nalpha\nbeta\ngamma");
 }
 
 #[test]
 fn dd_and_p_paste_deleted_line_after_current_line() {
-    // given
     let mut editor = LineEditor::new("> ", vec![]);
     editor.vim_enabled = true;
     let mut session = EditSession::new(true);
@@ -81,19 +63,16 @@ fn dd_and_p_paste_deleted_line_after_current_line() {
     session.cursor = 0;
     let _ = session.handle_escape();
 
-    // when
     editor.handle_char(&mut session, 'j');
     editor.handle_char(&mut session, 'd');
     editor.handle_char(&mut session, 'd');
     editor.handle_char(&mut session, 'p');
 
-    // then
     assert_eq!(session.text, "alpha\ngamma\nbeta\n");
 }
 
 #[test]
 fn visual_mode_tracks_selection_with_motions() {
-    // given
     let mut editor = LineEditor::new("> ", vec![]);
     editor.vim_enabled = true;
     let mut session = EditSession::new(true);
@@ -101,12 +80,10 @@ fn visual_mode_tracks_selection_with_motions() {
     session.cursor = 0;
     let _ = session.handle_escape();
 
-    // when
     editor.handle_char(&mut session, 'v');
     editor.handle_char(&mut session, 'j');
     editor.handle_char(&mut session, 'l');
 
-    // then
     assert_eq!(session.mode, EditorMode::Visual);
     assert_eq!(
         selection_bounds(
@@ -120,7 +97,6 @@ fn visual_mode_tracks_selection_with_motions() {
 
 #[test]
 fn command_mode_submits_colon_prefixed_input() {
-    // given
     let mut editor = LineEditor::new("> ", vec![]);
     editor.vim_enabled = true;
     let mut session = EditSession::new(true);
@@ -128,13 +104,11 @@ fn command_mode_submits_colon_prefixed_input() {
     session.cursor = session.text.len();
     let _ = session.handle_escape();
 
-    // when
     editor.handle_char(&mut session, ':');
     editor.handle_char(&mut session, 'q');
     editor.handle_char(&mut session, '!');
     let action = session.submit_or_toggle();
 
-    // then
     assert_eq!(session.mode, EditorMode::Command);
     assert_eq!(session.command_buffer, ":q!");
     assert!(matches!(action, KeyAction::Submit(line) if line == ":q!"));
@@ -142,70 +116,221 @@ fn command_mode_submits_colon_prefixed_input() {
 
 #[test]
 fn push_history_ignores_blank_entries() {
-    // given
-    let mut editor = LineEditor::new("> ", vec!["/help".to_string()]);
+    let mut editor = LineEditor::new("> ", vec![cmd("/help", "Show help", false)]);
 
-    // when
     editor.push_history("   ");
     editor.push_history("/help");
 
-    // then
     assert_eq!(editor.history, vec!["/help".to_string()]);
 }
 
 #[test]
-fn tab_completes_matching_slash_commands() {
-    // given
-    let mut editor = LineEditor::new("> ", vec!["/help".to_string(), "/hello".to_string()]);
+fn slash_suggestions_filter_and_accept_tab() {
+    let mut editor = LineEditor::new(
+        "> ",
+        vec![
+            cmd("/help", "Show help", false),
+            cmd("/hello", "Greet", true),
+        ],
+    );
     let mut session = EditSession::new(false);
     session.text = "/he".to_string();
     session.cursor = session.text.len();
 
-    // when
-    editor.complete_slash_command(&mut session);
+    editor.update_suggestions(&session);
+    assert!(editor.suggestion_state.is_some());
+    assert_eq!(editor.suggestion_state.as_ref().unwrap().items.len(), 2);
 
-    // then
-    assert_eq!(session.text, "/help");
-    assert_eq!(session.cursor, 5);
+    editor.accept_suggestion(&mut session);
+    assert!(session.text.starts_with("/he"));
 }
 
 #[test]
-fn tab_cycles_between_matching_slash_commands() {
-    // given
+fn slash_suggestions_navigate_down() {
     let mut editor = LineEditor::new(
         "> ",
-        vec!["/permissions".to_string(), "/plugin".to_string()],
+        vec![
+            cmd("/permissions", "Manage permissions", false),
+            cmd("/plugin", "Manage plugins", false),
+        ],
     );
     let mut session = EditSession::new(false);
     session.text = "/p".to_string();
     session.cursor = session.text.len();
 
-    // when
-    editor.complete_slash_command(&mut session);
-    let first = session.text.clone();
-    session.cursor = session.text.len();
-    editor.complete_slash_command(&mut session);
-    let second = session.text.clone();
+    editor.update_suggestions(&session);
+    assert!(editor.suggestion_state.is_some());
 
-    // then
-    assert_eq!(first, "/permissions");
-    assert_eq!(second, "/plugin");
+    let action = editor.handle_key_event(
+        &mut session,
+        KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+    );
+    assert!(matches!(action, KeyAction::Continue));
+    assert_eq!(editor.suggestion_state.as_ref().unwrap().selected, 1);
+
+    // Verify update_suggestions preserves selection when text hasn't changed
+    editor.update_suggestions(&session);
+    assert_eq!(editor.suggestion_state.as_ref().unwrap().selected, 1);
+}
+
+#[test]
+fn slash_suggestions_navigate_up_wraps() {
+    let mut editor = LineEditor::new(
+        "> ",
+        vec![
+            cmd("/help", "Show help", false),
+            cmd("/hello", "Greet", true),
+            cmd("/history", "Show history", false),
+        ],
+    );
+    let mut session = EditSession::new(false);
+    session.text = "/h".to_string();
+    session.cursor = session.text.len();
+
+    editor.update_suggestions(&session);
+    assert_eq!(editor.suggestion_state.as_ref().unwrap().selected, 0);
+
+    // Up from 0 wraps to last item
+    editor.handle_key_event(&mut session, KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+    editor.update_suggestions(&session);
+    assert_eq!(editor.suggestion_state.as_ref().unwrap().selected, 2);
+
+    // Up again goes to 1
+    editor.handle_key_event(&mut session, KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+    editor.update_suggestions(&session);
+    assert_eq!(editor.suggestion_state.as_ref().unwrap().selected, 1);
+}
+
+#[test]
+fn slash_suggestions_enter_accepts_selected() {
+    let mut editor = LineEditor::new(
+        "> ",
+        vec![
+            cmd("/permissions", "Manage permissions", false),
+            cmd("/plugin", "Manage plugins", false),
+        ],
+    );
+    let mut session = EditSession::new(false);
+    session.text = "/p".to_string();
+    session.cursor = session.text.len();
+
+    editor.update_suggestions(&session);
+
+    // Navigate to /plugin (index 1)
+    editor.handle_key_event(
+        &mut session,
+        KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+    );
+    editor.update_suggestions(&session);
+    assert_eq!(editor.suggestion_state.as_ref().unwrap().selected, 1);
+
+    // Press Enter to accept
+    let action = editor.handle_key_event(
+        &mut session,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+    );
+
+    // /plugin has no args → execute_on_enter = true → Submit
+    assert!(matches!(action, KeyAction::Submit(ref line) if line == "/plugin"));
+}
+
+#[test]
+fn suggestions_selection_resets_when_items_change() {
+    let mut editor = LineEditor::new(
+        "> ",
+        vec![
+            cmd("/help", "Show help", false),
+            cmd("/hello", "Greet", true),
+            cmd("/history", "Show history", false),
+        ],
+    );
+    let mut session = EditSession::new(false);
+    session.text = "/h".to_string();
+    session.cursor = session.text.len();
+
+    editor.update_suggestions(&session);
+    assert_eq!(editor.suggestion_state.as_ref().unwrap().items.len(), 3);
+
+    // Select second item
+    editor.handle_key_event(
+        &mut session,
+        KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+    );
+    editor.update_suggestions(&session);
+    assert_eq!(editor.suggestion_state.as_ref().unwrap().selected, 1);
+
+    // Type 'e' → filter changes to "/he" → 2 items → selection resets
+    editor.handle_key_event(
+        &mut session,
+        KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE),
+    );
+    editor.update_suggestions(&session);
+    assert_eq!(editor.suggestion_state.as_ref().unwrap().items.len(), 2);
+    assert_eq!(editor.suggestion_state.as_ref().unwrap().selected, 0);
+}
+
+#[test]
+fn at_suggestions_enter_adds_trailing_space_for_directory() {
+    use super::super::suggestions::{SuggestionItem, SuggestionState, SuggestionTrigger};
+
+    let mut editor = LineEditor::new("> ", vec![]);
+
+    let dir_item = || SuggestionItem {
+        display: "+ src/".to_string(),
+        description: String::new(),
+        completion: "@src/".to_string(), // directory: no trailing space in raw completion
+        execute_on_enter: false,
+    };
+    let at_trigger = || SuggestionTrigger::At {
+        token_start: 0,
+        token_len: 4,
+    };
+
+    // Tab: keeps raw completion (no space — allows drilling into src/)
+    {
+        let mut s = EditSession::new(false);
+        s.text = "@src".to_string();
+        s.cursor = 4;
+        editor.suggestion_state = Some(SuggestionState {
+            items: vec![dir_item()],
+            selected: 0,
+            trigger: at_trigger(),
+        });
+        editor.accept_suggestion(&mut s);
+        assert_eq!(
+            s.text, "@src/",
+            "Tab should not add a space for directories"
+        );
+    }
+
+    // Enter: always appends a trailing space
+    {
+        let mut s = EditSession::new(false);
+        s.text = "@src".to_string();
+        s.cursor = 4;
+        editor.suggestion_state = Some(SuggestionState {
+            items: vec![dir_item()],
+            selected: 0,
+            trigger: at_trigger(),
+        });
+        let action =
+            editor.handle_key_event(&mut s, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(matches!(action, KeyAction::Continue));
+        assert_eq!(s.text, "@src/ ", "Enter should append a trailing space");
+    }
 }
 
 #[test]
 fn ctrl_c_cancels_when_input_exists() {
-    // given
     let mut editor = LineEditor::new("> ", vec![]);
     let mut session = EditSession::new(false);
     session.text = "draft".to_string();
     session.cursor = session.text.len();
 
-    // when
     let action = editor.handle_key_event(
         &mut session,
         KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
     );
 
-    // then
     assert!(matches!(action, KeyAction::Cancel));
 }

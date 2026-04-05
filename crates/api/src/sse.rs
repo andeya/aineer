@@ -1,5 +1,16 @@
 use crate::error::ApiError;
 use crate::types::StreamEvent;
+use serde_json::Value;
+
+/// Top-level `type` values we deserialize today; anything else is ignored for forward compatibility.
+const KNOWN_STREAM_EVENT_TYPES: &[&str] = &[
+    "message_start",
+    "message_delta",
+    "content_block_start",
+    "content_block_delta",
+    "content_block_stop",
+    "message_stop",
+];
 
 #[derive(Debug, Default)]
 pub struct SseParser {
@@ -103,14 +114,47 @@ pub fn parse_frame(frame: &str) -> Result<Option<StreamEvent>, ApiError> {
         return Ok(None);
     }
 
-    serde_json::from_str::<StreamEvent>(&payload)
-        .map(Some)
-        .map_err(ApiError::from)
+    let value: Value = serde_json::from_str(&payload).map_err(ApiError::from)?;
+
+    // Anthropic Messages SSE: `type: "error"` must surface as an error, not be dropped as unknown.
+    if value.get("type").and_then(Value::as_str) == Some("error") {
+        let err_obj = value.get("error");
+        let error_type = err_obj
+            .and_then(|e| e.get("type"))
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let message = err_obj
+            .and_then(|e| e.get("message"))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_else(|| "unknown streaming error".to_string());
+        return Err(ApiError::StreamApplicationError {
+            error_type,
+            message,
+        });
+    }
+
+    let unknown_top_level = matches!(
+        value.get("type").and_then(Value::as_str),
+        Some(t) if !KNOWN_STREAM_EVENT_TYPES.contains(&t)
+    );
+    match serde_json::from_value::<StreamEvent>(value) {
+        Ok(event) => Ok(Some(event)),
+        Err(err) => {
+            // Forward-compatible: ignore only unknown *top-level* event kinds. A known `type` with
+            // a malformed payload must still surface as `Json` so we do not drop real bugs.
+            if unknown_top_level {
+                return Ok(None);
+            }
+            Err(ApiError::from(err))
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{parse_frame, SseParser};
+    use crate::error::ApiError;
     use crate::types::{ContentBlockDelta, MessageDelta, OutputContentBlock, StreamEvent, Usage};
 
     #[test]
@@ -291,5 +335,34 @@ mod tests {
         let big_chunk = vec![b'x'; SseParser::MAX_BUFFER_SIZE + 1];
         let err = parser.push(&big_chunk).unwrap_err();
         assert!(err.to_string().contains("limit"));
+    }
+
+    #[test]
+    fn stream_error_frame_returns_err() {
+        let frame = concat!(
+            "event: error\n",
+            "data: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"try again\"}}\n\n"
+        );
+        let err = parse_frame(frame).unwrap_err();
+        assert!(err.is_retryable());
+        match &err {
+            ApiError::StreamApplicationError {
+                error_type,
+                message,
+            } => {
+                assert_eq!(error_type.as_deref(), Some("overloaded_error"));
+                assert_eq!(message, "try again");
+            }
+            other => panic!("expected StreamApplicationError, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unknown_event_type_is_skipped() {
+        let frame = concat!(
+            "event: future_event\n",
+            "data: {\"type\":\"hypothetical_future_event\",\"index\":0}\n\n"
+        );
+        assert_eq!(parse_frame(frame).expect("skip unknown"), None);
     }
 }

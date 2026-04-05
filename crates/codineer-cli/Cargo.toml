@@ -20,7 +20,11 @@ api.workspace = true
 commands.workspace = true
 crossterm = "0.28"
 pulldown-cmark = "0.13"
-reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = [
+    "json",
+    "blocking",
+    "rustls-tls",
+] }
 rustyline = "15"
 runtime.workspace = true
 plugins.workspace = true
@@ -28,6 +32,7 @@ serde_json.workspace = true
 syntect = "5"
 tokio = { version = "1", features = ["rt-multi-thread", "time"] }
 tools.workspace = true
+unicode-width = "0.2"
 
 [lints]
 workspace = true

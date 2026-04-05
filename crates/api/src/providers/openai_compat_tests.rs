@@ -1,3 +1,4 @@
+use super::openai_compat_sse::parse_sse_frame;
 use super::{
     build_chat_completion_request, chat_completions_endpoint, normalize_finish_reason,
     openai_tool_choice, parse_tool_arguments, OpenAiCompatClient, OpenAiCompatConfig,
@@ -50,7 +51,7 @@ fn request_translation_uses_openai_compatible_shape() {
 #[test]
 fn chat_completion_strips_custom_provider_prefix_for_upstream_model() {
     let payload = build_chat_completion_request(&MessageRequest {
-        model: "dashscope/qwen-plus-2025-07-28".to_string(),
+        model: "acme-corp/qwen-plus-2025-07-28".to_string(),
         max_tokens: 64,
         messages: vec![InputMessage {
             role: "user".to_string(),
@@ -67,11 +68,37 @@ fn chat_completion_strips_custom_provider_prefix_for_upstream_model() {
 }
 
 #[test]
+fn chat_completion_clamps_max_tokens_to_openai_compat_cap() {
+    let payload = build_chat_completion_request(&MessageRequest {
+        model: "gpt-4o".to_string(),
+        max_tokens: 100_000,
+        messages: vec![InputMessage::user_text("hi")],
+        system: None,
+        tools: None,
+        tool_choice: None,
+        stream: false,
+    });
+    assert_eq!(payload["max_tokens"], json!(32_768));
+}
+
+#[test]
+fn chat_completion_clamps_max_tokens_minimum_to_one() {
+    let payload = build_chat_completion_request(&MessageRequest {
+        model: "gpt-4o".to_string(),
+        max_tokens: 0,
+        messages: vec![InputMessage::user_text("hi")],
+        system: None,
+        tools: None,
+        tool_choice: None,
+        stream: false,
+    });
+    assert_eq!(payload["max_tokens"], json!(1));
+}
+
+#[test]
 fn sse_parses_delta_with_reasoning_content_only() {
     let frame = "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"reasoning_content\":\"2\"}}]}\n\n";
-    let parsed = super::parse_sse_frame(frame)
-        .expect("parse")
-        .expect("chunk");
+    let parsed = parse_sse_frame(frame).expect("parse").expect("chunk");
     assert_eq!(parsed.choices.len(), 1);
     assert_eq!(
         parsed.choices[0].delta.stream_text_fragment(),
@@ -82,9 +109,7 @@ fn sse_parses_delta_with_reasoning_content_only() {
 #[test]
 fn sse_parses_delta_with_thought_field() {
     let frame = "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"thought\":\"x\"}}]}\n\n";
-    let parsed = super::parse_sse_frame(frame)
-        .expect("parse")
-        .expect("chunk");
+    let parsed = parse_sse_frame(frame).expect("parse").expect("chunk");
     assert_eq!(
         parsed.choices[0].delta.stream_text_fragment(),
         Some("x".to_string())
@@ -97,9 +122,7 @@ fn sse_parses_delta_with_content_array() {
         r#"data: {"id":"1","choices":[{"delta":{"content":[{"type":"text","text":"hi"}]}}]}"#
             .to_string()
             + "\n\n";
-    let parsed = super::parse_sse_frame(&frame)
-        .expect("parse")
-        .expect("chunk");
+    let parsed = parse_sse_frame(&frame).expect("parse").expect("chunk");
     assert_eq!(
         parsed.choices[0].delta.stream_text_fragment(),
         Some("hi".to_string())
