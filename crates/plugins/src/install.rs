@@ -62,6 +62,9 @@ pub(crate) fn materialize_source(
             }
             Ok(destination)
         }
+        PluginInstallSource::Embedded => Err(PluginError::CommandFailed(
+            "embedded plugins cannot be materialized from an install source".into(),
+        )),
     }
 }
 
@@ -101,6 +104,7 @@ pub(crate) fn describe_install_source(source: &PluginInstallSource) -> String {
     match source {
         PluginInstallSource::LocalPath { path } => path.display().to_string(),
         PluginInstallSource::GitUrl { url } => url.clone(),
+        PluginInstallSource::Embedded => "embedded".into(),
     }
 }
 

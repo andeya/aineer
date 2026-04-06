@@ -1,5 +1,6 @@
 mod hooks;
 
+mod bundled;
 mod constants;
 mod definition;
 mod error;

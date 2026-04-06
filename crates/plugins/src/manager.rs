@@ -29,16 +29,11 @@ impl PluginManager {
     }
 
     #[must_use]
-    pub fn bundled_root() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("bundled")
-    }
-
-    #[must_use]
     pub fn install_root(&self) -> PathBuf {
         self.config
             .install_root
             .clone()
-            .unwrap_or_else(|| self.config.config_home.join("plugins").join("installed"))
+            .unwrap_or_else(|| self.config.config_home.join("plugins"))
     }
 
     #[must_use]
@@ -312,77 +307,58 @@ impl PluginManager {
     }
 
     fn sync_bundled_plugins(&self) -> Result<(), PluginError> {
-        let bundled_root = self
-            .config
-            .bundled_root
-            .clone()
-            .unwrap_or_else(Self::bundled_root);
-        let bundled_plugins = discover_plugin_dirs(&bundled_root)?;
+        let install_root = self.install_root();
         let mut registry = self.load_registry()?;
         let mut changed = false;
-        let install_root = self.install_root();
-        let mut active_bundled_ids = BTreeSet::new();
+        let mut active_ids = BTreeSet::new();
 
-        for source_root in bundled_plugins {
-            let manifest = load_plugin_from_directory(&source_root)?;
-            let plugin_id = plugin_id(&manifest.name, BUNDLED_MARKETPLACE);
-            active_bundled_ids.insert(plugin_id.clone());
-            let install_path = install_root.join(sanitize_plugin_id(&plugin_id));
-            let now = unix_time_ms();
-            let existing_record = registry.plugins.get(&plugin_id);
-            let installed_copy_is_valid =
-                install_path.exists() && load_plugin_from_directory(&install_path).is_ok();
-            let needs_sync = existing_record.is_none_or(|record| {
-                record.kind != PluginKind::Bundled
-                    || record.version != manifest.version
-                    || record.name != manifest.name
-                    || record.description != manifest.description
-                    || record.install_path != install_path
-                    || !record.install_path.exists()
-                    || !installed_copy_is_valid
-            });
-
-            if !needs_sync {
-                continue;
+        if let Some(ref bundled_root) = self.config.bundled_root {
+            for source_root in discover_plugin_dirs(bundled_root)? {
+                let manifest = load_plugin_from_directory(&source_root)?;
+                let source = PluginInstallSource::LocalPath {
+                    path: source_root.clone(),
+                };
+                self.sync_one_bundled(
+                    &manifest.name,
+                    &manifest.version,
+                    &manifest.description,
+                    &install_root,
+                    &mut registry,
+                    &mut active_ids,
+                    &mut changed,
+                    |dest| copy_dir_all(&source_root, dest),
+                    source,
+                )?;
             }
-
-            if install_path.exists() {
-                fs::remove_dir_all(&install_path)?;
+        } else {
+            use crate::bundled::BUNDLED_PLUGINS;
+            for bp in BUNDLED_PLUGINS {
+                self.sync_one_bundled(
+                    bp.name,
+                    bp.version,
+                    bp.description,
+                    &install_root,
+                    &mut registry,
+                    &mut active_ids,
+                    &mut changed,
+                    |dest| bp.materialize(dest).map_err(PluginError::Io),
+                    PluginInstallSource::Embedded,
+                )?;
             }
-            copy_dir_all(&source_root, &install_path)?;
-
-            let installed_at_unix_ms =
-                existing_record.map_or(now, |record| record.installed_at_unix_ms);
-            registry.plugins.insert(
-                plugin_id.clone(),
-                InstalledPluginRecord {
-                    kind: PluginKind::Bundled,
-                    id: plugin_id,
-                    name: manifest.name,
-                    version: manifest.version,
-                    description: manifest.description,
-                    install_path,
-                    source: PluginInstallSource::LocalPath { path: source_root },
-                    installed_at_unix_ms,
-                    updated_at_unix_ms: now,
-                },
-            );
-            changed = true;
         }
 
-        let stale_bundled_ids = registry
+        // Prune bundled entries no longer present in the source set.
+        let stale: Vec<String> = registry
             .plugins
             .iter()
-            .filter_map(|(plugin_id, record)| {
-                (record.kind == PluginKind::Bundled && !active_bundled_ids.contains(plugin_id))
-                    .then_some(plugin_id.clone())
+            .filter_map(|(id, r)| {
+                (r.kind == PluginKind::Bundled && !active_ids.contains(id)).then_some(id.clone())
             })
-            .collect::<Vec<_>>();
-
-        for plugin_id in stale_bundled_ids {
-            if let Some(record) = registry.plugins.remove(&plugin_id) {
-                if record.install_path.exists() {
-                    fs::remove_dir_all(&record.install_path)?;
+            .collect();
+        for id in stale {
+            if let Some(r) = registry.plugins.remove(&id) {
+                if r.install_path.exists() {
+                    fs::remove_dir_all(&r.install_path)?;
                 }
                 changed = true;
             }
@@ -391,7 +367,64 @@ impl PluginManager {
         if changed {
             self.store_registry(&registry)?;
         }
+        Ok(())
+    }
 
+    #[allow(clippy::too_many_arguments)]
+    fn sync_one_bundled(
+        &self,
+        name: &str,
+        version: &str,
+        description: &str,
+        install_root: &std::path::Path,
+        registry: &mut InstalledPluginRegistry,
+        active_ids: &mut BTreeSet<String>,
+        changed: &mut bool,
+        write_files: impl FnOnce(&std::path::Path) -> Result<(), PluginError>,
+        source: PluginInstallSource,
+    ) -> Result<(), PluginError> {
+        let pid = plugin_id(name, BUNDLED_MARKETPLACE);
+        active_ids.insert(pid.clone());
+        let install_path = install_root.join(sanitize_plugin_id(&pid));
+        let now = unix_time_ms();
+        let existing = registry.plugins.get(&pid);
+        let installed_ok =
+            install_path.exists() && load_plugin_from_directory(&install_path).is_ok();
+        let needs_sync = existing.is_none_or(|r| {
+            r.kind != PluginKind::Bundled
+                || r.version != version
+                || r.name != name
+                || r.description != description
+                || r.install_path != install_path
+                || !r.install_path.exists()
+                || !installed_ok
+        });
+        if !needs_sync {
+            return Ok(());
+        }
+
+        if install_path.exists() {
+            fs::remove_dir_all(&install_path)?;
+        }
+        write_files(&install_path)?;
+        let manifest = load_plugin_from_directory(&install_path)?;
+
+        let installed_at = existing.map_or(now, |r| r.installed_at_unix_ms);
+        registry.plugins.insert(
+            pid.clone(),
+            InstalledPluginRecord {
+                kind: PluginKind::Bundled,
+                id: pid,
+                name: manifest.name,
+                version: manifest.version,
+                description: manifest.description,
+                install_path,
+                source,
+                installed_at_unix_ms: installed_at,
+                updated_at_unix_ms: now,
+            },
+        );
+        *changed = true;
         Ok(())
     }
 
