@@ -104,11 +104,11 @@ pub(super) struct EditSession {
     pub(super) command_buffer: String,
     pub(super) command_cursor: usize,
     /// When true, render a "Press Ctrl-C again to exit" hint below the prompt.
-    /// Cleared on the next re-render that doesn't set it.
+    /// Cleared at the start of every key-press and paste event cycle.
     pub(super) show_interrupt_hint: bool,
     /// One-shot status message rendered in the info area (e.g. "no image in
-    /// clipboard").  Cleared at the start of the next key-event handler so it
-    /// disappears after the user presses any key.
+    /// clipboard").  Cleared at the start of every key-press and paste event
+    /// cycle so it disappears after a single interaction.
     pub(super) transient_status: Option<String>,
     /// When true, render a bottom separator line below the input text and above
     /// the info/panel area.  Set from `LineEditor::show_separator`.
@@ -117,6 +117,10 @@ pub(super) struct EditSession {
     /// separator whenever no other panel (?, interrupt, suggestions) is active.
     /// Set from `LineEditor::hint_line` when the session is created.
     pub(super) static_hint: Option<String>,
+    /// Dynamic hint showing attachments (images, large pasted text).
+    /// Takes priority over `static_hint`; updated automatically based on
+    /// which `[Image #N]` / `[Pasted text #N]` placeholders remain in the buffer.
+    pub(super) attachment_hints: Option<String>,
     pub(super) history_index: Option<usize>,
     pub(super) history_backup: Option<String>,
     rendered_cursor_row: usize,
@@ -147,6 +151,7 @@ impl EditSession {
             transient_status: None,
             show_bottom_sep: false,
             static_hint: None,
+            attachment_hints: None,
             rendered_cursor_row: 0,
             rendered_lines: 1,
             prefix_line_widths: Vec::new(),
@@ -319,8 +324,7 @@ impl EditSession {
             write!(out, "\r\n{}{status}{}", p.dim, p.r)?;
             1
         } else if self.show_bottom_sep {
-            // Static hint line — shown whenever the info area is otherwise empty.
-            if let Some(ref hint) = self.static_hint {
+            if let Some(ref hint) = self.attachment_hints.as_ref().or(self.static_hint.as_ref()) {
                 write!(out, "\r\n{hint}")?;
                 1
             } else {
@@ -434,7 +438,6 @@ impl EditSession {
             )?;
         }
         Ok(SHORTCUTS.len())
-    }
 
     fn draw_interrupt_hint(&self, out: &mut impl Write) -> std::io::Result<usize> {
         let p = Palette::for_stdout();

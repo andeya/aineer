@@ -140,6 +140,11 @@ impl LineEditor {
             // Bracketed paste: insert the whole text at once so newlines in the
             // pasted content don't accidentally trigger a submission.
             if let Event::Paste(ref text) = event {
+                // Clear one-shot hints (same as handle_key_event does for key
+                // presses) so stale messages don't linger through paste events.
+                session.show_interrupt_hint = false;
+                session.transient_status = None;
+
                 let text = text.replace('\r', "\n");
                 let trimmed = text.trim();
 
@@ -155,12 +160,7 @@ impl LineEditor {
                             .or_else(|| crate::image_util::media_type_from_extension(path))
                             .unwrap_or("image/png");
                         self.insert_image(&mut session, bytes, media_type);
-                        session.render_with_suggestions(
-                            &mut stdout,
-                            &self.prompt,
-                            self.vim_enabled,
-                            self.suggestion_state.as_ref(),
-                        )?;
+                        self.render(&mut session, &mut stdout, self.suggestion_state.as_ref())?;
                         continue;
                     }
                 }
@@ -172,12 +172,7 @@ impl LineEditor {
                     if let Ok((bytes, media_type)) = super::clipboard::read_clipboard_image() {
                         self.insert_image(&mut session, bytes, media_type);
                     }
-                    session.render_with_suggestions(
-                        &mut stdout,
-                        &self.prompt,
-                        self.vim_enabled,
-                        self.suggestion_state.as_ref(),
-                    )?;
+                    self.render(&mut session, &mut stdout, self.suggestion_state.as_ref())?;
                     continue;
                 }
 
@@ -197,12 +192,7 @@ impl LineEditor {
                     };
                 session.insert_text(&insert);
                 self.update_suggestions(&session);
-                session.render_with_suggestions(
-                    &mut stdout,
-                    &self.prompt,
-                    self.vim_enabled,
-                    self.suggestion_state.as_ref(),
-                )?;
+                self.render(&mut session, &mut stdout, self.suggestion_state.as_ref())?;
                 continue;
             }
             let Event::Key(key) = event else {
@@ -228,12 +218,7 @@ impl LineEditor {
                         session.transient_status = Some(reason);
                     }
                 }
-                session.render_with_suggestions(
-                    &mut stdout,
-                    &self.prompt,
-                    self.vim_enabled,
-                    self.suggestion_state.as_ref(),
-                )?;
+                self.render(&mut session, &mut stdout, self.suggestion_state.as_ref())?;
                 // Consume Ctrl+V here so the fallthrough path never inserts 'v'.
                 continue;
             }
@@ -241,12 +226,7 @@ impl LineEditor {
             match self.handle_key_event(&mut session, key) {
                 KeyAction::Continue => {
                     self.update_suggestions(&session);
-                    session.render_with_suggestions(
-                        &mut stdout,
-                        &self.prompt,
-                        self.vim_enabled,
-                        self.suggestion_state.as_ref(),
-                    )?;
+                    self.render(&mut session, &mut stdout, self.suggestion_state.as_ref())?;
                 }
                 KeyAction::Submit(line) => {
                     let line = self.expand_paste_refs(line);
@@ -263,12 +243,7 @@ impl LineEditor {
                     self.suggestion_state = None;
                     self.image_store.clear();
                     self.paste_store.clear();
-                    session.render_with_suggestions(
-                        &mut stdout,
-                        &self.prompt,
-                        self.vim_enabled,
-                        None,
-                    )?;
+                    self.render(&mut session, &mut stdout, None)?;
                 }
                 KeyAction::Exit => {
                     session.clear_render(&mut stdout, 0)?;
@@ -278,12 +253,7 @@ impl LineEditor {
                 }
                 KeyAction::InterruptHint => {
                     session.show_interrupt_hint = true;
-                    session.render_with_suggestions(
-                        &mut stdout,
-                        &self.prompt,
-                        self.vim_enabled,
-                        None,
-                    )?;
+                    self.render(&mut session, &mut stdout, None)?;
                 }
                 KeyAction::ToggleVim => {
                     session.clear_render(&mut stdout, session.prefix_lines())?;
@@ -342,6 +312,7 @@ impl LineEditor {
             session.prefix_line_widths.push(new_cols);
         }
 
+        self.sync_attachment_hints(session);
         session.render_content(out, &self.prompt, self.vim_enabled, suggestions)
     }
 
@@ -379,6 +350,57 @@ impl LineEditor {
                 text: buffer,
                 images: Vec::new(),
             }));
+        }
+    }
+
+    /// Render helper: sync attachment hints then draw.
+    fn render(
+        &self,
+        session: &mut EditSession,
+        out: &mut impl io::Write,
+        suggestions: Option<&suggestions::SuggestionState>,
+    ) -> io::Result<()> {
+        self.sync_attachment_hints(session);
+        session.render_with_suggestions(out, &self.prompt, self.vim_enabled, suggestions)
+    }
+
+    /// Update `session.attachment_hints` based on which `[Image #N]` and
+    /// `[Pasted text #N …]` placeholders are still present in the buffer.
+    fn sync_attachment_hints(&self, session: &mut EditSession) {
+        if self.image_store.is_empty() && self.paste_store.is_empty() {
+            session.attachment_hints = None;
+            return;
+        }
+
+        let mut parts: Vec<String> = Vec::new();
+
+        let active_images: Vec<usize> = self
+            .image_store
+            .keys()
+            .filter(|id| session.text.contains(&format!("[Image #{}]", id)))
+            .copied()
+            .collect();
+        if !active_images.is_empty() {
+            let labels: Vec<_> = active_images.iter().map(|id| format!("#{id}")).collect();
+            parts.push(format!("📎 image {}", labels.join(", ")));
+        }
+
+        let active_pastes: Vec<usize> = self
+            .paste_store
+            .keys()
+            .filter(|id| session.text.contains(&format!("[Pasted text #{}", id)))
+            .copied()
+            .collect();
+        if !active_pastes.is_empty() {
+            let labels: Vec<_> = active_pastes.iter().map(|id| format!("#{id}")).collect();
+            parts.push(format!("📋 text {}", labels.join(", ")));
+        }
+
+        if parts.is_empty() {
+            session.attachment_hints = None;
+        } else {
+            let p = crate::style::Palette::for_stdout();
+            session.attachment_hints = Some(format!("{}{}{}", p.dim, parts.join("  "), p.r));
         }
     }
 
