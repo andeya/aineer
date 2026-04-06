@@ -108,6 +108,7 @@ export OPENAI_API_KEY="sk-..."                    # GPT
 export XAI_API_KEY="xai-..."                      # Grok
 export OPENROUTER_API_KEY="..."                   # OpenRouter (free models)
 export GROQ_API_KEY="..."                         # Groq Cloud (free tier)
+export GEMINI_API_KEY="AIzaSy..."                  # Google Gemini
 export DASHSCOPE_API_KEY="sk-..."                 # Alibaba DashScope (OpenAI-compatible)
 ollama serve                                      # Local AI (no key needed)
 # Or use OpenClaw Zero Token gateway for free access to all major models (see below)
@@ -171,6 +172,34 @@ codineer --model ollama              # auto-pick best coding model
 
 > Models without function calling automatically fall back to text-only mode — every model works.
 
+### Google Gemini (OpenAI-compatible)
+
+Use Gemini models through Google's OpenAI-compatible endpoint. Configure the provider in `settings.json`:
+
+```json
+{
+  "model": "gemini/gemini-2.5-flash",
+  "env": {
+    "GEMINI_API_KEY": "AIzaSy..."
+  },
+  "providers": {
+    "gemini": {
+      "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "apiKeyEnv": "GEMINI_API_KEY",
+      "defaultModel": "gemini-2.5-flash",
+      "models": ["gemini-2.5-flash", "gemini-2.5-pro"]
+    }
+  }
+}
+```
+
+```bash
+codineer --model gemini/gemini-2.5-flash "explain this code"
+codineer --model gemini/gemini-2.5-pro "review my architecture"
+```
+
+> **Important:** Use the OpenAI-compatible endpoint (`/v1beta/openai`), not the native Gemini REST API (`/v1beta/models/...:generateContent`). Codineer appends `/chat/completions` to the base URL.
+
 ### Alibaba Cloud DashScope (OpenAI-compatible)
 
 Use `provider/model` and configure `providers` in `settings.json` with the correct `baseUrl` (see [Model Studio docs](https://www.alibabacloud.com/help/en/model-studio/)):
@@ -181,6 +210,43 @@ codineer --model dashscope/qwen-plus-2025-07-28 "one-line Rust ownership"
 ```
 
 Streaming deltas may use `reasoning_content`, `thought`, or array-shaped `content`; Codineer normalizes these. If you still see **assistant stream produced no content**, the CLI automatically retries **once** with a non-streaming request. Use a current build from source or the latest release.
+
+### Azure OpenAI
+
+Set optional `apiVersion` (e.g. `2024-02-15-preview`) on a `providers.<name>` entry; Codineer appends `api-version=…` to the `chat/completions` URL. See [`settings.example.json`](https://github.com/andeya/codineer/blob/main/settings.example.json) (`azure-openai`).
+
+### List available models
+
+```bash
+codineer models               # All providers
+codineer models anthropic     # Filter by provider
+codineer models ollama        # Show local Ollama models
+```
+
+### Model resolution order
+
+When no `--model` flag is given:
+
+1. `model` field in settings.json
+2. Auto-detect from available API credentials
+3. Auto-detect running Ollama instance
+
+If the resolved model lacks credentials, Codineer tries each entry in `fallbackModels` before giving up.
+
+Switch model mid-session: `/model <name>`
+
+### Fallback models
+
+Set an ordered list of fallback models in `settings.json`. If the primary model is unavailable (e.g. missing API key), Codineer tries each fallback in order:
+
+```json
+{
+  "model": "sonnet",
+  "fallbackModels": ["ollama/qwen3-coder", "groq/llama-3.3-70b-versatile"]
+}
+```
+
+This is especially useful for zero-cost setups: set a cloud model as primary and local models as fallback.
 
 ### OpenClaw Zero Token (Free Access to Major AI Models)
 
@@ -233,43 +299,6 @@ codineer --model openclaw-zero/deepseek-web/deepseek-chat "explain this code"
 ```
 
 > The `headers` field is optional and lets you attach custom HTTP headers to every request sent to a provider. In the OpenClaw Zero Token scenario, `x-openclaw-scopes` controls the permission scope on the gateway.
-
-### Azure OpenAI
-
-Set optional `apiVersion` (e.g. `2024-02-15-preview`) on a `providers.<name>` entry; Codineer appends `api-version=…` to the `chat/completions` URL. See [`settings.example.json`](https://github.com/andeya/codineer/blob/main/settings.example.json) (`azure-openai`).
-
-### List available models
-
-```bash
-codineer models               # All providers
-codineer models anthropic     # Filter by provider
-codineer models ollama        # Show local Ollama models
-```
-
-### Model resolution order
-
-When no `--model` flag is given:
-
-1. `model` field in settings.json
-2. Auto-detect from available API credentials
-3. Auto-detect running Ollama instance
-
-If the resolved model lacks credentials, Codineer tries each entry in `fallbackModels` before giving up.
-
-Switch model mid-session: `/model <name>`
-
-### Fallback models
-
-Set an ordered list of fallback models in `settings.json`. If the primary model is unavailable (e.g. missing API key), Codineer tries each fallback in order:
-
-```json
-{
-  "model": "sonnet",
-  "fallbackModels": ["ollama/qwen3-coder", "groq/llama-3.3-70b-versatile"]
-}
-```
-
-This is especially useful for zero-cost setups: set a cloud model as primary and local models as fallback.
 
 ---
 
@@ -435,6 +464,7 @@ Set via shell export **or** the `"env"` section in settings.json (shell exports 
 | `OPENAI_API_KEY`           | OpenAI API key                                                                                             |
 | `OPENROUTER_API_KEY`       | OpenRouter API key                                                                                         |
 | `GROQ_API_KEY`             | Groq Cloud API key                                                                                         |
+| `GEMINI_API_KEY`           | Google Gemini API key                                                                                      |
 | `DASHSCOPE_API_KEY`        | Alibaba Cloud DashScope (OpenAI-compatible)                                                                |
 | `OLLAMA_HOST`              | Ollama endpoint (e.g. `http://192.168.1.100:11434`)                                                        |
 | `CODINEER_WORKSPACE_ROOT`  | Override workspace root                                                                                    |
