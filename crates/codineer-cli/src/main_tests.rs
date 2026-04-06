@@ -1431,14 +1431,14 @@ fn help_output_includes_config_files_section() {
 
 #[test]
 fn process_at_mentioned_files_strips_at_token_from_message() {
-    use crate::turn_helpers::process_at_mentioned_files;
+    use crate::turn_helpers::process_at_mentioned_files_text;
 
     // Use a relative path (extract_at_mentioned_files skips paths starting with '/')
     let file_name = "codineer_test_note_tmp.txt";
     std::fs::write(file_name, "hello world").expect("write temp file");
 
     let input = format!("@{file_name} please summarise this");
-    let result = process_at_mentioned_files(&input);
+    let result = process_at_mentioned_files_text(&input);
 
     let _ = std::fs::remove_file(file_name);
 
@@ -1465,10 +1465,10 @@ fn process_at_mentioned_files_strips_at_token_from_message() {
 
 #[test]
 fn process_at_mentioned_files_strips_unresolvable_token() {
-    use crate::turn_helpers::process_at_mentioned_files;
+    use crate::turn_helpers::process_at_mentioned_files_text;
 
     let input = "@no_such_file_xyz.txt explain this";
-    let result = process_at_mentioned_files(input);
+    let result = process_at_mentioned_files_text(input);
 
     // @token must be stripped even when the path doesn't exist
     assert!(
@@ -1489,22 +1489,22 @@ fn process_at_mentioned_files_strips_unresolvable_token() {
 
 #[test]
 fn process_at_mentioned_files_no_at_mention_unchanged() {
-    use crate::turn_helpers::process_at_mentioned_files;
+    use crate::turn_helpers::process_at_mentioned_files_text;
 
     let input = "what is the capital of France?";
-    assert_eq!(process_at_mentioned_files(input), input);
+    assert_eq!(process_at_mentioned_files_text(input), input);
 }
 
 #[test]
 fn process_at_mentioned_files_handles_line_number_suffix() {
-    use crate::turn_helpers::process_at_mentioned_files;
+    use crate::turn_helpers::process_at_mentioned_files_text;
 
     let file_name = "codineer_test_lineref_tmp.txt";
     let content: String = (1..=120).map(|i| format!("line {i}\n")).collect();
     std::fs::write(file_name, &content).expect("write temp file");
 
     let input = format!("@{file_name}:60 explain this function");
-    let result = process_at_mentioned_files(&input);
+    let result = process_at_mentioned_files_text(&input);
     let _ = std::fs::remove_file(file_name);
 
     assert!(
@@ -1531,14 +1531,14 @@ fn process_at_mentioned_files_handles_line_number_suffix() {
 
 #[test]
 fn process_at_mentioned_files_handles_line_range_suffix() {
-    use crate::turn_helpers::process_at_mentioned_files;
+    use crate::turn_helpers::process_at_mentioned_files_text;
 
     let file_name = "codineer_test_linerange_tmp.txt";
     let content: String = (1..=100).map(|i| format!("line {i}\n")).collect();
     std::fs::write(file_name, &content).expect("write temp file");
 
     let input = format!("@{file_name}:10-20 check these lines");
-    let result = process_at_mentioned_files(&input);
+    let result = process_at_mentioned_files_text(&input);
     let _ = std::fs::remove_file(file_name);
 
     assert!(
@@ -1552,5 +1552,84 @@ fn process_at_mentioned_files_handles_line_range_suffix() {
     assert!(
         !result.contains("line 21\n"),
         "lines outside range should be excluded: {result}"
+    );
+}
+
+#[test]
+fn process_at_mentioned_files_image_produces_image_block() {
+    use crate::turn_helpers::process_at_mentioned_files;
+
+    let file_name = "codineer_test_img_tmp.png";
+    // Minimal valid PNG header (8 bytes) + padding
+    let png_header: Vec<u8> = vec![
+        0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, b'I', b'H', b'D',
+        b'R',
+    ];
+    std::fs::write(file_name, &png_header).expect("write temp png");
+
+    let input = format!("@{file_name} describe this");
+    let enriched = process_at_mentioned_files(&input, Vec::new());
+    let _ = std::fs::remove_file(file_name);
+
+    let has_image = enriched
+        .blocks
+        .iter()
+        .any(|b| matches!(b, runtime::ContentBlock::Image { .. }));
+    assert!(has_image, "should contain an Image block");
+
+    let has_text = enriched.blocks.iter().any(|b| match b {
+        runtime::ContentBlock::Text { text } => text.contains("describe this"),
+        _ => false,
+    });
+    assert!(has_text, "should contain user text");
+
+    // Should NOT contain the @path in the text
+    let no_at = enriched.blocks.iter().all(|b| match b {
+        runtime::ContentBlock::Text { text } => !text.contains(&format!("@{file_name}")),
+        _ => true,
+    });
+    assert!(no_at, "@path should be stripped from text");
+}
+
+#[test]
+fn process_at_mentioned_files_binary_injects_metadata_block() {
+    use crate::turn_helpers::process_at_mentioned_files;
+
+    let file_name = "codineer_test_binary_tmp.bin";
+    // Write non-UTF-8 binary bytes
+    std::fs::write(file_name, b"\x00\x01\x02\x03\xFF\xFE").expect("write temp binary");
+
+    let input = format!("@{file_name} what is this");
+    let enriched = process_at_mentioned_files(&input, Vec::new());
+    let _ = std::fs::remove_file(file_name);
+
+    let text = enriched
+        .blocks
+        .iter()
+        .filter_map(|b| match b {
+            runtime::ContentBlock::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<String>();
+
+    assert!(
+        text.contains("type=\"binary\""),
+        "binary file should produce a binary metadata block: {text}"
+    );
+    assert!(
+        text.contains("size="),
+        "binary block should include size: {text}"
+    );
+    assert!(
+        text.contains("what is this"),
+        "user text should be preserved: {text}"
+    );
+    assert!(
+        !text.contains(&format!("@{file_name}")),
+        "@path should be stripped: {text}"
+    );
+    assert!(
+        !text.contains("<not_found"),
+        "should NOT be not_found for existing binary: {text}"
     );
 }

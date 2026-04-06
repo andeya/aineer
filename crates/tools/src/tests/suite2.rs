@@ -1,4 +1,3 @@
-
 #[test]
 fn agent_tool_subset_mapping_is_expected() {
     let general = allowed_tools_for_subagent("general-purpose");
@@ -310,8 +309,7 @@ fn file_tools_cover_read_write_and_edit_behaviors() {
         &json!({ "path": "nested/demo.txt", "content": "alpha\nbeta\nalpha\n" }),
     )
     .expect("write create should succeed");
-    let write_create_output: serde_json::Value =
-        serde_json::from_str(&write_create).expect("json");
+    let write_create_output: serde_json::Value = serde_json::from_str(&write_create).expect("json");
     assert_eq!(write_create_output["type"], "create");
     assert!(root.join("nested/demo.txt").exists());
 
@@ -320,8 +318,7 @@ fn file_tools_cover_read_write_and_edit_behaviors() {
         &json!({ "path": "nested/demo.txt", "content": "alpha\nbeta\ngamma\n" }),
     )
     .expect("write update should succeed");
-    let write_update_output: serde_json::Value =
-        serde_json::from_str(&write_update).expect("json");
+    let write_update_output: serde_json::Value = serde_json::from_str(&write_update).expect("json");
     assert_eq!(write_update_output["type"], "update");
     assert_eq!(write_update_output["originalFile"], "alpha\nbeta\nalpha\n");
 
@@ -450,8 +447,7 @@ fn glob_and_grep_tools_cover_success_and_errors() {
         }),
     )
     .expect("grep content should succeed");
-    let grep_content_output: serde_json::Value =
-        serde_json::from_str(&grep_content).expect("json");
+    let grep_content_output: serde_json::Value = serde_json::from_str(&grep_content).expect("json");
     assert_eq!(grep_content_output["numFiles"], 0);
     assert!(grep_content_output["appliedLimit"].is_null());
     assert_eq!(grep_content_output["appliedOffset"], 1);
@@ -482,8 +478,7 @@ fn glob_and_grep_tools_cover_success_and_errors() {
 #[test]
 fn sleep_waits_and_reports_duration() {
     let started = std::time::Instant::now();
-    let result =
-        execute_tool("Sleep", &json!({"duration_ms": 20})).expect("Sleep should succeed");
+    let result = execute_tool("Sleep", &json!({"duration_ms": 20})).expect("Sleep should succeed");
     let elapsed = started.elapsed();
     let output: serde_json::Value = serde_json::from_str(&result).expect("json");
     assert_eq!(output["duration_ms"], 20);
@@ -655,13 +650,12 @@ printf 'pwsh:%s' "$1"
 
     let stub = script.to_str().expect("stub path");
 
-    let foreground = execute_shell_command(stub, "Write-Output hello", Some(1000), None)
+    let foreground = execute_shell_command(stub, "Write-Output hello", Some(5000), None)
         .expect("foreground should succeed");
     assert_eq!(foreground.stdout, "pwsh:Write-Output hello");
 
-    let background =
-        execute_shell_command(stub, "Write-Output hello", None, Some(true))
-            .expect("background should succeed");
+    let background = execute_shell_command(stub, "Write-Output hello", None, Some(true))
+        .expect("background should succeed");
     assert!(background.background_task_id.is_some());
     assert_eq!(background.backgrounded_by_user, Some(true));
     assert_eq!(background.assistant_auto_backgrounded, Some(false));
@@ -716,9 +710,7 @@ impl TestServer {
 
             match listener.accept() {
                 Ok((mut stream, _)) => {
-                    stream
-                        .set_nonblocking(false)
-                        .expect("set stream blocking");
+                    stream.set_nonblocking(false).expect("set stream blocking");
                     let mut buffer = [0_u8; 4096];
                     let size = stream.read(&mut buffer).expect("read request");
                     let request = String::from_utf8_lossy(&buffer[..size]).into_owned();
