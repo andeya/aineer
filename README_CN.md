@@ -52,7 +52,7 @@
 - **即刻启动** — `brew install` 或 `cargo install`。一个 Rust 二进制文件，无运行时依赖。
 - **多模态输入** — 通过 `@photo.png` 附加图片、从剪贴板粘贴（`Ctrl+V` / `/image`）或将文件拖拽到终端。支持 Anthropic、OpenAI 及所有兼容多模态的 Provider。
 - **优雅降级** — 不支持 function calling 的模型自动降级为纯文本模式。
-- **项目记忆** — `CODINEER.md` 让 AI 拥有关于代码库的持久上下文。提交到仓库，与团队共享。
+- **项目记忆** — `.codineer/CODINEER.md` 让 AI 拥有关于代码库的持久上下文。提交到仓库，与团队共享。
 - **自适应终端 UI** — 欢迎面板和分割线随窗口宽度实时调整。超窄终端自动切换为单列布局；拖动窗口时输入行原位重绘，无闪烁。兼容 macOS、Linux 和 Windows（Windows Terminal / ConPTY）。
 
 ## 目录
@@ -413,10 +413,10 @@ codineer -p "检查安全问题" \
 
 Codineer 从多个 JSON 文件合并设置（优先级从高到低）：
 
-| 文件                            | 路径示意（相对项目根 / 家目录）          | 作用域         | 是否提交         |
-| ------------------------------- | ---------------------------------------- | -------------- | ---------------- |
+| 文件                            | 路径示意（相对项目根 / 家目录）          | 作用域          | 是否提交         |
+| ------------------------------- | ---------------------------------------- | --------------- | ---------------- |
 | `.codineer/settings.local.json` | `<项目根>/.codineer/settings.local.json` | 项目 — 本地覆盖 | 否（gitignored） |
-| `.codineer/settings.json`       | `<项目根>/.codineer/settings.json`       | 项目配置       | 是               |
+| `.codineer/settings.json`       | `<项目根>/.codineer/settings.json`       | 项目配置        | 是               |
 | `~/.codineer/settings.json`     | `$HOME/.codineer/settings.json`          | 用户 — 全局配置 | —                |
 
 所有文件使用相同 schema。`env`、`providers`、`mcpServers` 等对象跨层级深度合并；`mcpServers` 中同名服务器以后加载的文件为准（完整替换，不深度合并）。`codineer config set` 始终写入全局文件（`~/.codineer/settings.json`）。
@@ -521,20 +521,29 @@ codineer config list                           # 列出全部配置
 
 ## 项目上下文
 
-`CODINEER.md` 是项目记忆文件，告诉 AI 你的代码库约定和工作流。
+`.codineer/CODINEER.md` 是**项目记忆文件**——它会被注入到每次对话的 system prompt 中，让 AI 无需反复询问即可了解你的代码库。典型内容包括：
+
+- 使用的技术栈和编程语言
+- 构建、lint、测试命令
+- 编码规范（命名、错误处理、提交风格）
+- 仓库目录结构说明
 
 ```bash
 codineer init        # 根据检测到的技术栈自动生成
 ```
 
+`codineer init` 会创建 `.codineer/` 目录并自动检测技术栈（Rust/Python/Node 等）生成初始 `CODINEER.md`。可自由编辑并提交到仓库，让整个团队受益。
+
 Codineer 沿目录树向上查找并加载所有匹配的指令文件：
 
 | 文件                        | 用途                       |
 | --------------------------- | -------------------------- |
-| `CODINEER.md`               | 主要上下文（建议提交）     |
+| `.codineer/CODINEER.md`     | 主要上下文（建议提交）     |
+| `CODINEER.md`               | 兼容旧版（同样支持）       |
 | `CODINEER.local.md`         | 个人覆盖（加入 gitignore） |
-| `.codineer/CODINEER.md`     | 替代位置                   |
 | `.codineer/instructions.md` | 附加指令                   |
+
+所有匹配文件从每个祖先目录收集、去重后拼接到 system prompt 中。这意味着 monorepo 中的子项目可以拥有自己的 `CODINEER.md`，与根目录的版本互补。
 
 ---
 

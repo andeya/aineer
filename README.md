@@ -52,7 +52,7 @@ Most AI coding CLIs lock you into a single provider. Claude Code requires Anthro
 - **Instant setup** — `brew install` or `cargo install`. One Rust binary, no runtime dependencies.
 - **Multimodal input** — attach images via `@photo.png`, paste from clipboard (`Ctrl+V` / `/image`), or drag-and-drop into the terminal. Works with Anthropic, OpenAI, and any multimodal-capable provider.
 - **Graceful degradation** — models without function calling automatically fall back to text-only mode.
-- **Project memory** — `CODINEER.md` gives the AI persistent context about your codebase. Commit it to share with your team.
+- **Project memory** — `.codineer/CODINEER.md` gives the AI persistent context about your codebase. Commit it to share with your team.
 - **Adaptive terminal UI** — welcome panel and separator line reflow in real time as the window resizes. Ultra-narrow terminals collapse to a single-column layout; the input line redraws in place without flicker. Works on macOS, Linux, and Windows (Windows Terminal / ConPTY).
 
 ## Table of Contents
@@ -517,20 +517,29 @@ codineer config list                           # Show all settings
 
 ## Project Context
 
-`CODINEER.md` is the project memory file. It tells the AI about your codebase, conventions, and workflows.
+`.codineer/CODINEER.md` is the **project memory file** — it is injected into every conversation's system prompt so the AI understands your codebase without re-asking each time. Typical content includes:
+
+- Tech stack and languages used
+- Build, lint, and test commands
+- Coding conventions (naming, error handling, commit style)
+- Repository layout notes
 
 ```bash
 codineer init        # auto-generate from detected stack
 ```
 
+`codineer init` scaffolds the `.codineer/` directory and auto-detects your stack (Rust/Python/Node/etc.) to generate a starter `CODINEER.md`. Edit it freely and commit it to the repo so the whole team benefits.
+
 Codineer walks up the directory tree and loads all matching instruction files:
 
 | File                        | Purpose                             |
 | --------------------------- | ----------------------------------- |
-| `CODINEER.md`               | Primary context (commit this)       |
+| `.codineer/CODINEER.md`     | Primary context (commit this)       |
+| `CODINEER.md`               | Legacy location (also supported)    |
 | `CODINEER.local.md`         | Personal overrides (gitignore this) |
-| `.codineer/CODINEER.md`     | Alternative location                |
 | `.codineer/instructions.md` | Additional instructions             |
+
+Files are loaded from every ancestor directory, deduplicated, and concatenated into the system prompt. This means monorepo sub-projects can have their own `CODINEER.md` that augments the root one.
 
 ---
 
