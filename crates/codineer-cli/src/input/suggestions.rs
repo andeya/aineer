@@ -110,7 +110,9 @@ pub(super) fn file_suggestions(text: &str, cursor: usize) -> Option<SuggestionSt
     let mut dir_items = Vec::new();
     let mut file_items = Vec::new();
 
-    for entry in entries.flatten().take(200) {
+    const MAX_SUGGESTIONS: usize = 200;
+
+    for entry in entries.flatten() {
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
 
@@ -154,6 +156,10 @@ pub(super) fn file_suggestions(text: &str, cursor: usize) -> Option<SuggestionSt
             dir_items.push(item);
         } else {
             file_items.push(item);
+        }
+
+        if dir_items.len() + file_items.len() >= MAX_SUGGESTIONS {
+            break;
         }
     }
 
