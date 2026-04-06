@@ -103,7 +103,10 @@ pub(crate) fn process_at_mentioned_files(input: &str) -> String {
                     (all_lines[s..e].to_vec(), s + 1, e)
                 }
                 Some((line, None)) => {
-                    let s = line.saturating_sub(1).saturating_sub(LINE_CONTEXT).min(total);
+                    let s = line
+                        .saturating_sub(1)
+                        .saturating_sub(LINE_CONTEXT)
+                        .min(total);
                     let e = (line + LINE_CONTEXT).min(total);
                     (all_lines[s..e].to_vec(), s + 1, e)
                 }
