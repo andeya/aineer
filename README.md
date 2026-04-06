@@ -108,7 +108,7 @@ export OPENAI_API_KEY="sk-..."                    # GPT
 export XAI_API_KEY="xai-..."                      # Grok
 export OPENROUTER_API_KEY="..."                   # OpenRouter (free models)
 export GROQ_API_KEY="..."                         # Groq Cloud (free tier)
-export GEMINI_API_KEY="AIzaSy..."                  # Google Gemini
+export GEMINI_API_KEY="AIzaSy..."                  # Google Gemini (free key from aistudio.google.com)
 export DASHSCOPE_API_KEY="sk-..."                 # Alibaba DashScope (OpenAI-compatible)
 ollama serve                                      # Local AI (no key needed)
 # Or use OpenClaw Zero Token gateway for free access to all major models (see below)
@@ -172,9 +172,9 @@ codineer --model ollama              # auto-pick best coding model
 
 > Models without function calling automatically fall back to text-only mode — every model works.
 
-### Google Gemini (OpenAI-compatible)
+### Google Gemini (OpenAI-compatible, free API key)
 
-Use Gemini models through Google's OpenAI-compatible endpoint. Configure the provider in `settings.json`:
+Get a **free** API key from [Google AI Studio](https://aistudio.google.com/apikey) — no credit card required. Configure the provider in `settings.json`:
 
 ```json
 {
@@ -464,7 +464,7 @@ Set via shell export **or** the `"env"` section in settings.json (shell exports 
 | `OPENAI_API_KEY`           | OpenAI API key                                                                                             |
 | `OPENROUTER_API_KEY`       | OpenRouter API key                                                                                         |
 | `GROQ_API_KEY`             | Groq Cloud API key                                                                                         |
-| `GEMINI_API_KEY`           | Google Gemini API key                                                                                      |
+| `GEMINI_API_KEY`           | Google Gemini API key ([free from AI Studio](https://aistudio.google.com/apikey))                           |
 | `DASHSCOPE_API_KEY`        | Alibaba Cloud DashScope (OpenAI-compatible)                                                                |
 | `OLLAMA_HOST`              | Ollama endpoint (e.g. `http://192.168.1.100:11434`)                                                        |
 | `CODINEER_WORKSPACE_ROOT`  | Override workspace root                                                                                    |

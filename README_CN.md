@@ -108,7 +108,7 @@ export OPENAI_API_KEY="sk-..."                    # GPT
 export XAI_API_KEY="xai-..."                      # Grok
 export OPENROUTER_API_KEY="..."                   # OpenRouter（免费模型）
 export GROQ_API_KEY="..."                         # Groq Cloud（免费额度）
-export GEMINI_API_KEY="AIzaSy..."                  # Google Gemini
+export GEMINI_API_KEY="AIzaSy..."                  # Google Gemini（aistudio.google.com 免费申请）
 export DASHSCOPE_API_KEY="sk-..."                 # 阿里云通义 DashScope（兼容 OpenAI）
 ollama serve                                      # 本地 AI（无需 Key）
 # 或通过 OpenClaw Zero Token 网关免费使用所有主流模型（见下文）
@@ -172,9 +172,9 @@ codineer --model ollama              # 自动选择最佳编程模型
 
 > 不支持 function calling 的模型自动降级为纯文本模式——任何模型都能工作。
 
-### Google Gemini（OpenAI 兼容）
+### Google Gemini（OpenAI 兼容，免费 API Key）
 
-通过 Google 的 OpenAI 兼容端点使用 Gemini 模型。在 `settings.json` 中配置：
+在 [Google AI Studio](https://aistudio.google.com/apikey) 免费申请 API Key，无需绑定信用卡。在 `settings.json` 中配置：
 
 ```json
 {
@@ -468,7 +468,7 @@ Codineer 从多个 JSON 文件合并设置（优先级从高到低）：
 | `OPENAI_API_KEY`           | OpenAI API Key                                                                 |
 | `OPENROUTER_API_KEY`       | OpenRouter API Key                                                             |
 | `GROQ_API_KEY`             | Groq Cloud API Key                                                             |
-| `GEMINI_API_KEY`           | Google Gemini API Key                                                          |
+| `GEMINI_API_KEY`           | Google Gemini API Key（[AI Studio 免费申请](https://aistudio.google.com/apikey)）|
 | `DASHSCOPE_API_KEY`        | 阿里云通义 DashScope（OpenAI 兼容模式）                                        |
 | `OLLAMA_HOST`              | Ollama 端点（如 `http://192.168.1.100:11434`）                                 |
 | `CODINEER_WORKSPACE_ROOT`  | 覆盖工作区根路径                                                               |
