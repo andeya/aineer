@@ -1,14 +1,7 @@
 # Build artifacts
 /target/
 
-# Codineer local artifacts
-.codineer/settings.local.json
-.codineer/sessions/
-.codineer/cache/
-.codineer/agents/
-.codineer/todos.json
-.codineer/sandbox-home/
-.codineer/sandbox-tmp/
+# Codineer local artifacts (fine-grained rules live in .codineer/.gitignore)
 
 # Environment
 .env

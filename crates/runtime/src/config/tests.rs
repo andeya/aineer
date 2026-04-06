@@ -401,7 +401,6 @@ fn rejects_unsupported_mcp_server_type() {
     fs::remove_dir_all(root).expect("cleanup");
 }
 
-
 #[test]
 fn parses_permission_and_sandbox_mode_labels() {
     let root = temp_dir();

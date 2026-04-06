@@ -1,0 +1,13 @@
+# Tracked (committed to the repo)
+!settings.json
+!plugins/
+!skills/
+
+# Ignored (local / runtime artifacts)
+settings.local.json
+sessions/
+agents/
+sandbox-home/
+sandbox-tmp/
+todos.json
+cache/
