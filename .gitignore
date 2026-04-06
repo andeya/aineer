@@ -25,10 +25,7 @@
 
 # Logs
 *.log
-codineer.log
 
 # Keys / secrets
 *.pem
 *.key
-
-test-write.txt
