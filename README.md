@@ -35,6 +35,7 @@ Most AI coding CLIs lock you into a single provider. Claude Code requires Anthro
 | **Zero-token-cost** ([free access to major models](#openclaw-zero-token-free-access-to-major-ai-models)) |     **Yes**      |       No       |       No        |      No      |
 | **Zero-config local AI** (auto-detect Ollama)                                                            |     **Yes**      |       No       |  `--oss` flag   | Manual setup |
 | **Single binary** (no runtime deps)                                                                      |     **Rust**     |    Node.js     |     Node.js     |    Python    |
+| **Multimodal input** (`@image.png`, clipboard paste, drag-and-drop)                                      |     **Yes**      |      Yes       |     Limited     |   Limited    |
 | **MCP protocol** (external tool integration)                                                             |     **Yes**      |      Yes       |       Yes       |     Yes      |
 | **Plugin system** + agents + skills                                                                      |     **Yes**      |      Yes       |       No        |      No      |
 | **Permission modes** (read-only → full access)                                                           |     **Yes**      |      Yes       |       Yes       |   Partial    |
@@ -49,6 +50,7 @@ Most AI coding CLIs lock you into a single provider. Claude Code requires Anthro
 - **Zero token cost** — pair with [OpenClaw Zero Token](https://github.com/andeya/openclaw-zero-token) to use Claude, ChatGPT, Gemini, DeepSeek, and 10+ more models for free — no API key purchase needed.
 - **Zero-config local AI** — start Ollama, run `codineer`. Auto-detects local models and picks the best one.
 - **Instant setup** — `brew install` or `cargo install`. One Rust binary, no runtime dependencies.
+- **Multimodal input** — attach images via `@photo.png`, paste from clipboard (`Ctrl+V`), or drag-and-drop into the terminal. Works with Anthropic, OpenAI, and any multimodal-capable provider.
 - **Graceful degradation** — models without function calling automatically fall back to text-only mode.
 - **Project memory** — `CODINEER.md` gives the AI persistent context about your codebase. Commit it to share with your team.
 - **Adaptive terminal UI** — welcome panel and separator line reflow in real time as the window resizes. Ultra-narrow terminals collapse to a single-column layout; the input line redraws in place without flicker. Works on macOS, Linux, and Windows (Windows Terminal / ConPTY).
@@ -59,6 +61,7 @@ Most AI coding CLIs lock you into a single provider. Claude Code requires Anthro
 - [Quick Start](#quick-start)
 - [Models & Providers](#models--providers)
 - [Usage](#usage)
+  - [File & Image Attachments](#file--image-attachments)
 - [Configuration](#configuration)
 - [Project Context](#project-context)
 - [Extending Codineer](#extending-codineer)
@@ -295,7 +298,8 @@ A **framed welcome banner** shows workspace, directory, model, session, and a co
 | ------------------------------------ | --------------------------------------------------- |
 | `?`                                  | Inline shortcuts reference panel                    |
 | `!<cmd>`                             | Bash mode — sends a shell command request to the AI |
-| `@`                                  | File path completion                                |
+| `@`                                  | File / image attachment (Tab-complete path;  → image block) |
+| `Ctrl+V`                             | Paste clipboard image → inserts `[Image #N]` placeholder |
 | `/`                                  | Slash command completion (with Tab)                 |
 | `Up` / `Down`                        | History recall                                      |
 | `Shift+Enter`, `Ctrl+J`, `\ + Enter` | Insert newline                                      |
@@ -303,6 +307,27 @@ A **framed welcome banner** shows workspace, directory, model, session, and a co
 | `Ctrl+D`                             | Exit (on empty prompt)                              |
 | `Double-tap Esc`                     | Clear input                                         |
 | `/vim`                               | Toggle Vim modal editing                            |
+
+### File & image attachments
+
+Use the `@` prefix to attach context directly to your message:
+
+| Syntax | What happens |
+| ------ | ------------ |
+| `@src/main.rs` | Inject file content (up to 2000 lines) |
+| `@src/main.rs:10-50` | Inject a specific line range |
+| `@src/` | List directory entries |
+| `@photo.png` | Attach as a multimodal image block (base64) |
+| `@archive.bin` | Inject binary file metadata (size, type) — content not read |
+
+**Clipboard & drag-and-drop images:**
+
+| Input | Result |
+| ----- | ------ |
+| `Ctrl+V` when clipboard contains an image | Inserts `[Image #N]` placeholder; image is sent on submit |
+| Drag an image file path into the terminal | Auto-detected and attached as image block |
+
+Images are transmitted as proper multimodal content — `source: base64` for Anthropic and `image_url` data-URLs for OpenAI-compatible providers. Supported formats: PNG, JPEG, GIF, WebP, BMP. Maximum size: 20 MB per image.
 
 ### One-shot prompts
 
