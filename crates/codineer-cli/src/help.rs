@@ -77,6 +77,7 @@ pub(crate) fn print_help_to(out: &mut impl io::Write) -> io::Result<()> {
             "  /help                                 Browse the full slash command map",
             "  /status                               Inspect session + workspace state",
             "  /model <name>                         Switch models mid-session",
+            "  Ctrl+V / /image                       Paste clipboard image (Ctrl+V on macOS/Linux; /image on all platforms)",
             "  /permissions <mode>                   Adjust tool access",
             "  Tab                                   Complete slash commands",
             "  /vim                                  Toggle modal editing",
@@ -243,6 +244,7 @@ pub(crate) fn render_repl_help() -> String {
         "  Completion           Tab cycles slash command matches",
         "  Cancel               Ctrl-C clears input; press twice on empty prompt to exit",
         "  Multiline            Shift+Enter, Ctrl+J, or \\ + Enter inserts a newline",
+        "  Image paste          Ctrl+V or /image pastes a clipboard image",
         "  Clear input          Double-tap Esc clears the current input",
         "  Shortcuts            Type ? to see the shortcut reference (inline preview)",
     ];
@@ -290,6 +292,11 @@ pub(crate) fn slash_command_entries() -> Vec<crate::input::CommandEntry> {
         })
         .collect();
     entries.push(CommandEntry {
+        name: "/image".into(),
+        description: "Paste clipboard image into editor".into(),
+        has_args: false,
+    });
+    entries.push(CommandEntry {
         name: "/vim".into(),
         description: "Toggle modal editing".into(),
         has_args: false,
@@ -319,6 +326,7 @@ pub(crate) fn slash_command_completion_candidates() -> Vec<String> {
         })
         .collect::<Vec<_>>();
     candidates.extend([
+        String::from("/image"),
         String::from("/vim"),
         String::from("/exit"),
         String::from("/quit"),
