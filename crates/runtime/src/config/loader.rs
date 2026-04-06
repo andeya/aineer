@@ -66,9 +66,8 @@ impl ConfigLoader {
         let mut loaded_entries = Vec::new();
         let mut mcp_servers = BTreeMap::new();
 
-        let mut config_warnings = Vec::new();
         for entry in self.discover() {
-            let Some(value) = read_optional_json_object(&entry.path, &mut config_warnings)? else {
+            let Some(value) = read_optional_json_object(&entry.path)? else {
                 continue;
             };
             merge_mcp_servers(&mut mcp_servers, entry.source, &value, &entry.path)?;
@@ -94,17 +93,12 @@ impl ConfigLoader {
             credentials: parse_optional_credentials_config(&merged_value)?,
         };
 
-        for w in &config_warnings {
-            eprintln!("warning: {w}");
-        }
-
         Ok(RuntimeConfig::new(merged, loaded_entries, feature_config))
     }
 }
 
 fn read_optional_json_object(
     path: &Path,
-    _warnings: &mut Vec<String>,
 ) -> Result<Option<BTreeMap<String, JsonValue>>, ConfigError> {
     let contents = match fs::read_to_string(path) {
         Ok(contents) => contents,

@@ -8,27 +8,23 @@ use commands::{
 use crate::{logo_ascii, VERSION};
 
 struct ConfigFilePaths {
-    local_override: String,
-    project_settings: String,
-    global_settings: String,
+    local_override: &'static str,
+    project_settings: &'static str,
+    global_settings: &'static str,
 }
 
-/// Build OS-appropriate display paths for the configuration files section.
-///
-/// On Windows uses `%USERPROFILE%\...` with backslash separators.
-/// On Unix/macOS uses `~/.codineer/...` with forward-slash separators.
 fn config_file_paths() -> ConfigFilePaths {
     if cfg!(target_os = "windows") {
         ConfigFilePaths {
-            local_override: r".codineer\settings.local.json".to_string(),
-            project_settings: r".codineer\settings.json".to_string(),
-            global_settings: r"%USERPROFILE%\.codineer\settings.json".to_string(),
+            local_override: r".codineer\settings.local.json",
+            project_settings: r".codineer\settings.json",
+            global_settings: r"%USERPROFILE%\.codineer\settings.json",
         }
     } else {
         ConfigFilePaths {
-            local_override: ".codineer/settings.local.json".to_string(),
-            project_settings: ".codineer/settings.json".to_string(),
-            global_settings: "~/.codineer/settings.json".to_string(),
+            local_override: ".codineer/settings.local.json",
+            project_settings: ".codineer/settings.json",
+            global_settings: "~/.codineer/settings.json",
         }
     }
 }
