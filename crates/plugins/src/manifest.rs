@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::constants::{MANIFEST_FILE_NAME, MANIFEST_RELATIVE_PATH};
+use crate::constants::{is_literal_command, MANIFEST_FILE_NAME};
 use crate::error::{PluginError, PluginManifestValidationError};
 use crate::types::{
     PluginCommandManifest, PluginHooks, PluginLifecycle, PluginManifest, PluginPermission,
@@ -75,20 +75,13 @@ fn load_manifest_from_path(
 }
 
 pub(crate) fn plugin_manifest_path(root: &Path) -> Result<PathBuf, PluginError> {
-    let direct_path = root.join(MANIFEST_FILE_NAME);
-    if direct_path.exists() {
-        return Ok(direct_path);
+    let path = root.join(MANIFEST_FILE_NAME);
+    if path.exists() {
+        return Ok(path);
     }
-
-    let packaged_path = root.join(MANIFEST_RELATIVE_PATH);
-    if packaged_path.exists() {
-        return Ok(packaged_path);
-    }
-
     Err(PluginError::NotFound(format!(
-        "plugin manifest not found at {} or {}",
-        direct_path.display(),
-        packaged_path.display()
+        "plugin manifest not found at {}",
+        path.display(),
     )))
 }
 
@@ -295,8 +288,6 @@ fn build_manifest_commands(
 
     validated
 }
-
-use crate::constants::is_literal_command;
 
 fn validate_command_entries<'a>(
     root: &Path,

@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-use crate::constants::{MANIFEST_FILE_NAME, MANIFEST_RELATIVE_PATH};
+use crate::constants::MANIFEST_FILE_NAME;
 use crate::*;
 
 fn temp_dir(label: &str) -> PathBuf {
@@ -77,7 +77,7 @@ fn write_external_plugin(root: &Path, name: &str, version: &str) {
         "#!/bin/sh\nprintf 'post'\n",
     );
     write_file(
-        root.join(MANIFEST_RELATIVE_PATH).as_path(),
+        root.join(MANIFEST_FILE_NAME).as_path(),
         format!(
             "{{\n  \"name\": \"{name}\",\n  \"version\": \"{version}\",\n  \"description\": \"test plugin\",\n  \"hooks\": {{\n    \"PreToolUse\": [\"./hooks/pre.sh\"],\n    \"PostToolUse\": [\"./hooks/post.sh\"]\n  }}\n}}"
         )
@@ -87,7 +87,7 @@ fn write_external_plugin(root: &Path, name: &str, version: &str) {
 
 fn write_broken_plugin(root: &Path, name: &str) {
     write_file(
-        root.join(MANIFEST_RELATIVE_PATH).as_path(),
+        root.join(MANIFEST_FILE_NAME).as_path(),
         format!(
             "{{\n  \"name\": \"{name}\",\n  \"version\": \"1.0.0\",\n  \"description\": \"broken plugin\",\n  \"hooks\": {{\n    \"PreToolUse\": [\"./hooks/missing.sh\"]\n  }}\n}}"
         )
@@ -107,7 +107,7 @@ fn write_lifecycle_plugin(root: &Path, name: &str, version: &str) -> PathBuf {
         "#!/bin/sh\nprintf 'shutdown\\n' >> lifecycle.log\n",
     );
     write_file(
-        root.join(MANIFEST_RELATIVE_PATH).as_path(),
+        root.join(MANIFEST_FILE_NAME).as_path(),
         format!(
             "{{\n  \"name\": \"{name}\",\n  \"version\": \"{version}\",\n  \"description\": \"lifecycle plugin\",\n  \"lifecycle\": {{\n    \"Init\": [\"./lifecycle/init.sh\"],\n    \"Shutdown\": [\"./lifecycle/shutdown.sh\"]\n  }}\n}}"
         )
@@ -137,7 +137,7 @@ fn write_tool_plugin_with_name(root: &Path, name: &str, version: &str, tool_name
         fs::set_permissions(&script_path, permissions).expect("chmod");
     }
     write_file(
-        root.join(MANIFEST_RELATIVE_PATH).as_path(),
+        root.join(MANIFEST_FILE_NAME).as_path(),
         format!(
             "{{\n  \"name\": \"{name}\",\n  \"version\": \"{version}\",\n  \"description\": \"tool plugin\",\n  \"tools\": [\n    {{\n      \"name\": \"{tool_name}\",\n      \"description\": \"Echo JSON input\",\n      \"inputSchema\": {{\"type\": \"object\", \"properties\": {{\"message\": {{\"type\": \"string\"}}}}, \"required\": [\"message\"], \"additionalProperties\": false}},\n      \"command\": \"./tools/echo-json.sh\",\n      \"requiredPermission\": \"workspace-write\"\n    }}\n  ]\n}}"
         )
@@ -147,7 +147,7 @@ fn write_tool_plugin_with_name(root: &Path, name: &str, version: &str, tool_name
 
 fn write_bundled_plugin(root: &Path, name: &str, version: &str, default_enabled: bool) {
     write_file(
-        root.join(MANIFEST_RELATIVE_PATH).as_path(),
+        root.join(MANIFEST_FILE_NAME).as_path(),
         format!(
             "{{\n  \"name\": \"{name}\",\n  \"version\": \"{version}\",\n  \"description\": \"bundled plugin\",\n  \"defaultEnabled\": {}\n}}",
             if default_enabled { "true" } else { "false" }
@@ -219,12 +219,12 @@ fn load_plugin_from_directory_reads_root_manifest_and_validates_entries() {
 }
 
 #[test]
-fn load_plugin_from_directory_supports_packaged_manifest_path() {
-    let root = temp_dir("manifest-packaged");
-    write_external_plugin(&root, "packaged-demo", "1.0.0");
+fn load_plugin_from_directory_loads_external_plugin() {
+    let root = temp_dir("manifest-external");
+    write_external_plugin(&root, "external-demo", "1.0.0");
 
-    let manifest = load_plugin_from_directory(&root).expect("packaged manifest should load");
-    assert_eq!(manifest.name, "packaged-demo");
+    let manifest = load_plugin_from_directory(&root).expect("external manifest should load");
+    assert_eq!(manifest.name, "external-demo");
     assert!(manifest.tools.is_empty());
     assert!(manifest.commands.is_empty());
 
@@ -550,7 +550,7 @@ fn bundled_sync_prunes_removed_bundled_registry_entries() {
         .join("stale-bundled-external");
     write_bundled_plugin(&bundled_root.join("active"), "active", "0.1.0", false);
     write_file(
-        stale_install_path.join(MANIFEST_RELATIVE_PATH).as_path(),
+        stale_install_path.join(MANIFEST_FILE_NAME).as_path(),
         r#"{
   "name": "stale",
   "version": "0.1.0",
@@ -910,37 +910,6 @@ fn list_installed_plugins_scans_install_root_without_registry_entries() {
     assert!(installed
         .iter()
         .any(|plugin| plugin.metadata.id == "scan-demo@external"));
-
-    let _ = fs::remove_dir_all(config_home);
-    let _ = fs::remove_dir_all(bundled_root);
-}
-
-#[test]
-fn list_installed_plugins_scans_packaged_manifests_in_install_root() {
-    let config_home = temp_dir("installed-packaged-scan-home");
-    let bundled_root = temp_dir("installed-packaged-scan-bundled");
-    let install_root = config_home.join("plugins").join("installed");
-    let installed_plugin_root = install_root.join("scan-packaged");
-    write_file(
-        installed_plugin_root.join(MANIFEST_RELATIVE_PATH).as_path(),
-        r#"{
-  "name": "scan-packaged",
-  "version": "1.0.0",
-  "description": "Packaged manifest in install root"
-}"#,
-    );
-
-    let mut config = PluginManagerConfig::new(&config_home);
-    config.bundled_root = Some(bundled_root.clone());
-    config.install_root = Some(install_root);
-    let manager = PluginManager::new(config);
-
-    let installed = manager
-        .list_installed_plugins()
-        .expect("installed plugins should scan packaged manifests");
-    assert!(installed
-        .iter()
-        .any(|plugin| plugin.metadata.id == "scan-packaged@external"));
 
     let _ = fs::remove_dir_all(config_home);
     let _ = fs::remove_dir_all(bundled_root);

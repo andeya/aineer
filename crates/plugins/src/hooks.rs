@@ -66,7 +66,7 @@ mod tests {
     }
 
     fn write_hook_plugin(root: &Path, name: &str, pre_message: &str, post_message: &str) {
-        fs::create_dir_all(root.join(".codineer-plugin")).expect("manifest dir");
+        fs::create_dir_all(root).expect("plugin dir");
         fs::create_dir_all(root.join("hooks")).expect("hooks dir");
         fs::write(
             root.join("hooks").join("pre.sh"),
@@ -79,7 +79,7 @@ mod tests {
         )
         .expect("write post hook");
         fs::write(
-            root.join(".codineer-plugin").join("plugin.json"),
+            root.join("plugin.json"),
             format!(
                 "{{\n  \"name\": \"{name}\",\n  \"version\": \"1.0.0\",\n  \"description\": \"hook plugin\",\n  \"hooks\": {{\n    \"PreToolUse\": [\"./hooks/pre.sh\"],\n    \"PostToolUse\": [\"./hooks/post.sh\"]\n  }}\n}}"
             ),
