@@ -1494,3 +1494,63 @@ fn process_at_mentioned_files_no_at_mention_unchanged() {
     let input = "what is the capital of France?";
     assert_eq!(process_at_mentioned_files(input), input);
 }
+
+#[test]
+fn process_at_mentioned_files_handles_line_number_suffix() {
+    use crate::turn_helpers::process_at_mentioned_files;
+
+    let file_name = "codineer_test_lineref_tmp.txt";
+    let content: String = (1..=120).map(|i| format!("line {i}\n")).collect();
+    std::fs::write(file_name, &content).expect("write temp file");
+
+    let input = format!("@{file_name}:60 explain this function");
+    let result = process_at_mentioned_files(&input);
+    let _ = std::fs::remove_file(file_name);
+
+    assert!(
+        !result.contains(&format!("@{file_name}:60")),
+        "raw @path:line should be stripped: {result}"
+    );
+    assert!(
+        result.contains("<attached_file"),
+        "file content block missing: {result}"
+    );
+    assert!(
+        result.contains("line 60"),
+        "target line should be included: {result}"
+    );
+    assert!(
+        result.contains("lines="),
+        "lines attribute should be present for line-referenced files: {result}"
+    );
+    assert!(
+        !result.contains("line 1\n"),
+        "distant lines should not be included: {result}"
+    );
+}
+
+#[test]
+fn process_at_mentioned_files_handles_line_range_suffix() {
+    use crate::turn_helpers::process_at_mentioned_files;
+
+    let file_name = "codineer_test_linerange_tmp.txt";
+    let content: String = (1..=100).map(|i| format!("line {i}\n")).collect();
+    std::fs::write(file_name, &content).expect("write temp file");
+
+    let input = format!("@{file_name}:10-20 check these lines");
+    let result = process_at_mentioned_files(&input);
+    let _ = std::fs::remove_file(file_name);
+
+    assert!(
+        result.contains("line 10"),
+        "start line should be included: {result}"
+    );
+    assert!(
+        result.contains("line 20"),
+        "end line should be included: {result}"
+    );
+    assert!(
+        !result.contains("line 21\n"),
+        "lines outside range should be excluded: {result}"
+    );
+}
