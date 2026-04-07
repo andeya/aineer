@@ -1,3 +1,5 @@
+//! Built-in tool implementations for the Codineer agent runtime.
+
 use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -12,7 +14,6 @@ use runtime::{
 
 mod agent;
 pub mod builtin;
-pub mod tool_output;
 mod collab;
 mod config_tool;
 mod cron;
@@ -24,6 +25,7 @@ mod powershell;
 mod registry;
 mod specs;
 mod task;
+pub mod tool_output;
 mod types;
 mod web;
 mod worktree;
@@ -58,6 +60,8 @@ use crate::types::{
     UserQuestion, WebFetchInput, WebSearchInput, WriteFileInput,
 };
 
+#[must_use]
+#[allow(clippy::double_must_use)]
 pub fn execute_tool(name: &str, input: &Value) -> Result<String, String> {
     // Try trait-based dispatch first (migrated tools)
     if let Some(tool) = builtin::find_builtin(name) {

@@ -28,6 +28,10 @@ struct MockSubagentApiClient {
 }
 
 impl runtime::ApiClient for MockSubagentApiClient {
+    fn active_model(&self) -> &str {
+        "mock-model"
+    }
+
     fn stream(&mut self, request: ApiRequest) -> Result<Vec<AssistantEvent>, RuntimeError> {
         self.calls += 1;
         match self.calls {
@@ -74,7 +78,7 @@ fn subagent_runtime_executes_tool_loop_with_isolated_session() {
         },
         SubagentToolExecutor::new(BTreeSet::from([String::from("read_file")])),
         agent_permission_policy(),
-        vec![String::from("system prompt")],
+        api::SystemBlock::from_plain("system prompt"),
         (),
     );
 

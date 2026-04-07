@@ -10,31 +10,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-use crate::types::{TaskCreateInput, TaskGetInput, TaskListInput, TaskStopInput, TaskUpdateInput};
+use crate::types::{
+    TaskCreateInput, TaskGetInput, TaskListInput, TaskStatus, TaskStopInput, TaskUpdateInput,
+};
 
 // ── Data model ────────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub(crate) enum TaskStatus {
-    Pending,
-    Running,
-    Completed,
-    Failed,
-    Stopped,
-}
-
-impl TaskStatus {
-    fn as_str(&self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Running => "running",
-            Self::Completed => "completed",
-            Self::Failed => "failed",
-            Self::Stopped => "stopped",
-        }
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Task {
@@ -293,12 +273,7 @@ pub(crate) fn execute_task_list(input: TaskListInput) -> Result<String, String> 
     // Filter by status if requested.
     let filtered: Vec<_> = tasks
         .iter()
-        .filter(|t| {
-            input
-                .status
-                .as_deref()
-                .is_none_or(|s| t.status.as_str() == s)
-        })
+        .filter(|t| input.status.is_none_or(|wanted| t.status == wanted))
         .map(|t| {
             serde_json::json!({
                 "id": t.id,
@@ -334,15 +309,8 @@ pub(crate) fn execute_task_update(input: TaskUpdateInput) -> Result<String, Stri
     if let Some(desc) = input.description {
         task.description = if desc.is_empty() { None } else { Some(desc) };
     }
-    if let Some(status_str) = &input.status {
-        task.status = match status_str.as_str() {
-            "pending" => TaskStatus::Pending,
-            "running" => TaskStatus::Running,
-            "completed" => TaskStatus::Completed,
-            "failed" => TaskStatus::Failed,
-            "stopped" => TaskStatus::Stopped,
-            other => return Err(format!("invalid status: {other}")),
-        };
+    if let Some(status) = input.status {
+        task.status = status;
     }
     task.updated_at = unix_now();
 
@@ -398,7 +366,7 @@ pub(crate) fn execute_task_stop(input: TaskStopInput) -> Result<String, String> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{TaskCreateInput, TaskGetInput, TaskListInput, TaskUpdateInput};
+    use crate::types::{TaskCreateInput, TaskGetInput, TaskListInput, TaskStatus, TaskUpdateInput};
     use std::sync::{Mutex, OnceLock};
 
     fn task_test_lock() -> &'static Mutex<()> {
@@ -440,7 +408,7 @@ mod tests {
             task_id: task_id.clone(),
             title: Some("Updated title".to_string()),
             description: None,
-            status: Some("completed".to_string()),
+            status: Some(TaskStatus::Completed),
         })
         .unwrap();
         let uv: serde_json::Value = serde_json::from_str(&updated).unwrap();
@@ -471,7 +439,7 @@ mod tests {
     }
 
     #[test]
-    fn update_invalid_status_returns_error() {
+    fn update_invalid_status_fails_deserialization() {
         let _g = task_test_lock().lock().unwrap();
         let dir = std::env::temp_dir().join(format!("codineer-task-stat-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -487,14 +455,20 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&created).unwrap();
         let task_id = v["task_id"].as_str().unwrap().to_string();
 
-        let err = execute_task_update(TaskUpdateInput {
-            task_id,
-            title: None,
-            description: None,
-            status: Some("bogus".to_string()),
-        })
+        let err = crate::execute_tool(
+            "TaskUpdate",
+            &serde_json::json!({
+                "task_id": task_id,
+                "status": "bogus",
+            }),
+        )
         .unwrap_err();
-        assert!(err.contains("invalid status"));
+        assert!(
+            err.contains("unknown variant")
+                || err.contains("invalid value")
+                || err.contains("deserialize"),
+            "unexpected error: {err}"
+        );
 
         std::env::set_current_dir(&orig).unwrap();
         let _ = std::fs::remove_dir_all(&dir);

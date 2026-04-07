@@ -1,15 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt;
 
 use crate::canonical_tool_token;
 use crate::execute_tool;
 use crate::registry::ToolSpec;
 use crate::specs::mvp_tool_specs;
-use crate::types::{AgentInput, AgentJob, AgentOutput};
+use crate::types::{AgentInput, AgentJob, AgentOutput, AgentRunStatus};
 use api::{
     max_tokens_for_model, ContentBlockDelta, InputContentBlock, InputMessage, MessageRequest,
-    MessageResponse, OutputContentBlock, ProviderClient, StreamEvent as ApiStreamEvent, ToolChoice,
-    ToolDefinition, ToolResultContentBlock,
+    MessageResponse, OutputContentBlock, ProviderClient, StreamEvent as ApiStreamEvent,
+    SystemBlock, ToolChoice, ToolDefinition, ToolResultContentBlock,
 };
 use runtime::{
     load_system_prompt, ApiClient, ApiRequest, AssistantEvent, ContentBlock, ConversationMessage,
@@ -129,23 +128,6 @@ impl SubagentKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AgentRunStatus {
-    Running,
-    Completed,
-    Failed,
-}
-
-impl fmt::Display for AgentRunStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Running => f.write_str("running"),
-            Self::Completed => f.write_str("completed"),
-            Self::Failed => f.write_str("failed"),
-        }
-    }
-}
-
 pub(crate) fn execute_agent(input: AgentInput) -> Result<AgentOutput, String> {
     execute_agent_with_spawn(input, spawn_agent_job)
 }
@@ -204,7 +186,7 @@ where
         description: input.description,
         subagent_type: Some(normalized_subagent_type),
         model: Some(model),
-        status: AgentRunStatus::Running.to_string(),
+        status: AgentRunStatus::Running,
         output_file: output_file.display().to_string(),
         manifest_file: manifest_file.display().to_string(),
         created_at: created_at.clone(),
@@ -296,7 +278,7 @@ fn build_agent_runtime(
     ))
 }
 
-fn build_agent_system_prompt(subagent_type: &str) -> Result<Vec<String>, String> {
+fn build_agent_system_prompt(subagent_type: &str) -> Result<Vec<SystemBlock>, String> {
     let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
     let mut prompt = load_system_prompt(
         cwd,
@@ -305,9 +287,9 @@ fn build_agent_system_prompt(subagent_type: &str) -> Result<Vec<String>, String>
         "unknown",
     )
     .map_err(|error| error.to_string())?;
-    prompt.push(format!(
+    prompt.push(SystemBlock::text(format!(
         "You are a background sub-agent of type `{subagent_type}`. Work only on the delegated task, use only the tools available to you, do not ask the user questions, and finish with a concise result."
-    ));
+    )));
     Ok(prompt)
 }
 
@@ -350,7 +332,7 @@ pub(crate) fn persist_agent_terminal_state(
         &format_agent_terminal_output(&status_str, result, error.as_deref()),
     )?;
     let mut next_manifest = manifest.clone();
-    next_manifest.status = status_str;
+    next_manifest.status = status;
     next_manifest.completed_at = Some(iso8601_now());
     next_manifest.error = error;
     write_agent_manifest(&next_manifest)
@@ -399,6 +381,10 @@ impl ProviderRuntimeClient {
 }
 
 impl ApiClient for ProviderRuntimeClient {
+    fn active_model(&self) -> &str {
+        &self.model
+    }
+
     #[allow(clippy::too_many_lines)]
     fn stream(&mut self, request: ApiRequest) -> Result<Vec<AssistantEvent>, RuntimeError> {
         let tools = tool_specs_for_allowed_tools(Some(&self.allowed_tools))
@@ -407,16 +393,18 @@ impl ApiClient for ProviderRuntimeClient {
                 name: spec.name.to_string(),
                 description: Some(spec.description.to_string()),
                 input_schema: spec.input_schema,
+                cache_control: None,
             })
             .collect::<Vec<_>>();
         let message_request = MessageRequest {
             model: self.model.clone(),
             max_tokens: max_tokens_for_model(&self.model),
             messages: convert_messages(&request.messages),
-            system: (!request.system_prompt.is_empty()).then(|| request.system_prompt.join("\n\n")),
+            system: (!request.system_prompt.is_empty()).then(|| request.system_prompt.clone()),
             tools: (!tools.is_empty()).then_some(tools),
             tool_choice: (!self.allowed_tools.is_empty()).then_some(ToolChoice::Auto),
             stream: true,
+            thinking: None,
         };
 
         self.runtime.block_on(async {
@@ -503,6 +491,7 @@ impl ApiClient for ProviderRuntimeClient {
                 .client
                 .send_message(&MessageRequest {
                     stream: false,
+                    thinking: None,
                     ..message_request.clone()
                 })
                 .await

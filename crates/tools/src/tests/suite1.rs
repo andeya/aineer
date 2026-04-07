@@ -475,7 +475,7 @@ fn agent_persists_handoff_metadata() {
 
     assert_eq!(manifest.name, "ship-audit");
     assert_eq!(manifest.subagent_type.as_deref(), Some("Explore"));
-    assert_eq!(manifest.status, "running");
+    assert_eq!(manifest.status, AgentRunStatus::Running);
     assert!(!manifest.created_at.is_empty());
     assert!(manifest.started_at.is_some());
     assert!(manifest.completed_at.is_none());

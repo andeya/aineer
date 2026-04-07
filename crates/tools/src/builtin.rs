@@ -62,10 +62,7 @@ pub fn find_builtin(name: &str) -> Option<&'static dyn BuiltinToolDispatch> {
 /// All registered builtin tools. Tools are added here as they're migrated to the trait.
 ///
 /// The old `execute_tool` match statement serves as fallback for tools not yet listed here.
-static BUILTIN_TOOLS: &[&dyn BuiltinToolDispatch] = &[
-    &SleepTool,
-    &StructuredOutputTool,
-];
+static BUILTIN_TOOLS: &[&dyn BuiltinToolDispatch] = &[&SleepTool, &StructuredOutputTool];
 
 // -- Example migrated tools below --
 
@@ -129,7 +126,9 @@ mod tests {
     #[test]
     fn concurrency_safe_check() {
         let input = serde_json::json!({ "duration_ms": 1 });
-        assert!(find_builtin("Sleep").unwrap().check_concurrency_safe(&input));
+        assert!(find_builtin("Sleep")
+            .unwrap()
+            .check_concurrency_safe(&input));
     }
 
     #[test]

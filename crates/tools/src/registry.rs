@@ -142,6 +142,7 @@ impl GlobalToolRegistry {
                 name: spec.name.to_string(),
                 description: Some(spec.description.to_string()),
                 input_schema: spec.input_schema,
+                cache_control: None,
             });
         let plugin = self
             .plugin_tools
@@ -154,6 +155,7 @@ impl GlobalToolRegistry {
                 name: tool.definition().name.clone(),
                 description: tool.definition().description.clone(),
                 input_schema: tool.definition().input_schema.clone(),
+                cache_control: None,
             });
         builtin.chain(plugin).collect()
     }

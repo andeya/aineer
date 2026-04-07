@@ -1,7 +1,31 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+/// Lifecycle state for background shell tasks (`TaskCreate` / `tasks.json`).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum TaskStatus {
+    Pending,
+    Running,
+    Completed,
+    Failed,
+    Stopped,
+}
+
+impl TaskStatus {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Running => "running",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Stopped => "stopped",
+        }
+    }
+}
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct ReadFileInput {
@@ -221,6 +245,24 @@ pub(crate) struct SkillOutput {
     pub(crate) prompt: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum AgentRunStatus {
+    Running,
+    Completed,
+    Failed,
+}
+
+impl fmt::Display for AgentRunStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Running => f.write_str("running"),
+            Self::Completed => f.write_str("completed"),
+            Self::Failed => f.write_str("failed"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct AgentOutput {
     #[serde(rename = "agentId")]
@@ -230,7 +272,7 @@ pub(crate) struct AgentOutput {
     #[serde(rename = "subagentType")]
     pub(crate) subagent_type: Option<String>,
     pub(crate) model: Option<String>,
-    pub(crate) status: String,
+    pub(crate) status: AgentRunStatus,
     #[serde(rename = "outputFile")]
     pub(crate) output_file: String,
     #[serde(rename = "manifestFile")]
@@ -249,7 +291,7 @@ pub(crate) struct AgentOutput {
 pub(crate) struct AgentJob {
     pub(crate) manifest: AgentOutput,
     pub(crate) prompt: String,
-    pub(crate) system_prompt: Vec<String>,
+    pub(crate) system_prompt: Vec<api::SystemBlock>,
     pub(crate) allowed_tools: BTreeSet<String>,
 }
 
@@ -518,7 +560,7 @@ pub(crate) struct TaskGetInput {
 #[derive(Debug, Deserialize)]
 pub(crate) struct TaskListInput {
     /// Filter by status: pending, running, completed, failed, stopped.
-    pub(crate) status: Option<String>,
+    pub(crate) status: Option<TaskStatus>,
 }
 
 /// Input for `TaskUpdate`.
@@ -527,7 +569,7 @@ pub(crate) struct TaskUpdateInput {
     pub(crate) task_id: String,
     pub(crate) title: Option<String>,
     pub(crate) description: Option<String>,
-    pub(crate) status: Option<String>,
+    pub(crate) status: Option<TaskStatus>,
 }
 
 /// Input for `TaskStop`.
