@@ -38,7 +38,13 @@ pub(crate) fn execute_exit_plan_mode(_input: ExitPlanModeInput) -> Result<String
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
     use super::*;
+
+    /// Serializes tests that touch the process-wide [`PLAN_MODE_ACTIVE`] flag so
+    /// parallel test threads cannot reset or flip it between assertions.
+    static PLAN_MODE_TEST_MUTEX: Mutex<()> = Mutex::new(());
 
     fn reset() {
         PLAN_MODE_ACTIVE.store(false, Ordering::SeqCst);
@@ -46,6 +52,9 @@ mod tests {
 
     #[test]
     fn enter_activates_and_exit_deactivates() {
+        let _guard = PLAN_MODE_TEST_MUTEX
+            .lock()
+            .expect("plan-mode test mutex poisoned");
         reset();
         assert!(!is_plan_mode());
         let msg = execute_enter_plan_mode(EnterPlanModeInput {}).unwrap();
@@ -58,6 +67,9 @@ mod tests {
 
     #[test]
     fn double_enter_is_idempotent() {
+        let _guard = PLAN_MODE_TEST_MUTEX
+            .lock()
+            .expect("plan-mode test mutex poisoned");
         reset();
         execute_enter_plan_mode(EnterPlanModeInput {}).unwrap();
         let msg = execute_enter_plan_mode(EnterPlanModeInput {}).unwrap();
@@ -67,6 +79,9 @@ mod tests {
 
     #[test]
     fn exit_without_enter_is_noop() {
+        let _guard = PLAN_MODE_TEST_MUTEX
+            .lock()
+            .expect("plan-mode test mutex poisoned");
         reset();
         let msg = execute_exit_plan_mode(ExitPlanModeInput {}).unwrap();
         assert!(msg.contains("not active"));

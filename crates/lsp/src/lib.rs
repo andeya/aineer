@@ -74,6 +74,8 @@ def write_message(payload):
     sys.stdout.buffer.flush()
 
 
+opened_uri = None
+
 while True:
     message = read_message()
     if message is None:
@@ -102,6 +104,7 @@ while True:
         continue
     elif method == "textDocument/didOpen":
         document = message["params"]["textDocument"]
+        opened_uri = document["uri"]
         write_message({
             "jsonrpc": "2.0",
             "method": "textDocument/publishDiagnostics",
@@ -205,6 +208,7 @@ while True:
             ],
         })
     elif method == "workspace/symbol":
+        ws_uri = opened_uri if opened_uri else "file:///mock/symbol.rs"
         write_message({
             "jsonrpc": "2.0",
             "id": message["id"],
@@ -213,7 +217,7 @@ while True:
                     "name": "MockSymbol",
                     "kind": 5,
                     "location": {
-                        "uri": "file:///mock/symbol.rs",
+                        "uri": ws_uri,
                         "range": {
                             "start": {"line": 2, "character": 0},
                             "end": {"line": 2, "character": 10},

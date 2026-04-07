@@ -992,6 +992,11 @@ mod tests {
             .expect("write should succeed");
         let mtime = written.last_modified_at.expect("mtime should be present");
 
+        // Ensure enough wall-clock time passes so the next atomic_write
+        // receives a distinct mtime even on filesystems with coarse
+        // timestamp granularity (observed on some CI environments).
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
         // Edit with correct mtime succeeds.
         let edited = edit_file(
             path.to_string_lossy().as_ref(),

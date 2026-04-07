@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::io::{self, IsTerminal, Write};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crossterm::event::{
     self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyEventKind,
@@ -129,11 +129,24 @@ impl LineEditor {
         session.show_bottom_sep = self.show_separator;
         session.static_hint = self.hint_line.clone();
         self.render_prefix(&mut session, &mut stdout, None)?;
+        let mut last_cols = crate::terminal_width::terminal_cols();
 
         loop {
+            // Poll with timeout so we can detect width changes even when
+            // SIGWINCH / Event::Resize is not delivered (common in embedded
+            // terminals such as Cursor IDE's xterm.js panel).
+            if !event::poll(Duration::from_millis(250))? {
+                let cur = crate::terminal_width::terminal_cols();
+                if cur != last_cols {
+                    last_cols = cur;
+                    self.render_prefix(&mut session, &mut stdout, self.suggestion_state.as_ref())?;
+                }
+                continue;
+            }
             let event = event::read()?;
             if let Event::Resize(w, _) = event {
                 crate::terminal_width::update_terminal_cols(w as usize);
+                last_cols = w as usize;
                 self.render_prefix(&mut session, &mut stdout, self.suggestion_state.as_ref())?;
                 continue;
             }

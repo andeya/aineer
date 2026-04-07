@@ -13,7 +13,7 @@ use super::text::{
     to_u16,
 };
 use crate::style::Palette;
-use crate::terminal_width::strip_ansi;
+use crate::terminal_width::{strip_ansi, terminal_cols};
 use unicode_width::UnicodeWidthStr;
 
 /// Write a full-width dim separator line (`─`) without trailing newline.
@@ -304,9 +304,9 @@ impl EditSession {
         let (cursor_row, cursor_col, total_lines) = self.cursor_layout(prompt.as_ref());
 
         let sep_lines = if self.show_bottom_sep {
-            let (cols, _) = terminal::size().unwrap_or((80, 24));
+            let cols = terminal_cols();
             write!(out, "\r\n")?;
-            write_dim_separator(out, cols as usize)?;
+            write_dim_separator(out, cols)?;
             1usize
         } else {
             0
@@ -363,9 +363,9 @@ impl EditSession {
         out: &mut impl Write,
         state: &SuggestionState,
     ) -> std::io::Result<usize> {
-        let (cols, rows) = terminal::size().unwrap_or((80, 24));
-        let cols = cols as usize;
-        let max_visible = std::cmp::min(6, (rows as usize).saturating_sub(3)).max(1);
+        let cols = terminal_cols();
+        let rows = terminal::size().map_or(24, |(_, h)| h as usize);
+        let max_visible = std::cmp::min(6, rows.saturating_sub(3)).max(1);
 
         let total = state.items.len();
         let start = if total <= max_visible {
@@ -414,12 +414,12 @@ impl EditSession {
     /// user types `?` as the sole character).  Returns the number of terminal
     /// lines drawn so the cursor can be repositioned correctly.
     fn draw_shortcuts_panel(&self, out: &mut impl Write) -> std::io::Result<usize> {
-        let (cols, _) = terminal::size().unwrap_or((80, 24));
+        let cols = terminal_cols();
         let p = Palette::for_stdout();
 
         let shortcuts = Self::shortcut_entries();
 
-        let left_w = (cols as usize / 2).max(20);
+        let left_w = (cols / 2).max(20);
         for &(left, right) in &shortcuts {
             write!(
                 out,
@@ -473,8 +473,7 @@ impl EditSession {
         let prompt_plain = strip_ansi(&prompt);
         let indent = " ".repeat(prompt_plain.width());
         let buf = self.visible_buffer();
-        let (cols, _) = terminal::size().unwrap_or((80, 24));
-        let cols = cols as usize;
+        let cols = terminal_cols();
         // Each visual line gets a dark-gray background bar (Claude Code style).
         let mut lines = buf.lines();
         write_bg_padded(
