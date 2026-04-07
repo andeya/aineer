@@ -114,19 +114,19 @@ impl<'a> ModelResolver<'a> {
     ) -> Result<ResolvedModel, Box<dyn std::error::Error>> {
         let lower = provider_name.to_ascii_lowercase();
 
-        let client = if let Some(config) = self.providers.get(&lower) {
-            let api_key = resolve_custom_api_key(config)?;
-            let mut c = OpenAiCompatClient::new_custom(&config.base_url, api_key);
-            if let Some(ref v) = config.api_version {
+        let client = if let Some(provider_cfg) = self.providers.get(&lower) {
+            let api_key = resolve_custom_api_key(provider_cfg, self.config)?;
+            let mut c = OpenAiCompatClient::new_custom(&provider_cfg.base_url, api_key);
+            if let Some(ref v) = provider_cfg.api_version {
                 let q = format!("api-version={v}");
                 c = c.with_endpoint_query(Some(q));
             }
-            if !config.headers.is_empty() {
-                c = c.with_custom_headers(config.headers.clone());
+            if !provider_cfg.headers.is_empty() {
+                c = c.with_custom_headers(provider_cfg.headers.clone());
             }
             c
         } else if let Some(preset) = api::builtin_preset(&lower) {
-            let api_key = resolve_preset_api_key(preset)?;
+            let api_key = resolve_preset_api_key(preset, self.config)?;
             OpenAiCompatClient::new_custom(preset.base_url, api_key)
         } else {
             return Err(format!(
@@ -161,38 +161,40 @@ impl<'a> ModelResolver<'a> {
 }
 
 pub(crate) fn resolve_custom_api_key(
-    config: &CustomProviderConfig,
+    provider: &CustomProviderConfig,
+    config: &runtime::RuntimeConfig,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    if let Some(key) = &config.api_key {
-        return Ok(key.clone());
-    }
-    if let Some(env_name) = &config.api_key_env {
-        let key = std::env::var(env_name).unwrap_or_default();
-        if key.is_empty() {
-            return Err(
-                format!("provider config references env var {env_name} but it is not set").into(),
-            );
+    if let Some(key) = &provider.api_key {
+        if !key.is_empty() {
+            return Ok(key.clone());
         }
-        return Ok(key);
+    }
+    if let Some(env_name) = &provider.api_key_env {
+        if let Some(key) = config.resolve_env(env_name) {
+            return Ok(key);
+        }
+        return Err(
+            format!("provider config references env var {env_name} but it is not set").into(),
+        );
     }
     Ok(String::new())
 }
 
 pub(crate) fn resolve_preset_api_key(
     preset: &api::BuiltinProviderPreset,
+    config: &runtime::RuntimeConfig,
 ) -> Result<String, Box<dyn std::error::Error>> {
     if preset.api_key_env.is_empty() {
         return Ok(String::new());
     }
-    let key = std::env::var(preset.api_key_env).unwrap_or_default();
-    if key.is_empty() {
-        return Err(format!(
-            "provider '{}' requires {} to be set",
-            preset.name, preset.api_key_env
-        )
-        .into());
+    if let Some(key) = config.resolve_env(preset.api_key_env) {
+        return Ok(key);
     }
-    Ok(key)
+    Err(format!(
+        "provider '{}' requires {} to be set",
+        preset.name, preset.api_key_env
+    )
+    .into())
 }
 
 /// Probe local Ollama and pick the best coding model.

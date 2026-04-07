@@ -3,7 +3,7 @@ use super::*;
 use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
 
-use runtime::CustomProviderConfig;
+use runtime::{ConfigLoader, CustomProviderConfig};
 
 fn env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -12,6 +12,13 @@ fn env_lock() -> &'static Mutex<()> {
 
 fn empty_providers() -> BTreeMap<String, CustomProviderConfig> {
     BTreeMap::new()
+}
+
+fn empty_runtime_config() -> runtime::RuntimeConfig {
+    let dir = std::env::temp_dir().join("codineer-test-empty-cfg");
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::write(dir.join("settings.json"), "{}");
+    ConfigLoader::new(&dir, &dir).load().expect("empty config")
 }
 
 fn make_provider(base_url: &str, default_model: Option<&str>) -> CustomProviderConfig {
@@ -80,7 +87,8 @@ fn pick_best_coding_model_selects_qwen3_over_codellama() {
 
 #[test]
 fn resolve_custom_api_key_returns_inline_key() {
-    let config = CustomProviderConfig {
+    let rt = empty_runtime_config();
+    let provider = CustomProviderConfig {
         base_url: "http://localhost".to_string(),
         api_version: None,
         api_key: Some("sk-test-123".to_string()),
@@ -89,18 +97,23 @@ fn resolve_custom_api_key_returns_inline_key() {
         default_model: None,
         headers: BTreeMap::new(),
     };
-    assert_eq!(resolve_custom_api_key(&config).unwrap(), "sk-test-123");
+    assert_eq!(
+        resolve_custom_api_key(&provider, &rt).unwrap(),
+        "sk-test-123"
+    );
 }
 
 #[test]
 fn resolve_custom_api_key_returns_empty_when_no_key_fields() {
-    let config = make_provider("http://localhost", None);
-    assert_eq!(resolve_custom_api_key(&config).unwrap(), "");
+    let rt = empty_runtime_config();
+    let provider = make_provider("http://localhost", None);
+    assert_eq!(resolve_custom_api_key(&provider, &rt).unwrap(), "");
 }
 
 #[test]
 fn resolve_custom_api_key_errors_on_missing_env_var() {
-    let config = CustomProviderConfig {
+    let rt = empty_runtime_config();
+    let provider = CustomProviderConfig {
         base_url: "http://localhost".to_string(),
         api_version: None,
         api_key: None,
@@ -109,7 +122,7 @@ fn resolve_custom_api_key_errors_on_missing_env_var() {
         default_model: None,
         headers: BTreeMap::new(),
     };
-    let err = resolve_custom_api_key(&config).unwrap_err();
+    let err = resolve_custom_api_key(&provider, &rt).unwrap_err();
     assert!(err
         .to_string()
         .contains("__CODINEER_TEST_NONEXISTENT_KEY__"));
@@ -121,14 +134,16 @@ fn resolve_custom_api_key_errors_on_missing_env_var() {
 
 #[test]
 fn resolve_preset_api_key_returns_empty_for_local_provider() {
+    let rt = empty_runtime_config();
     let preset = api::builtin_preset("ollama").unwrap();
-    assert_eq!(resolve_preset_api_key(preset).unwrap(), "");
+    assert_eq!(resolve_preset_api_key(preset, &rt).unwrap(), "");
 }
 
 #[test]
 fn resolve_preset_api_key_errors_when_env_missing() {
+    let rt = empty_runtime_config();
     let preset = api::builtin_preset("groq").unwrap();
-    let err = resolve_preset_api_key(preset).unwrap_err();
+    let err = resolve_preset_api_key(preset, &rt).unwrap_err();
     assert!(err.to_string().contains("GROQ_API_KEY"));
 }
 

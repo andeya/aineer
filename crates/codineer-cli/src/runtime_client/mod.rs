@@ -16,7 +16,10 @@ use crate::{build_runtime_plugin_state, max_tokens_for_model};
 
 pub(crate) use messages::convert_messages;
 #[allow(unused_imports)]
-pub(crate) use model::{query_ollama_tags, resolve_ollama_base_url, ModelResolver, ResolvedModel};
+pub(crate) use model::{
+    query_ollama_tags, resolve_custom_api_key, resolve_ollama_base_url, resolve_preset_api_key,
+    ModelResolver,
+};
 pub(crate) use permission::{permission_policy, CliPermissionPrompter};
 #[allow(unused_imports)]
 pub(crate) use stream::{push_output_block, response_to_events, write_flush};
@@ -66,6 +69,21 @@ pub(crate) fn build_runtime(
     let resolver = ModelResolver::new(&runtime_config);
     let resolved = resolver.resolve(&model)?;
     let resolved_model = resolved.model.clone();
+
+    let fallback_models: Vec<(String, ProviderClient)> = runtime_config
+        .fallback_models()
+        .iter()
+        .filter_map(|fb| {
+            let expanded = resolver.expand_shorthand(fb).ok()?;
+            let canonical = api::resolve_model_alias(&expanded, runtime_config.model_aliases());
+            if canonical == resolved_model {
+                return None;
+            }
+            let r = resolver.resolve(&canonical).ok()?;
+            Some((r.model, r.client))
+        })
+        .collect();
+
     let shared_runtime = Arc::new(tokio::runtime::Runtime::new()?);
     let runtime = ConversationRuntime::new_with_features(
         session,
@@ -80,6 +98,7 @@ pub(crate) fn build_runtime(
             progress_reporter,
             mcp_manager: Arc::clone(&mcp_manager),
             tools_disabled_by_provider: false,
+            fallback_models,
         },
         CliToolExecutor::new(
             allowed_tools.clone(),
@@ -111,6 +130,7 @@ pub(crate) struct DefaultRuntimeClient {
     progress_reporter: Option<InternalPromptProgressReporter>,
     mcp_manager: SharedMcpManager,
     tools_disabled_by_provider: bool,
+    fallback_models: Vec<(String, ProviderClient)>,
 }
 
 impl DefaultRuntimeClient {
@@ -142,6 +162,19 @@ impl DefaultRuntimeClient {
             || lower.contains("unsupported parameter")
             || lower.contains("does not support")
     }
+
+    /// Errors that indicate the current model/provider is temporarily or
+    /// permanently unable to serve requests — worth trying a different model.
+    fn should_try_model_fallback(error_msg: &str) -> bool {
+        let lower = error_msg.to_ascii_lowercase();
+        lower.contains("429")
+            || lower.contains("rate limit")
+            || lower.contains("quota")
+            || lower.contains("exceeded")
+            || lower.contains("model") && lower.contains("not available")
+            || lower.contains("capacity")
+            || lower.contains("overloaded")
+    }
 }
 
 impl ApiClient for DefaultRuntimeClient {
@@ -172,7 +205,7 @@ impl ApiClient for DefaultRuntimeClient {
                     let fallback_request = MessageRequest {
                         tools: None,
                         tool_choice: None,
-                        ..message_request
+                        ..message_request.clone()
                     };
                     return self.runtime.block_on(async {
                         stream::stream_with_client(
@@ -183,6 +216,44 @@ impl ApiClient for DefaultRuntimeClient {
                         )
                         .await
                     });
+                }
+            }
+        }
+
+        // Try fallback models on rate-limit / model-unavailable errors
+        if let Err(ref primary_err) = result {
+            if !self.fallback_models.is_empty()
+                && Self::should_try_model_fallback(&primary_err.to_string())
+            {
+                let primary_model = self.model.clone();
+                for (fb_model, fb_client) in &self.fallback_models {
+                    if fb_model == &primary_model {
+                        continue;
+                    }
+                    eprintln!(
+                        "[info] {primary_model} unavailable ({err}), trying fallback {fb_model}",
+                        err = primary_err
+                    );
+                    let fb_request = MessageRequest {
+                        model: fb_model.clone(),
+                        max_tokens: max_tokens_for_model(fb_model),
+                        ..message_request.clone()
+                    };
+                    let fb_result = self.runtime.block_on(async {
+                        stream::stream_with_client(
+                            fb_client,
+                            &fb_request,
+                            self.emit_output,
+                            self.progress_reporter.as_ref(),
+                        )
+                        .await
+                    });
+                    if fb_result.is_ok() {
+                        eprintln!("[info] switched to fallback model {fb_model}");
+                        self.model = fb_model.clone();
+                        self.client = fb_client.clone();
+                        return fb_result;
+                    }
                 }
             }
         }
