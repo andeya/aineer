@@ -100,6 +100,12 @@ impl LineEditor {
         self
     }
 
+    /// Replace the prefix renderer after construction (e.g. after a `/model` switch).
+    /// The new prefix will be displayed on the next `read_line` call.
+    pub fn set_prefix(&mut self, f: impl Fn() -> String + 'static) {
+        self.prefix_fn = Some(Box::new(f));
+    }
+
     /// Set a persistent one-line hint shown in the info area below the bottom
     /// separator whenever no other panel (shortcuts, interrupt, suggestions) is
     /// active.  Accepts ANSI-coloured strings.

@@ -4,6 +4,7 @@ use std::process::Command;
 use std::sync::Arc;
 
 use crate::input;
+use crate::models_cmd;
 use commands::{
     handle_agents_slash_command, handle_branch_slash_command, handle_commit_push_pr_slash_command,
     handle_plugins_slash_command, handle_skills_slash_command, handle_worktree_slash_command,
@@ -270,6 +271,14 @@ impl LiveCli {
             }
             SlashCommand::Config { section } => {
                 Self::print_config(section.as_deref())?;
+                false
+            }
+            SlashCommand::Models { provider } => {
+                models_cmd::run_models(provider.as_deref())?;
+                false
+            }
+            SlashCommand::Providers => {
+                models_cmd::run_providers()?;
                 false
             }
             SlashCommand::Agents { args } => {
@@ -872,28 +881,50 @@ pub(crate) fn run_repl(
     let is_initialized = cwd
         .as_ref()
         .is_some_and(|p| p.join(".codineer").join("settings.json").is_file());
-    let b_model = cli.model.clone();
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    let b_model = Rc::new(RefCell::new(cli.model.clone()));
     let b_perms = cli.permission_mode.as_str().to_string();
     let b_session_id = cli.session.id.clone();
     let b_session_path = cli.session.path.clone();
     let hint_line = format!("{}? for shortcuts  ·  /help  ·  Esc clears{}", p.dim, p.r);
+
+    let make_prefix = {
+        let b_model = Rc::clone(&b_model);
+        let workspace_summary = workspace_summary.clone();
+        let cwd_display = cwd_display.clone();
+        let b_perms = b_perms.clone();
+        let b_session_id = b_session_id.clone();
+        let b_session_path = b_session_path.clone();
+        move || {
+            let b_model = Rc::clone(&b_model);
+            let workspace_summary = workspace_summary.clone();
+            let cwd_display = cwd_display.clone();
+            let b_perms = b_perms.clone();
+            let b_session_id = b_session_id.clone();
+            let b_session_path = b_session_path.clone();
+            move || {
+                welcome_banner(
+                    color,
+                    BannerContext {
+                        workspace_summary: &workspace_summary,
+                        cwd_display: &cwd_display,
+                        model: &b_model.borrow(),
+                        permissions: &b_perms,
+                        session_id: &b_session_id,
+                        session_path: &b_session_path,
+                        is_initialized,
+                    },
+                )
+            }
+        }
+    };
+
     let mut editor = input::LineEditor::new(prompt, slash_command_entries())
         .with_separator()
         .with_hint_line(hint_line)
-        .with_prefix(move || {
-            welcome_banner(
-                color,
-                BannerContext {
-                    workspace_summary: &workspace_summary,
-                    cwd_display: &cwd_display,
-                    model: &b_model,
-                    permissions: &b_perms,
-                    session_id: &b_session_id,
-                    session_path: &b_session_path,
-                    is_initialized,
-                },
-            )
-        });
+        .with_prefix(make_prefix());
 
     loop {
         match editor.read_line()? {
@@ -920,9 +951,14 @@ pub(crate) fn run_repl(
                     continue;
                 }
                 if let Some(command) = SlashCommand::parse(trimmed) {
+                    let is_model_cmd = matches!(command, SlashCommand::Model { .. });
                     match cli.handle_repl_command(command) {
                         Ok(true) => {
                             let _ = cli.persist_session();
+                            if is_model_cmd {
+                                *b_model.borrow_mut() = cli.model.clone();
+                                editor.set_prefix(make_prefix());
+                            }
                         }
                         Err(e) => {
                             let p = crate::style::Palette::for_stdout();
