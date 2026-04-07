@@ -9,11 +9,12 @@ use serde_json::Value;
 use crate::constants::{BUILTIN_MARKETPLACE, BUNDLED_MARKETPLACE, EXTERNAL_MARKETPLACE};
 use crate::error::PluginError;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PluginKind {
     Builtin,
     Bundled,
+    #[default]
     External,
 }
 
@@ -74,6 +75,12 @@ impl PluginHooks {
             .post_tool_use
             .extend(other.post_tool_use.iter().cloned());
         merged
+    }
+
+    /// Convert to a `RuntimeHookConfig` for use with `HookDispatcher`.
+    #[must_use]
+    pub fn to_hook_config(&self) -> runtime::RuntimeHookConfig {
+        runtime::RuntimeHookConfig::new(self.pre_tool_use.clone(), self.post_tool_use.clone())
     }
 }
 
@@ -310,7 +317,7 @@ pub enum PluginInstallSource {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InstalledPluginRecord {
-    #[serde(default = "default_plugin_kind")]
+    #[serde(default)]
     pub kind: PluginKind,
     pub id: String,
     pub name: String,
@@ -326,10 +333,6 @@ pub struct InstalledPluginRecord {
 pub struct InstalledPluginRegistry {
     #[serde(default)]
     pub plugins: BTreeMap<String, InstalledPluginRecord>,
-}
-
-fn default_plugin_kind() -> PluginKind {
-    PluginKind::External
 }
 
 #[derive(Debug, Clone, PartialEq)]

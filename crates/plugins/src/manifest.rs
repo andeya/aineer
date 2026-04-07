@@ -51,29 +51,6 @@ fn default_tool_permission_label() -> String {
     "danger-full-access".to_string()
 }
 
-pub fn load_plugin_from_directory(root: &Path) -> Result<PluginManifest, PluginError> {
-    load_manifest_from_directory(root)
-}
-
-fn load_manifest_from_directory(root: &Path) -> Result<PluginManifest, PluginError> {
-    let manifest_path = plugin_manifest_path(root)?;
-    load_manifest_from_path(root, &manifest_path)
-}
-
-fn load_manifest_from_path(
-    root: &Path,
-    manifest_path: &Path,
-) -> Result<PluginManifest, PluginError> {
-    let contents = fs::read_to_string(manifest_path).map_err(|error| {
-        PluginError::NotFound(format!(
-            "plugin manifest not found at {}: {error}",
-            manifest_path.display()
-        ))
-    })?;
-    let raw_manifest: RawPluginManifest = serde_json::from_str(&contents)?;
-    build_plugin_manifest(root, raw_manifest)
-}
-
 pub(crate) fn plugin_manifest_path(root: &Path) -> Result<PathBuf, PluginError> {
     let path = root.join(MANIFEST_FILE_NAME);
     if path.exists() {
@@ -85,49 +62,65 @@ pub(crate) fn plugin_manifest_path(root: &Path) -> Result<PathBuf, PluginError> 
     )))
 }
 
-fn build_plugin_manifest(
-    root: &Path,
-    raw: RawPluginManifest,
-) -> Result<PluginManifest, PluginError> {
-    let mut errors = Vec::new();
-
-    validate_required_manifest_field("name", &raw.name, &mut errors);
-    validate_required_manifest_field("version", &raw.version, &mut errors);
-    validate_required_manifest_field("description", &raw.description, &mut errors);
-
-    let permissions = build_manifest_permissions(&raw.permissions, &mut errors);
-    validate_command_entries(root, raw.hooks.pre_tool_use.iter(), "hook", &mut errors);
-    validate_command_entries(root, raw.hooks.post_tool_use.iter(), "hook", &mut errors);
-    validate_command_entries(
-        root,
-        raw.lifecycle.init.iter(),
-        "lifecycle command",
-        &mut errors,
-    );
-    validate_command_entries(
-        root,
-        raw.lifecycle.shutdown.iter(),
-        "lifecycle command",
-        &mut errors,
-    );
-    let tools = build_manifest_tools(root, raw.tools, &mut errors);
-    let commands = build_manifest_commands(root, raw.commands, &mut errors);
-
-    if !errors.is_empty() {
-        return Err(PluginError::ManifestValidation(errors));
+impl PluginManifest {
+    /// Load and validate a plugin manifest from a directory containing `plugin.json`.
+    pub fn from_directory(root: &Path) -> Result<Self, PluginError> {
+        let manifest_path = plugin_manifest_path(root)?;
+        Self::from_path(root, &manifest_path)
     }
 
-    Ok(PluginManifest {
-        name: raw.name,
-        version: raw.version,
-        description: raw.description,
-        permissions,
-        default_enabled: raw.default_enabled,
-        hooks: raw.hooks,
-        lifecycle: raw.lifecycle,
-        tools,
-        commands,
-    })
+    fn from_path(root: &Path, manifest_path: &Path) -> Result<Self, PluginError> {
+        let contents = fs::read_to_string(manifest_path).map_err(|error| {
+            PluginError::NotFound(format!(
+                "plugin manifest not found at {}: {error}",
+                manifest_path.display()
+            ))
+        })?;
+        let raw: RawPluginManifest = serde_json::from_str(&contents)?;
+        Self::from_raw(root, raw)
+    }
+
+    fn from_raw(root: &Path, raw: RawPluginManifest) -> Result<Self, PluginError> {
+        let mut errors = Vec::new();
+
+        validate_required_manifest_field("name", &raw.name, &mut errors);
+        validate_required_manifest_field("version", &raw.version, &mut errors);
+        validate_required_manifest_field("description", &raw.description, &mut errors);
+
+        let permissions = build_manifest_permissions(&raw.permissions, &mut errors);
+        validate_command_entries(root, raw.hooks.pre_tool_use.iter(), "hook", &mut errors);
+        validate_command_entries(root, raw.hooks.post_tool_use.iter(), "hook", &mut errors);
+        validate_command_entries(
+            root,
+            raw.lifecycle.init.iter(),
+            "lifecycle command",
+            &mut errors,
+        );
+        validate_command_entries(
+            root,
+            raw.lifecycle.shutdown.iter(),
+            "lifecycle command",
+            &mut errors,
+        );
+        let tools = build_manifest_tools(root, raw.tools, &mut errors);
+        let commands = build_manifest_commands(root, raw.commands, &mut errors);
+
+        if !errors.is_empty() {
+            return Err(PluginError::ManifestValidation(errors));
+        }
+
+        Ok(Self {
+            name: raw.name,
+            version: raw.version,
+            description: raw.description,
+            permissions,
+            default_enabled: raw.default_enabled,
+            hooks: raw.hooks,
+            lifecycle: raw.lifecycle,
+            tools,
+            commands,
+        })
+    }
 }
 
 fn validate_required_manifest_field(

@@ -14,7 +14,7 @@ use crate::install::{
     parse_install_source, plugin_id, resolve_local_source, sanitize_plugin_id, unix_time_ms,
     update_settings_json,
 };
-use crate::manifest::{load_plugin_from_directory, plugin_manifest_path};
+use crate::manifest::plugin_manifest_path;
 use crate::types::{
     InstallOutcome, InstalledPluginRecord, InstalledPluginRegistry, Plugin, PluginDefinition,
     PluginHooks, PluginInstallSource, PluginKind, PluginManager, PluginManagerConfig,
@@ -89,7 +89,7 @@ impl PluginManager {
 
     pub fn validate_plugin_source(&self, source: &str) -> Result<PluginManifest, PluginError> {
         let path = resolve_local_source(source)?;
-        load_plugin_from_directory(&path)
+        PluginManifest::from_directory(&path)
     }
 
     pub fn install(&mut self, source: &str) -> Result<InstallOutcome, PluginError> {
@@ -97,7 +97,7 @@ impl PluginManager {
         let temp_root = self.install_root().join(".tmp");
         let staged_source = materialize_source(&install_source, &temp_root)?;
         let cleanup_source = matches!(install_source, PluginInstallSource::GitUrl { .. });
-        let manifest = load_plugin_from_directory(&staged_source)?;
+        let manifest = PluginManifest::from_directory(&staged_source)?;
 
         let plugin_id = plugin_id(&manifest.name, EXTERNAL_MARKETPLACE);
         let install_path = self.install_root().join(sanitize_plugin_id(&plugin_id));
@@ -182,7 +182,7 @@ impl PluginManager {
         let temp_root = self.install_root().join(".tmp");
         let staged_source = materialize_source(&record.source, &temp_root)?;
         let cleanup_source = matches!(record.source, PluginInstallSource::GitUrl { .. });
-        let manifest = load_plugin_from_directory(&staged_source)?;
+        let manifest = PluginManifest::from_directory(&staged_source)?;
 
         if record.install_path.exists() {
             fs::remove_dir_all(&record.install_path)?;
@@ -314,7 +314,7 @@ impl PluginManager {
 
         if let Some(ref bundled_root) = self.config.bundled_root {
             for source_root in discover_plugin_dirs(bundled_root)? {
-                let manifest = load_plugin_from_directory(&source_root)?;
+                let manifest = PluginManifest::from_directory(&source_root)?;
                 let source = PluginInstallSource::LocalPath {
                     path: source_root.clone(),
                 };
@@ -389,7 +389,7 @@ impl PluginManager {
         let now = unix_time_ms();
         let existing = registry.plugins.get(&pid);
         let installed_ok =
-            install_path.exists() && load_plugin_from_directory(&install_path).is_ok();
+            install_path.exists() && PluginManifest::from_directory(&install_path).is_ok();
         let needs_sync = existing.is_none_or(|r| {
             r.kind != PluginKind::Bundled
                 || r.version != version
@@ -407,7 +407,7 @@ impl PluginManager {
             fs::remove_dir_all(&install_path)?;
         }
         write_files(&install_path)?;
-        let manifest = load_plugin_from_directory(&install_path)?;
+        let manifest = PluginManifest::from_directory(&install_path)?;
 
         let installed_at = existing.map_or(now, |r| r.installed_at_unix_ms);
         registry.plugins.insert(

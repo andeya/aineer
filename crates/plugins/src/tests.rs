@@ -176,25 +176,25 @@ fn load_enabled_plugins(path: &Path) -> BTreeMap<String, bool> {
 }
 
 #[test]
-fn load_plugin_from_directory_validates_required_fields() {
+fn manifest_from_directory_validates_required_fields() {
     let root = temp_dir("manifest-required");
     write_file(
         root.join(MANIFEST_FILE_NAME).as_path(),
         r#"{"name":"","version":"1.0.0","description":"desc"}"#,
     );
 
-    let error = load_plugin_from_directory(&root).expect_err("empty name should fail");
+    let error = PluginManifest::from_directory(&root).expect_err("empty name should fail");
     assert!(error.to_string().contains("name cannot be empty"));
 
     let _ = fs::remove_dir_all(root);
 }
 
 #[test]
-fn load_plugin_from_directory_reads_root_manifest_and_validates_entries() {
+fn manifest_from_directory_reads_root_manifest_and_validates_entries() {
     let root = temp_dir("manifest-root");
     write_loader_plugin(&root);
 
-    let manifest = load_plugin_from_directory(&root).expect("manifest should load");
+    let manifest = PluginManifest::from_directory(&root).expect("manifest should load");
     assert_eq!(manifest.name, "loader-demo");
     assert_eq!(manifest.version, "1.2.3");
     assert_eq!(
@@ -219,11 +219,11 @@ fn load_plugin_from_directory_reads_root_manifest_and_validates_entries() {
 }
 
 #[test]
-fn load_plugin_from_directory_loads_external_plugin() {
+fn manifest_from_directory_loads_external_plugin() {
     let root = temp_dir("manifest-external");
     write_external_plugin(&root, "external-demo", "1.0.0");
 
-    let manifest = load_plugin_from_directory(&root).expect("external manifest should load");
+    let manifest = PluginManifest::from_directory(&root).expect("external manifest should load");
     assert_eq!(manifest.name, "external-demo");
     assert!(manifest.tools.is_empty());
     assert!(manifest.commands.is_empty());
@@ -232,7 +232,7 @@ fn load_plugin_from_directory_loads_external_plugin() {
 }
 
 #[test]
-fn load_plugin_from_directory_defaults_optional_fields() {
+fn manifest_from_directory_defaults_optional_fields() {
     let root = temp_dir("manifest-defaults");
     write_file(
         root.join(MANIFEST_FILE_NAME).as_path(),
@@ -243,7 +243,7 @@ fn load_plugin_from_directory_defaults_optional_fields() {
 }"#,
     );
 
-    let manifest = load_plugin_from_directory(&root).expect("minimal manifest should load");
+    let manifest = PluginManifest::from_directory(&root).expect("minimal manifest should load");
     assert!(manifest.permissions.is_empty());
     assert!(manifest.hooks.is_empty());
     assert!(manifest.tools.is_empty());
@@ -253,7 +253,7 @@ fn load_plugin_from_directory_defaults_optional_fields() {
 }
 
 #[test]
-fn load_plugin_from_directory_rejects_duplicate_permissions_and_commands() {
+fn manifest_from_directory_rejects_duplicate_permissions_and_commands() {
     let root = temp_dir("manifest-duplicates");
     write_file(
         root.join("commands").join("sync.sh").as_path(),
@@ -273,7 +273,7 @@ fn load_plugin_from_directory_rejects_duplicate_permissions_and_commands() {
 }"#,
     );
 
-    let error = load_plugin_from_directory(&root).expect_err("duplicates should fail");
+    let error = PluginManifest::from_directory(&root).expect_err("duplicates should fail");
     match error {
         PluginError::ManifestValidation(errors) => {
             assert!(errors.iter().any(|error| matches!(
@@ -294,7 +294,7 @@ fn load_plugin_from_directory_rejects_duplicate_permissions_and_commands() {
 }
 
 #[test]
-fn load_plugin_from_directory_rejects_missing_tool_or_command_paths() {
+fn manifest_from_directory_rejects_missing_tool_or_command_paths() {
     let root = temp_dir("manifest-paths");
     write_file(
         root.join(MANIFEST_FILE_NAME).as_path(),
@@ -313,14 +313,14 @@ fn load_plugin_from_directory_rejects_missing_tool_or_command_paths() {
 }"#,
     );
 
-    let error = load_plugin_from_directory(&root).expect_err("missing paths should fail");
+    let error = PluginManifest::from_directory(&root).expect_err("missing paths should fail");
     assert!(error.to_string().contains("does not exist"));
 
     let _ = fs::remove_dir_all(root);
 }
 
 #[test]
-fn load_plugin_from_directory_rejects_invalid_permissions() {
+fn manifest_from_directory_rejects_invalid_permissions() {
     let root = temp_dir("manifest-invalid-permissions");
     write_file(
         root.join(MANIFEST_FILE_NAME).as_path(),
@@ -332,7 +332,7 @@ fn load_plugin_from_directory_rejects_invalid_permissions() {
 }"#,
     );
 
-    let error = load_plugin_from_directory(&root).expect_err("invalid permissions should fail");
+    let error = PluginManifest::from_directory(&root).expect_err("invalid permissions should fail");
     match error {
         PluginError::ManifestValidation(errors) => {
             assert!(errors.iter().any(|error| matches!(
@@ -348,7 +348,7 @@ fn load_plugin_from_directory_rejects_invalid_permissions() {
 }
 
 #[test]
-fn load_plugin_from_directory_rejects_invalid_tool_required_permission() {
+fn manifest_from_directory_rejects_invalid_tool_required_permission() {
     let root = temp_dir("manifest-invalid-tool-permission");
     write_file(
         root.join("tools").join("echo.sh").as_path(),
@@ -372,7 +372,8 @@ fn load_plugin_from_directory_rejects_invalid_tool_required_permission() {
 }"#,
     );
 
-    let error = load_plugin_from_directory(&root).expect_err("invalid tool permission should fail");
+    let error =
+        PluginManifest::from_directory(&root).expect_err("invalid tool permission should fail");
     match error {
         PluginError::ManifestValidation(errors) => {
             assert!(errors.iter().any(|error| matches!(
@@ -390,7 +391,7 @@ fn load_plugin_from_directory_rejects_invalid_tool_required_permission() {
 }
 
 #[test]
-fn load_plugin_from_directory_accumulates_multiple_validation_errors() {
+fn manifest_from_directory_accumulates_multiple_validation_errors() {
     let root = temp_dir("manifest-multi-error");
     write_file(
         root.join(MANIFEST_FILE_NAME).as_path(),
@@ -406,7 +407,7 @@ fn load_plugin_from_directory_accumulates_multiple_validation_errors() {
     );
 
     let error =
-        load_plugin_from_directory(&root).expect_err("multiple manifest errors should fail");
+        PluginManifest::from_directory(&root).expect_err("multiple manifest errors should fail");
     match error {
         PluginError::ManifestValidation(errors) => {
             assert!(errors.len() >= 4);
@@ -913,4 +914,114 @@ fn list_installed_plugins_scans_install_root_without_registry_entries() {
 
     let _ = fs::remove_dir_all(config_home);
     let _ = fs::remove_dir_all(bundled_root);
+}
+
+// ── Hook integration tests (migrated from hooks.rs) ──────────────────
+
+#[cfg(unix)]
+mod hook_integration {
+    use crate::{PluginHooks, PluginManager, PluginManagerConfig};
+    use codineer_core::events::RuntimeEvent;
+    use codineer_core::observer::RuntimeObserver;
+    use runtime::HookDispatcher;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn hook_temp_dir(label: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be after epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("plugins-hook-runner-{label}-{nanos}"))
+    }
+
+    fn write_hook_plugin(root: &Path, name: &str, pre_message: &str, post_message: &str) {
+        fs::create_dir_all(root).expect("plugin dir");
+        fs::create_dir_all(root.join("hooks")).expect("hooks dir");
+        fs::write(
+            root.join("hooks").join("pre.sh"),
+            format!("#!/bin/sh\nprintf '%s\\n' '{pre_message}'\n"),
+        )
+        .expect("write pre hook");
+        fs::write(
+            root.join("hooks").join("post.sh"),
+            format!("#!/bin/sh\nprintf '%s\\n' '{post_message}'\n"),
+        )
+        .expect("write post hook");
+        fs::write(
+            root.join("plugin.json"),
+            format!(
+                "{{\n  \"name\": \"{name}\",\n  \"version\": \"1.0.0\",\n  \"description\": \"hook plugin\",\n  \"hooks\": {{\n    \"PreToolUse\": [\"./hooks/pre.sh\"],\n    \"PostToolUse\": [\"./hooks/post.sh\"]\n  }}\n}}"
+            ),
+        )
+        .expect("write plugin manifest");
+    }
+
+    #[test]
+    fn collects_and_runs_hooks_from_enabled_plugins() {
+        let config_home = hook_temp_dir("config");
+        let first_source_root = hook_temp_dir("source-a");
+        let second_source_root = hook_temp_dir("source-b");
+        write_hook_plugin(
+            &first_source_root,
+            "first",
+            "plugin pre one",
+            "plugin post one",
+        );
+        write_hook_plugin(
+            &second_source_root,
+            "second",
+            "plugin pre two",
+            "plugin post two",
+        );
+
+        let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+        manager
+            .install(first_source_root.to_str().expect("utf8 path"))
+            .expect("first plugin install should succeed");
+        manager
+            .install(second_source_root.to_str().expect("utf8 path"))
+            .expect("second plugin install should succeed");
+        let registry = manager.plugin_registry().expect("registry should build");
+        let hooks = registry.aggregated_hooks().expect("plugin hooks");
+        let mut dispatcher = HookDispatcher::from_hook_config(&hooks.to_hook_config());
+
+        let event = RuntimeEvent::PreToolUse {
+            tool_name: "Read",
+            tool_use_id: "id-1",
+            input: r#"{"path":"README.md"}"#,
+        };
+        let directive = dispatcher.on_event(&event);
+        assert!(!directive.is_denied());
+        assert_eq!(
+            directive.messages,
+            vec!["plugin pre one".to_string(), "plugin pre two".to_string()]
+        );
+
+        let _ = fs::remove_dir_all(config_home);
+        let _ = fs::remove_dir_all(first_source_root);
+        let _ = fs::remove_dir_all(second_source_root);
+    }
+
+    #[test]
+    fn pre_tool_use_denies_when_plugin_hook_exits_two() {
+        let hooks = PluginHooks {
+            pre_tool_use: vec!["printf 'blocked by plugin'; exit 2".to_string()],
+            post_tool_use: Vec::new(),
+        };
+        let mut dispatcher = HookDispatcher::from_hook_config(&hooks.to_hook_config());
+
+        let event = RuntimeEvent::PreToolUse {
+            tool_name: "Bash",
+            tool_use_id: "id-2",
+            input: r#"{"command":"pwd"}"#,
+        };
+        let directive = dispatcher.on_event(&event);
+        assert!(directive.is_denied());
+        assert!(directive
+            .messages
+            .iter()
+            .any(|m| m.contains("blocked by plugin")));
+    }
 }

@@ -3,8 +3,8 @@ use std::path::Path;
 use crate::constants::BUILTIN_MARKETPLACE;
 use crate::error::PluginError;
 use crate::install::plugin_id;
-use crate::manifest::load_plugin_from_directory;
 use crate::resolve::{resolve_hooks, resolve_lifecycle, resolve_tools};
+use crate::types::PluginManifest;
 use crate::types::{
     BuiltinPlugin, BundledPlugin, ExternalPlugin, PluginDefinition, PluginHooks, PluginKind,
     PluginLifecycle, PluginMetadata,
@@ -35,7 +35,7 @@ pub(crate) fn load_plugin_definition(
     source: String,
     marketplace: &str,
 ) -> Result<PluginDefinition, PluginError> {
-    let manifest = load_plugin_from_directory(root)?;
+    let manifest = PluginManifest::from_directory(root)?;
     let metadata = PluginMetadata {
         id: plugin_id(&manifest.name, marketplace),
         name: manifest.name,
