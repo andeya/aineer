@@ -110,6 +110,7 @@ pub(crate) fn build_runtime(
         permission_policy(permission_mode, &tool_registry),
         system_prompt,
         runtime_config.feature_config(),
+        (),
     );
     let model_aliases = runtime_config.model_aliases().clone();
     Ok(RuntimeBuildResult {

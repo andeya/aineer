@@ -3,6 +3,9 @@ use std::fmt::{Display, Formatter};
 
 pub use codineer_core::error::RuntimeError;
 
+use codineer_core::events::RuntimeEvent;
+use codineer_core::observer::{EventDirective, RuntimeObserver};
+
 use crate::compact::{
     compact_session, estimate_session_tokens, CompactionConfig, CompactionResult,
 };
@@ -130,7 +133,7 @@ pub struct TurnSummary {
     pub usage: TokenUsage,
 }
 
-pub struct ConversationRuntime<C, T> {
+pub struct ConversationRuntime<C, T, O: RuntimeObserver = ()> {
     session: Session,
     api_client: C,
     tool_executor: T,
@@ -139,12 +142,14 @@ pub struct ConversationRuntime<C, T> {
     max_iterations: usize,
     usage_tracker: UsageTracker,
     hook_runner: HookRunner<RuntimeHookConfig>,
+    observer: O,
 }
 
-impl<C, T> ConversationRuntime<C, T>
+impl<C, T, O> ConversationRuntime<C, T, O>
 where
     C: ApiClient,
     T: ToolExecutor,
+    O: RuntimeObserver,
 {
     #[must_use]
     pub fn new(
@@ -153,6 +158,7 @@ where
         tool_executor: T,
         permission_policy: PermissionPolicy,
         system_prompt: Vec<String>,
+        observer: O,
     ) -> Self {
         Self::new_with_features(
             session,
@@ -161,6 +167,7 @@ where
             permission_policy,
             system_prompt,
             &RuntimeFeatureConfig::default(),
+            observer,
         )
     }
 
@@ -172,6 +179,7 @@ where
         permission_policy: PermissionPolicy,
         system_prompt: Vec<String>,
         feature_config: &RuntimeFeatureConfig,
+        observer: O,
     ) -> Self {
         let usage_tracker = UsageTracker::from_session(&session);
         Self {
@@ -183,6 +191,7 @@ where
             max_iterations: 200,
             usage_tracker,
             hook_runner: HookRunner::from_feature_config(feature_config),
+            observer,
         }
     }
 
@@ -223,10 +232,18 @@ where
         loop {
             iterations += 1;
             if iterations > self.max_iterations {
+                let _ = self.observer.on_event(&RuntimeEvent::Stop {
+                    reason: "max iterations exceeded".into(),
+                });
                 return Err(RuntimeError::MaxIterations {
                     iterations: self.max_iterations,
                 });
             }
+
+            let _ = self.observer.on_event(&RuntimeEvent::TurnStart {
+                iteration: iterations,
+                turn: iterations,
+            });
 
             let request = ApiRequest {
                 system_prompt: self.system_prompt.clone(),
@@ -252,6 +269,10 @@ where
             assistant_messages.push(assistant_message);
 
             if pending_tool_uses.is_empty() {
+                let _ = self.observer.on_event(&RuntimeEvent::TurnEnd {
+                    iteration: iterations,
+                    turn: iterations,
+                });
                 break;
             }
 
@@ -634,6 +655,7 @@ mod tests {
             tool_executor,
             permission_policy,
             system_prompt,
+            (),
         );
 
         let summary = runtime
@@ -699,6 +721,7 @@ mod tests {
             StaticToolExecutor::new(),
             PermissionPolicy::new(PermissionMode::WorkspaceWrite),
             vec!["system".to_string()],
+            (),
         );
 
         let summary = runtime
@@ -754,6 +777,7 @@ mod tests {
                 .with_tool_requirement("blocked", PermissionMode::WorkspaceWrite),
             vec!["system".to_string()],
             &deny_config,
+            (),
         );
 
         let summary = runtime
@@ -824,6 +848,7 @@ mod tests {
                 .with_tool_requirement("add", PermissionMode::WorkspaceWrite),
             vec!["system".to_string()],
             &hook_config,
+            (),
         );
 
         let summary = runtime
@@ -891,6 +916,7 @@ mod tests {
             StaticToolExecutor::new(),
             PermissionPolicy::new(PermissionMode::DangerFullAccess),
             vec!["system".to_string()],
+            (),
         );
 
         assert_eq!(runtime.usage().turns(), 1);
@@ -918,6 +944,7 @@ mod tests {
             StaticToolExecutor::new(),
             PermissionPolicy::new(PermissionMode::DangerFullAccess),
             vec!["system".to_string()],
+            (),
         );
         runtime.run_turn("a", None).expect("turn a");
         runtime.run_turn("b", None).expect("turn b");

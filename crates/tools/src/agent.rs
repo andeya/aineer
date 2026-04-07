@@ -292,6 +292,7 @@ fn build_agent_runtime(
         tool_executor,
         agent_permission_policy(),
         job.system_prompt.clone(),
+        (),
     ))
 }
 

@@ -75,6 +75,7 @@ fn subagent_runtime_executes_tool_loop_with_isolated_session() {
         SubagentToolExecutor::new(BTreeSet::from([String::from("read_file")])),
         agent_permission_policy(),
         vec![String::from("system prompt")],
+        (),
     );
 
     let summary = runtime
