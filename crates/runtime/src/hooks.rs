@@ -1,7 +1,11 @@
+use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::process::Command;
 
 use serde_json::json;
+
+use codineer_core::events::{EventKind, RuntimeEvent};
+use codineer_core::observer::{Decision, EventDirective, RuntimeObserver};
 
 use crate::config::{RuntimeFeatureConfig, RuntimeHookConfig};
 
@@ -324,11 +328,146 @@ impl CommandWithStdin {
     }
 }
 
+/// Event-driven hook dispatcher implementing [`RuntimeObserver`].
+///
+/// Routes [`RuntimeEvent`]s to shell commands via `HashMap<EventKind>` for O(1) lookup.
+/// Bridges the old `HookRunner` mechanism with the new observer pattern.
+#[derive(Debug)]
+pub struct HookDispatcher {
+    commands: HashMap<EventKind, Vec<String>>,
+}
+
+impl HookDispatcher {
+    /// Build from a `RuntimeHookConfig`.
+    #[must_use]
+    pub fn from_hook_config(config: &RuntimeHookConfig) -> Self {
+        let mut commands = HashMap::new();
+        if !config.pre_tool_use().is_empty() {
+            commands.insert(EventKind::PreToolUse, config.pre_tool_use().to_vec());
+        }
+        if !config.post_tool_use().is_empty() {
+            commands.insert(EventKind::PostToolUse, config.post_tool_use().to_vec());
+        }
+        Self { commands }
+    }
+
+    /// Build from a `RuntimeFeatureConfig` (convenience).
+    #[must_use]
+    pub fn from_feature_config(feature_config: &RuntimeFeatureConfig) -> Self {
+        Self::from_hook_config(feature_config.hooks())
+    }
+
+    /// Register commands for an arbitrary [`EventKind`].
+    pub fn register(&mut self, kind: EventKind, cmds: Vec<String>) {
+        if !cmds.is_empty() {
+            self.commands.insert(kind, cmds);
+        }
+    }
+
+    /// How many event kinds have registered commands.
+    #[must_use]
+    pub fn registered_count(&self) -> usize {
+        self.commands.len()
+    }
+}
+
+impl Default for HookDispatcher {
+    fn default() -> Self {
+        Self {
+            commands: HashMap::new(),
+        }
+    }
+}
+
+impl RuntimeObserver for HookDispatcher {
+    fn on_event(&mut self, event: &RuntimeEvent<'_>) -> EventDirective {
+        let kind = event.kind();
+        let Some(commands) = self.commands.get(&kind) else {
+            return EventDirective::allow();
+        };
+
+        match event {
+            RuntimeEvent::PreToolUse {
+                tool_name, input, ..
+            } => {
+                let result = run_hook_commands(
+                    HookEvent::PreToolUse,
+                    commands,
+                    tool_name,
+                    input,
+                    None,
+                    false,
+                );
+                hook_result_to_directive(result)
+            }
+            RuntimeEvent::PostToolUse {
+                tool_name,
+                tool_use_id: _,
+                output,
+                is_error,
+            } => {
+                let result = run_hook_commands(
+                    HookEvent::PostToolUse,
+                    commands,
+                    tool_name,
+                    "",
+                    Some(output),
+                    *is_error,
+                );
+                hook_result_to_directive(result)
+            }
+            RuntimeEvent::PostToolUseFailure {
+                tool_name, error, ..
+            } => {
+                let result = run_hook_commands(
+                    HookEvent::PostToolUse,
+                    commands,
+                    tool_name,
+                    "",
+                    Some(error),
+                    true,
+                );
+                hook_result_to_directive(result)
+            }
+            _ => {
+                // For non-tool events with registered commands, we don't
+                // have a standard input format yet — just allow.
+                EventDirective::allow()
+            }
+        }
+    }
+}
+
+fn hook_result_to_directive(result: HookRunResult) -> EventDirective {
+    let messages: Vec<String> = result.messages().to_vec();
+    if result.is_denied() {
+        let reason = messages
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "hook denied".to_string());
+        EventDirective {
+            decision: Decision::Deny(reason),
+            messages,
+            additional_context: None,
+        }
+    } else if messages.is_empty() {
+        EventDirective::allow()
+    } else {
+        EventDirective {
+            decision: Decision::Allow,
+            messages,
+            additional_context: None,
+        }
+    }
+}
+
 #[cfg(test)]
 #[cfg(unix)]
 mod tests {
-    use super::{HookRunResult, HookRunner};
+    use super::{HookDispatcher, HookRunResult, HookRunner};
     use crate::config::{RuntimeFeatureConfig, RuntimeHookConfig};
+    use codineer_core::events::{EventKind, RuntimeEvent};
+    use codineer_core::observer::RuntimeObserver;
 
     #[test]
     fn allows_exit_code_zero_and_captures_stdout() {
@@ -371,5 +510,63 @@ mod tests {
             .messages()
             .iter()
             .any(|message| message.contains("allowing tool execution to continue")));
+    }
+
+    #[test]
+    fn dispatcher_from_hook_config() {
+        let config = RuntimeHookConfig::new(
+            vec!["printf 'pre ok'".to_string()],
+            vec!["printf 'post ok'".to_string()],
+        );
+        let dispatcher = HookDispatcher::from_hook_config(&config);
+        assert_eq!(dispatcher.registered_count(), 2);
+    }
+
+    #[test]
+    fn dispatcher_allows_pre_tool_use() {
+        let config = RuntimeHookConfig::new(
+            vec!["printf 'allowed'".to_string()],
+            Vec::new(),
+        );
+        let mut dispatcher = HookDispatcher::from_hook_config(&config);
+        let event = RuntimeEvent::PreToolUse {
+            tool_name: "Read",
+            tool_use_id: "id-1",
+            input: r#"{"path":"README.md"}"#,
+        };
+        let directive = dispatcher.on_event(&event);
+        assert!(!directive.is_denied());
+        assert_eq!(directive.messages, vec!["allowed".to_string()]);
+    }
+
+    #[test]
+    fn dispatcher_denies_pre_tool_use() {
+        let config = RuntimeHookConfig::new(
+            vec!["printf 'blocked'; exit 2".to_string()],
+            Vec::new(),
+        );
+        let mut dispatcher = HookDispatcher::from_hook_config(&config);
+        let event = RuntimeEvent::PreToolUse {
+            tool_name: "Bash",
+            tool_use_id: "id-2",
+            input: r#"{"command":"rm"}"#,
+        };
+        let directive = dispatcher.on_event(&event);
+        assert!(directive.is_denied());
+    }
+
+    #[test]
+    fn dispatcher_allows_unregistered_events() {
+        let mut dispatcher = HookDispatcher::default();
+        let event = RuntimeEvent::TurnStart { iteration: 0, turn: 0 };
+        let directive = dispatcher.on_event(&event);
+        assert!(!directive.is_denied());
+    }
+
+    #[test]
+    fn dispatcher_register_custom_event() {
+        let mut dispatcher = HookDispatcher::default();
+        dispatcher.register(EventKind::SessionStart, vec!["echo hello".to_string()]);
+        assert_eq!(dispatcher.registered_count(), 1);
     }
 }

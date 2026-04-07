@@ -46,7 +46,7 @@ pub use file_ops::{
     EditFileOutput, GlobSearchOutput, GrepOutputMode, GrepSearchInput, GrepSearchOutput,
     ReadFileOutput, StructuredPatchHunk, TextFilePayload, WriteFileOutput,
 };
-pub use hooks::{HookCommandSource, HookEvent, HookRunResult, HookRunner};
+pub use hooks::{HookCommandSource, HookDispatcher, HookEvent, HookRunResult, HookRunner};
 pub use json::JsonValue;
 pub use lsp::{
     FileDiagnostics, LspContextEnrichment, LspError, LspManager, LspServerConfig, SymbolLocation,
