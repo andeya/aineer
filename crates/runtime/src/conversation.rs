@@ -301,6 +301,27 @@ where
                         )));
                     }
                     PermissionOutcome::Allow => {
+                        let observer_directive = self.observer.on_event(
+                            &RuntimeEvent::PreToolUse {
+                                tool_name,
+                                tool_use_id,
+                                input,
+                            },
+                        );
+                        if observer_directive.is_denied() {
+                            let deny_msg = observer_directive
+                                .deny_reason()
+                                .unwrap_or("observer denied tool")
+                                .to_string();
+                            slot_status.push(Err(ConversationMessage::tool_result(
+                                tool_use_id.clone(),
+                                tool_name.clone(),
+                                deny_msg,
+                                true,
+                            )));
+                            continue;
+                        }
+
                         let pre_hook = self.hook_runner.run_pre_tool_use(tool_name, input);
                         if pre_hook.is_denied() {
                             let deny_msg = format_hook_message(
@@ -406,6 +427,23 @@ where
                             output,
                             post_hook.is_denied(),
                         );
+
+                        if is_error {
+                            let _ = self.observer.on_event(
+                                &RuntimeEvent::PostToolUseFailure {
+                                    tool_name: &tool_name,
+                                    tool_use_id: &tool_use_id,
+                                    error: &output,
+                                },
+                            );
+                        } else {
+                            let _ = self.observer.on_event(&RuntimeEvent::PostToolUse {
+                                tool_name: &tool_name,
+                                tool_use_id: &tool_use_id,
+                                output: &output,
+                                is_error: false,
+                            });
+                        }
 
                         ConversationMessage::tool_result(tool_use_id, tool_name, output, is_error)
                     }

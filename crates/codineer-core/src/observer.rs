@@ -54,6 +54,14 @@ impl EventDirective {
     pub fn is_denied(&self) -> bool {
         matches!(self.decision, Decision::Deny(_))
     }
+
+    #[must_use]
+    pub fn deny_reason(&self) -> Option<&str> {
+        match &self.decision {
+            Decision::Deny(reason) => Some(reason),
+            _ => None,
+        }
+    }
 }
 
 /// Trait for observing runtime lifecycle events.
