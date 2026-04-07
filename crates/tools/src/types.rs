@@ -22,6 +22,9 @@ pub(crate) struct EditFileInput {
     pub(crate) old_string: String,
     pub(crate) new_string: String,
     pub(crate) replace_all: Option<bool>,
+    /// Nanoseconds since UNIX epoch returned by a prior `read_file` call.
+    /// When set, the edit is rejected if the file has been modified since.
+    pub(crate) last_modified_at: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -389,4 +392,168 @@ pub(crate) enum WebSearchResultItem {
 pub(crate) struct SearchHit {
     pub(crate) title: String,
     pub(crate) url: String,
+}
+
+/// Input for `TeamCreate`.
+#[derive(Debug, Deserialize)]
+pub(crate) struct TeamCreateInput {
+    pub(crate) name: String,
+    pub(crate) description: Option<String>,
+    /// Agent endpoint URLs to add as initial members.
+    pub(crate) members: Option<Vec<String>>,
+}
+
+/// Input for `TeamDelete`.
+#[derive(Debug, Deserialize)]
+pub(crate) struct TeamDeleteInput {
+    pub(crate) name: String,
+}
+
+/// Input for `SendMessage`.
+#[derive(Debug, Deserialize)]
+pub(crate) struct SendMessageInput {
+    /// Team name or direct agent endpoint URL.
+    pub(crate) recipient: String,
+    /// Message content (text or JSON).
+    pub(crate) content: String,
+}
+
+/// Input for `SlashCommand`.
+#[derive(Debug, Deserialize)]
+pub(crate) struct SlashCommandInput {
+    /// Command name with or without leading `/`.
+    pub(crate) command: String,
+    /// Optional arguments (free-form JSON).
+    pub(crate) args: Option<serde_json::Value>,
+}
+
+/// Input for `ListMcpResources`.
+#[derive(Debug, Deserialize)]
+pub(crate) struct ListMcpResourcesInput {
+    /// Optional substring to filter URIs by server name.
+    pub(crate) server_filter: Option<String>,
+}
+
+/// Input for `ReadMcpResource`.
+#[derive(Debug, Deserialize)]
+pub(crate) struct ReadMcpResourceInput {
+    /// Full URI of the resource to read.
+    pub(crate) uri: String,
+}
+
+/// Input for `MCPSearch`.
+#[derive(Debug, Deserialize)]
+pub(crate) struct McpSearchInput {
+    /// Full-text query to match against resource names, descriptions, and content.
+    pub(crate) query: String,
+}
+
+/// Input for `CronCreate`.
+#[derive(Debug, Deserialize)]
+pub(crate) struct CronCreateInput {
+    /// Cron schedule expression (5 fields: min hour dom month dow).
+    pub(crate) schedule: String,
+    /// Shell command to execute.
+    pub(crate) command: String,
+    /// Optional human-readable label for the job.
+    pub(crate) label: Option<String>,
+}
+
+/// Input for `CronDelete`.
+#[derive(Debug, Deserialize)]
+pub(crate) struct CronDeleteInput {
+    /// ID returned by CronCreate.
+    pub(crate) cron_id: String,
+}
+
+/// Input for `CronList`.
+#[derive(Debug, Deserialize)]
+pub(crate) struct CronListInput {
+    /// Optional substring to filter jobs by label.
+    pub(crate) label_filter: Option<String>,
+}
+
+/// Input for `EnterWorktree`.
+#[derive(Debug, Deserialize)]
+pub(crate) struct EnterWorktreeInput {
+    /// Branch name to check out in the new worktree. Created from HEAD if it does not exist.
+    pub(crate) branch: String,
+    /// Optional filesystem path for the worktree directory. Defaults to `.worktrees/<branch>`.
+    pub(crate) path: Option<String>,
+}
+
+/// Input for `ExitWorktree`.
+#[derive(Debug, Deserialize)]
+pub(crate) struct ExitWorktreeInput {
+    /// If true, prune and remove the worktree directory on exit.
+    pub(crate) cleanup: Option<bool>,
+}
+
+/// Input for `EnterPlanMode` (no fields; empty object required by schema).
+#[derive(Debug, Deserialize)]
+pub(crate) struct EnterPlanModeInput {}
+
+/// Input for `ExitPlanMode` (no fields; empty object required by schema).
+#[derive(Debug, Deserialize)]
+pub(crate) struct ExitPlanModeInput {}
+
+/// Input for `TaskCreate`.
+#[derive(Debug, Deserialize)]
+pub(crate) struct TaskCreateInput {
+    pub(crate) title: String,
+    pub(crate) description: Option<String>,
+    /// Optional shell command to run as a background process.
+    pub(crate) command: Option<String>,
+}
+
+/// Input for `TaskGet`.
+#[derive(Debug, Deserialize)]
+pub(crate) struct TaskGetInput {
+    pub(crate) task_id: String,
+    /// Number of trailing output lines to return (default 50).
+    pub(crate) tail_lines: Option<usize>,
+}
+
+/// Input for `TaskList`.
+#[derive(Debug, Deserialize)]
+pub(crate) struct TaskListInput {
+    /// Filter by status: pending, running, completed, failed, stopped.
+    pub(crate) status: Option<String>,
+}
+
+/// Input for `TaskUpdate`.
+#[derive(Debug, Deserialize)]
+pub(crate) struct TaskUpdateInput {
+    pub(crate) task_id: String,
+    pub(crate) title: Option<String>,
+    pub(crate) description: Option<String>,
+    pub(crate) status: Option<String>,
+}
+
+/// Input for `TaskStop`.
+#[derive(Debug, Deserialize)]
+pub(crate) struct TaskStopInput {
+    pub(crate) task_id: String,
+}
+
+/// Input for the `Lsp` tool.
+#[derive(Debug, Deserialize)]
+pub(crate) struct LspInput {
+    /// Operation to perform: hover, completion, go_to_definition, find_references,
+    /// document_symbols, workspace_symbols, rename, formatting, diagnostics.
+    pub(crate) operation: String,
+    /// Absolute or workspace-relative path of the file to query.
+    pub(crate) path: String,
+    /// 0-based line number (required for position-sensitive operations).
+    pub(crate) line: Option<u32>,
+    /// 0-based character offset (required for position-sensitive operations).
+    pub(crate) character: Option<u32>,
+    /// Search query string (required for workspace_symbols).
+    pub(crate) query: Option<String>,
+    /// New symbol name (required for rename).
+    pub(crate) new_name: Option<String>,
+    /// Tab size in spaces (for formatting; default 4).
+    pub(crate) tab_size: Option<u32>,
+    /// Whether to use spaces instead of tabs (for formatting; default true).
+    pub(crate) insert_spaces: Option<bool>,
 }

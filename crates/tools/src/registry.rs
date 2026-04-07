@@ -194,6 +194,52 @@ impl GlobalToolRegistry {
             .execute(input)
             .map_err(|error| error.to_string())
     }
+
+    /// Returns `true` for built-in tools that are read-only and safe to run
+    /// concurrently with other tools. Plugin tools are conservatively excluded.
+    #[must_use]
+    pub fn is_concurrency_safe(&self, name: &str) -> bool {
+        // Only pure read-only built-ins with no interactive side effects.
+        matches!(
+            name,
+            "read_file"
+                | "glob_search"
+                | "grep_search"
+                | "WebFetch"
+                | "WebSearch"
+                | "Skill"
+                | "TaskGet"
+                | "TaskList"
+                | "ListMcpResources"
+                | "ReadMcpResource"
+                | "MCPSearch"
+                | "CronList"
+                | "Lsp"
+        )
+    }
+
+    /// Execute a batch of concurrency-safe tools in parallel using scoped threads.
+    ///
+    /// Each element of `calls` is `(tool_name, json_input_str)`.
+    /// Returns results in the same order as `calls`.
+    pub fn execute_batch(&self, calls: &[(&str, &str)]) -> Vec<Result<String, String>> {
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = calls
+                .iter()
+                .map(|(name, input_str)| {
+                    scope.spawn(move || {
+                        let value: Value =
+                            serde_json::from_str(input_str).map_err(|e| e.to_string())?;
+                        self.execute(name, &value)
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|h| h.join().expect("concurrent tool thread panicked"))
+                .collect()
+        })
+    }
 }
 
 fn normalize_tool_name(value: &str) -> String {

@@ -5,7 +5,17 @@ use crate::types::{NotebookCellType, NotebookEditInput, NotebookEditMode, Notebo
 pub(crate) fn execute_notebook_edit(
     input: NotebookEditInput,
 ) -> Result<NotebookEditOutput, String> {
-    let path = std::path::PathBuf::from(&input.notebook_path);
+    // Reject Windows UNC paths (\\server\share) before any other check.
+    if input.notebook_path.starts_with("\\\\") || input.notebook_path.starts_with("//") {
+        return Err(String::from(
+            "UNC / network share paths are not allowed for security reasons.",
+        ));
+    }
+
+    // Enforce workspace boundary using the runtime helper.
+    let path = runtime::workspace_safe_path(&input.notebook_path)
+        .map_err(|e| format!("Workspace boundary violation: {e}"))?;
+
     if path.extension().and_then(|ext| ext.to_str()) != Some("ipynb") {
         return Err(String::from(
             "File must be a Jupyter notebook (.ipynb file).",
@@ -111,7 +121,8 @@ pub(crate) fn execute_notebook_edit(
 
     let updated_file =
         serde_json::to_string_pretty(&notebook).map_err(|error| error.to_string())?;
-    std::fs::write(&path, &updated_file).map_err(|error| error.to_string())?;
+    // Atomic write: prevents corrupted notebooks on crash mid-write.
+    runtime::write_file(&path.to_string_lossy(), &updated_file).map_err(|e| e.to_string())?;
 
     Ok(NotebookEditOutput {
         new_source,

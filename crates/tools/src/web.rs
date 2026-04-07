@@ -1,21 +1,80 @@
 use std::collections::BTreeSet;
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-use reqwest::blocking::Client;
+use reqwest::Client;
 
 use crate::types::{
     SearchHit, WebFetchInput, WebFetchOutput, WebSearchInput, WebSearchOutput, WebSearchResultItem,
 };
 
+// ---------------------------------------------------------------------------
+// Global async HTTP client with built-in connection pool.
+// Shared across all web tool calls; connections are reused automatically.
+// ---------------------------------------------------------------------------
+
+pub(crate) fn http_client() -> &'static Client {
+    static CLIENT: OnceLock<Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        Client::builder()
+            .timeout(Duration::from_secs(30))
+            .redirect(reqwest::redirect::Policy::limited(10))
+            .pool_max_idle_per_host(10)
+            .user_agent("codineer-rust-tools/0.1")
+            .build()
+            .expect("failed to build global reqwest client")
+    })
+}
+
+/// Run an async future to completion.
+///
+/// Handles two execution contexts:
+/// - Already inside a tokio multi-thread runtime (e.g. async tool dispatch):
+///   uses `block_in_place` so the current worker thread can block without
+///   starving the scheduler.
+/// - Called from a purely synchronous thread (e.g. CLI CliToolExecutor):
+///   spins up a lightweight `current_thread` runtime for this call only.
+pub(crate) fn block_on_web<F, T>(fut: F) -> T
+where
+    F: std::future::Future<Output = T>,
+{
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => tokio::task::block_in_place(|| handle.block_on(fut)),
+        Err(_) => tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("failed to build fallback tokio runtime")
+            .block_on(fut),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Public sync entry points (thin wrappers around async implementations)
+// ---------------------------------------------------------------------------
+
 pub(crate) fn execute_web_fetch(input: &WebFetchInput) -> Result<WebFetchOutput, String> {
+    block_on_web(async_execute_web_fetch(input))
+}
+
+pub(crate) fn execute_web_search(input: &WebSearchInput) -> Result<WebSearchOutput, String> {
+    block_on_web(async_execute_web_search(input))
+}
+
+// ---------------------------------------------------------------------------
+// Async implementations
+// ---------------------------------------------------------------------------
+
+async fn async_execute_web_fetch(input: &WebFetchInput) -> Result<WebFetchOutput, String> {
     const MAX_BODY_SIZE: usize = 10 * 1024 * 1024; // 10 MiB
     let started = Instant::now();
-    let client = build_http_client()?;
+
     let request_url = normalize_fetch_url(&input.url)?;
-    let response = client
-        .get(request_url.clone())
+    ssrf_check_url(&request_url).await?;
+    let response = http_client()
+        .get(&request_url)
         .send()
-        .map_err(|error| error.to_string())?;
+        .await
+        .map_err(|e| e.to_string())?;
 
     let status = response.status();
     let final_url = response.url().to_string();
@@ -24,33 +83,21 @@ pub(crate) fn execute_web_fetch(input: &WebFetchInput) -> Result<WebFetchOutput,
     let content_type = response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
+        .and_then(|v| v.to_str().ok())
         .unwrap_or_default()
         .to_string();
-    let mut raw = Vec::new();
-    std::io::Read::read_to_end(
-        &mut std::io::Read::take(response, (MAX_BODY_SIZE + 1) as u64),
-        &mut raw,
-    )
-    .map_err(|error| error.to_string())?;
-    let truncated_from = if raw.len() > MAX_BODY_SIZE {
-        raw.truncate(MAX_BODY_SIZE);
-        true
+
+    // Stream body with size cap to avoid OOM on large responses.
+    let raw_bytes = response.bytes().await.map_err(|e| e.to_string())?;
+    let (raw, _truncated) = if raw_bytes.len() > MAX_BODY_SIZE {
+        (&raw_bytes[..MAX_BODY_SIZE], true)
     } else {
-        false
+        (raw_bytes.as_ref(), false)
     };
     let bytes = raw.len();
-    let _ = truncated_from;
-    let body = String::from_utf8_lossy(&raw).into_owned();
-    let truncated = body.as_str();
-    let normalized = normalize_fetched_content(truncated, &content_type);
-    let result = summarize_web_fetch(
-        &final_url,
-        &input.prompt,
-        &normalized,
-        truncated,
-        &content_type,
-    );
+    let body = String::from_utf8_lossy(raw).into_owned();
+    let normalized = normalize_fetched_content(&body, &content_type);
+    let result = summarize_web_fetch(&final_url, &input.prompt, &normalized, &body, &content_type);
 
     Ok(WebFetchOutput {
         bytes,
@@ -62,27 +109,28 @@ pub(crate) fn execute_web_fetch(input: &WebFetchInput) -> Result<WebFetchOutput,
     })
 }
 
-pub(crate) fn execute_web_search(input: &WebSearchInput) -> Result<WebSearchOutput, String> {
+async fn async_execute_web_search(input: &WebSearchInput) -> Result<WebSearchOutput, String> {
+    const MAX_SEARCH_BODY: usize = 5 * 1024 * 1024;
     let started = Instant::now();
-    let client = build_http_client()?;
+
     let search_url = build_search_url(&input.query)?;
-    let response = client
+    ssrf_check_url(search_url.as_str()).await?;
+    let response = http_client()
         .get(search_url)
         .send()
-        .map_err(|error| error.to_string())?;
+        .await
+        .map_err(|e| e.to_string())?;
 
     let final_url = response.url().clone();
-    const MAX_SEARCH_BODY: usize = 5 * 1024 * 1024;
-    let mut raw = Vec::new();
-    std::io::Read::read_to_end(
-        &mut std::io::Read::take(response, (MAX_SEARCH_BODY + 1) as u64),
-        &mut raw,
-    )
-    .map_err(|e| e.to_string())?;
-    raw.truncate(MAX_SEARCH_BODY);
-    let html = String::from_utf8_lossy(&raw).into_owned();
-    let mut hits = extract_search_hits(&html);
+    let raw_bytes = response.bytes().await.map_err(|e| e.to_string())?;
+    let html = String::from_utf8_lossy(if raw_bytes.len() > MAX_SEARCH_BODY {
+        &raw_bytes[..MAX_SEARCH_BODY]
+    } else {
+        raw_bytes.as_ref()
+    })
+    .into_owned();
 
+    let mut hits = extract_search_hits(&html);
     if hits.is_empty() && final_url.host_str().is_some() {
         hits = extract_search_hits_from_generic_links(&html);
     }
@@ -93,21 +141,20 @@ pub(crate) fn execute_web_search(input: &WebSearchInput) -> Result<WebSearchOutp
     if let Some(blocked) = input.blocked_domains.as_ref() {
         hits.retain(|hit| !host_matches_list(&hit.url, blocked));
     }
-
     dedupe_hits(&mut hits);
     hits.truncate(8);
 
     let summary = if hits.is_empty() {
         format!("No web search results matched the query {:?}.", input.query)
     } else {
-        let rendered_hits = hits
+        let rendered = hits
             .iter()
-            .map(|hit| format!("- [{}]({})", hit.title, hit.url))
+            .map(|h| format!("- [{}]({})", h.title, h.url))
             .collect::<Vec<_>>()
             .join("\n");
         format!(
             "Search results for {:?}. Include a Sources section in the final answer.\n{}",
-            input.query, rendered_hits
+            input.query, rendered
         )
     };
 
@@ -124,23 +171,26 @@ pub(crate) fn execute_web_search(input: &WebSearchInput) -> Result<WebSearchOutp
     })
 }
 
-pub(crate) fn build_http_client() -> Result<Client, String> {
-    use std::sync::OnceLock;
-    static CLIENT: OnceLock<Client> = OnceLock::new();
-    if let Some(client) = CLIENT.get() {
-        return Ok(client.clone());
-    }
-    let new_client = Client::builder()
-        .timeout(Duration::from_secs(20))
-        .redirect(reqwest::redirect::Policy::limited(10))
-        .user_agent("codineer-rust-tools/0.1")
-        .build()
-        .map_err(|error| error.to_string())?;
-    Ok(CLIENT.get_or_init(|| new_client).clone())
-}
-
 pub(crate) fn normalize_fetch_url(url: &str) -> Result<String, String> {
+    // Reject Windows UNC paths before URL parsing.
+    if url.starts_with("\\\\") || url.starts_with("//") {
+        return Err(String::from(
+            "SSRF protection: UNC / network share paths are not allowed",
+        ));
+    }
+
     let parsed = reqwest::Url::parse(url).map_err(|error| error.to_string())?;
+
+    // Only HTTP and HTTPS are supported.
+    match parsed.scheme() {
+        "http" | "https" => {}
+        other => {
+            return Err(format!(
+                "SSRF protection: scheme `{other}` is not allowed; only http and https are accepted"
+            ));
+        }
+    }
+
     if parsed.scheme() == "http" {
         let host = parsed.host_str().unwrap_or_default();
         if host != "localhost" && host != "127.0.0.1" && host != "::1" {
@@ -152,6 +202,80 @@ pub(crate) fn normalize_fetch_url(url: &str) -> Result<String, String> {
         }
     }
     Ok(parsed.to_string())
+}
+
+/// Resolve the hostname of `url` and reject requests that target private,
+/// loopback, link-local, or other reserved IP ranges (SSRF prevention).
+async fn ssrf_check_url(url: &str) -> Result<(), String> {
+    use std::net::IpAddr;
+    use tokio::net::lookup_host;
+
+    let parsed = reqwest::Url::parse(url).map_err(|e| e.to_string())?;
+    let host = match parsed.host_str() {
+        Some(h) => h,
+        None => return Ok(()), // nothing to resolve
+    };
+
+    // Literal IP addresses: check them directly without DNS.
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        if is_ssrf_blocked_ip(ip) {
+            return Err(format!(
+                "SSRF protection: IP address {ip} is in a private/reserved range"
+            ));
+        }
+        return Ok(());
+    }
+
+    // DNS resolution: all returned addresses must be public.
+    let port = parsed
+        .port()
+        .unwrap_or(if parsed.scheme() == "https" { 443 } else { 80 });
+    let addrs = lookup_host(format!("{host}:{port}"))
+        .await
+        .map_err(|e| format!("DNS resolution failed for `{host}`: {e}"))?;
+
+    for addr in addrs {
+        if is_ssrf_blocked_ip(addr.ip()) {
+            return Err(format!(
+                "SSRF protection: `{host}` resolved to a private/reserved IP {}",
+                addr.ip()
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Returns `true` for IP addresses that must not be reached from a web-fetch
+/// request, to prevent SSRF attacks.
+///
+/// Loopback addresses (127.x, ::1) are **not** blocked; they are legitimate
+/// for developer tooling (e.g., local test servers).  The main targets of
+/// concern are cloud-metadata endpoints, private LAN ranges, and link-local.
+fn is_ssrf_blocked_ip(ip: std::net::IpAddr) -> bool {
+    use std::net::IpAddr;
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_private()        // 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+                || v4.is_link_local()  // 169.254.0.0/16 (incl. AWS metadata 169.254.169.254)
+                || v4.is_broadcast()   // 255.255.255.255
+                || v4.is_unspecified() // 0.0.0.0
+                // Carrier-grade NAT: 100.64.0.0/10
+                || (v4.octets()[0] == 100 && (v4.octets()[1] & 0xC0) == 64)
+                // IETF Protocol Assignments: 192.0.0.0/24
+                || (v4.octets()[0] == 192 && v4.octets()[1] == 0 && v4.octets()[2] == 0)
+            // Loopback (127.x) is intentionally NOT blocked — dev tooling uses localhost
+        }
+        IpAddr::V6(v6) => {
+            v6.is_unspecified()
+                // Unique Local Address (fc00::/7)
+                || (v6.segments()[0] & 0xFE00) == 0xFC00
+                // Link-local (fe80::/10)
+                || (v6.segments()[0] & 0xFFC0) == 0xFE80
+                // IPv4-mapped private addresses (but not ::ffff:127.x loopback)
+                || matches!(v6.to_ipv4_mapped(), Some(v4) if is_ssrf_blocked_ip(IpAddr::V4(v4)))
+            // Loopback (::1) is intentionally NOT blocked
+        }
+    }
 }
 
 pub(crate) fn build_search_url(query: &str) -> Result<reqwest::Url, String> {

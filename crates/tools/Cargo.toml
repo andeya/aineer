@@ -13,10 +13,13 @@ categories.workspace = true
 
 [dependencies]
 api.workspace = true
+git2.workspace = true
+lsp.workspace = true
+lsp-types.workspace = true
 plugins.workspace = true
 runtime.workspace = true
 reqwest = { version = "0.12", default-features = false, features = [
-    "blocking",
+    "json",
     "rustls-tls",
 ] }
 serde.workspace = true

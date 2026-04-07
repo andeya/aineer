@@ -2,7 +2,23 @@
 
 AI-callable tool definitions and execution for [Codineer](https://github.com/andeya/codineer).
 
-This crate implements the built-in tools available to the AI agent — file operations, bash/PowerShell execution, web search, notebook editing, sub-agent orchestration, and more.
+This crate implements the built-in tools available to the AI agent:
+
+| Category            | Tools                                                                                             |
+| ------------------- | ------------------------------------------------------------------------------------------------- |
+| **File I/O**        | `read_file`, `write_file`, `edit_file`, `glob_search`, `grep_search`                              |
+| **Shell**           | `bash`, `PowerShell`, `REPL`                                                                      |
+| **Web**             | `WebFetch`, `WebSearch`                                                                           |
+| **Notebook**        | `NotebookEdit`                                                                                    |
+| **Agent**           | `Agent` (sub-agent orchestration), `SendUserMessage`                                              |
+| **LSP**             | `Lsp` (hover, completion, go-to-definition, references, symbols, rename, formatting, diagnostics) |
+| **Task management** | `TaskCreate`, `TaskGet`, `TaskList`, `TaskUpdate`, `TaskStop`                                     |
+| **Plan mode**       | `EnterPlanMode`, `ExitPlanMode`                                                                   |
+| **Git worktree**    | `EnterWorktree`, `ExitWorktree`                                                                   |
+| **Cron**            | `CronCreate`, `CronDelete`, `CronList`                                                            |
+| **MCP resources**   | `ListMcpResources`, `ReadMcpResource`, `MCPSearch`                                                |
+| **Collaboration**   | `TeamCreate`, `TeamDelete`, `SendMessage`, `SlashCommand`                                         |
+| **Misc**            | `TodoWrite`, `Skill`, `ToolSearch`, `Config`, `StructuredOutput`, `Sleep`                         |
 
 ## Note
 

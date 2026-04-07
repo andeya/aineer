@@ -110,6 +110,27 @@ impl CliToolExecutor {
 }
 
 impl ToolExecutor for CliToolExecutor {
+    fn is_concurrency_safe(&self, tool_name: &str) -> bool {
+        // MCP tools and ToolSearch are never run concurrently.
+        if tool_name.starts_with("mcp__") || tool_name == "ToolSearch" {
+            return false;
+        }
+        self.tool_registry.is_concurrency_safe(tool_name)
+    }
+
+    fn execute_batch(
+        &self,
+        calls: &[(&str, &str)],
+    ) -> Option<Vec<Result<String, runtime::ToolError>>> {
+        let batch = self.tool_registry.execute_batch(calls);
+        Some(
+            batch
+                .into_iter()
+                .map(|r| r.map_err(runtime::ToolError::new))
+                .collect(),
+        )
+    }
+
     fn execute(&mut self, tool_name: &str, input: &str) -> Result<String, ToolError> {
         if self
             .allowed_tools

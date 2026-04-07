@@ -11,14 +11,25 @@ use runtime::{
 };
 
 mod agent;
+mod collab;
 mod config_tool;
+mod cron;
+mod lsp_tool;
+mod mcp_resource;
 mod notebook;
+mod plan_mode;
 mod powershell;
 mod registry;
 mod specs;
+mod task;
 mod types;
 mod web;
+mod worktree;
 
+pub use collab::{register_slash_command, SlashCommandHandler};
+pub use lsp_tool::initialize_lsp_manager;
+pub use mcp_resource::{register_mcp_resource, McpResource};
+pub use plan_mode::is_plan_mode;
 pub use registry::{GlobalToolRegistry, ToolManifestEntry, ToolRegistry, ToolSource, ToolSpec};
 pub use specs::mvp_tool_specs;
 pub use types::ToolSearchInput;
@@ -34,11 +45,15 @@ pub(crate) use types::AgentJob;
 
 use crate::types::{
     AskUserQuestionInput, AskUserQuestionOutput, BriefInput, BriefOutput, BriefStatus, ConfigInput,
-    EditFileInput, GlobSearchInputValue, MultiEditInput, MultiEditOutput, NotebookEditInput,
-    PowerShellInput, QuestionOption, ReadFileInput, ReplInput, ReplOutput, ResolvedAttachment,
-    SkillInput, SkillOutput, SleepInput, SleepOutput, StructuredOutputInput,
-    StructuredOutputResult, TodoItem, TodoStatus, TodoWriteInput, TodoWriteOutput,
-    ToolSearchOutput, UserQuestion, WebFetchInput, WebSearchInput, WriteFileInput,
+    CronCreateInput, CronDeleteInput, CronListInput, EditFileInput, EnterPlanModeInput,
+    EnterWorktreeInput, ExitPlanModeInput, ExitWorktreeInput, GlobSearchInputValue,
+    ListMcpResourcesInput, LspInput, McpSearchInput, MultiEditInput, MultiEditOutput,
+    NotebookEditInput, PowerShellInput, QuestionOption, ReadFileInput, ReadMcpResourceInput,
+    ReplInput, ReplOutput, ResolvedAttachment, SendMessageInput, SkillInput, SkillOutput,
+    SlashCommandInput, SleepInput, SleepOutput, StructuredOutputInput, StructuredOutputResult,
+    TaskCreateInput, TaskGetInput, TaskListInput, TaskStopInput, TaskUpdateInput, TeamCreateInput,
+    TeamDeleteInput, TodoItem, TodoStatus, TodoWriteInput, TodoWriteOutput, ToolSearchOutput,
+    UserQuestion, WebFetchInput, WebSearchInput, WriteFileInput,
 };
 
 pub fn execute_tool(name: &str, input: &Value) -> Result<String, String> {
@@ -68,6 +83,30 @@ pub fn execute_tool(name: &str, input: &Value) -> Result<String, String> {
         "AskUserQuestion" => {
             from_value::<AskUserQuestionInput>(input).and_then(run_ask_user_question)
         }
+        "Lsp" => from_value::<LspInput>(input).and_then(run_lsp),
+        "TaskCreate" => from_value::<TaskCreateInput>(input).and_then(run_task_create),
+        "TaskGet" => from_value::<TaskGetInput>(input).and_then(run_task_get),
+        "TaskList" => from_value::<TaskListInput>(input).and_then(run_task_list),
+        "TaskUpdate" => from_value::<TaskUpdateInput>(input).and_then(run_task_update),
+        "TaskStop" => from_value::<TaskStopInput>(input).and_then(run_task_stop),
+        "EnterPlanMode" => from_value::<EnterPlanModeInput>(input).and_then(run_enter_plan_mode),
+        "ExitPlanMode" => from_value::<ExitPlanModeInput>(input).and_then(run_exit_plan_mode),
+        "EnterWorktree" => from_value::<EnterWorktreeInput>(input).and_then(run_enter_worktree),
+        "ExitWorktree" => from_value::<ExitWorktreeInput>(input).and_then(run_exit_worktree),
+        "CronCreate" => from_value::<CronCreateInput>(input).and_then(run_cron_create),
+        "CronDelete" => from_value::<CronDeleteInput>(input).and_then(run_cron_delete),
+        "CronList" => from_value::<CronListInput>(input).and_then(run_cron_list),
+        "ListMcpResources" => {
+            from_value::<ListMcpResourcesInput>(input).and_then(run_list_mcp_resources)
+        }
+        "ReadMcpResource" => {
+            from_value::<ReadMcpResourceInput>(input).and_then(run_read_mcp_resource)
+        }
+        "MCPSearch" => from_value::<McpSearchInput>(input).and_then(run_mcp_search),
+        "TeamCreate" => from_value::<TeamCreateInput>(input).and_then(run_team_create),
+        "TeamDelete" => from_value::<TeamDeleteInput>(input).and_then(run_team_delete),
+        "SendMessage" => from_value::<SendMessageInput>(input).and_then(run_send_message),
+        "SlashCommand" => from_value::<SlashCommandInput>(input).and_then(run_slash_command),
         _ => Err(format!("unsupported tool: {name}")),
     }
 }
@@ -99,6 +138,7 @@ fn run_edit_file(input: EditFileInput) -> Result<String, String> {
             &input.old_string,
             &input.new_string,
             input.replace_all.unwrap_or(false),
+            input.last_modified_at,
         )
         .map_err(io_to_string)?,
     )
@@ -174,6 +214,86 @@ fn run_multi_edit(input: MultiEditInput) -> Result<String, String> {
 
 fn run_ask_user_question(input: AskUserQuestionInput) -> Result<String, String> {
     to_pretty_json(execute_ask_user_question(input)?)
+}
+
+fn run_lsp(input: LspInput) -> Result<String, String> {
+    crate::lsp_tool::execute_lsp(input)
+}
+
+fn run_task_create(input: TaskCreateInput) -> Result<String, String> {
+    crate::task::execute_task_create(input)
+}
+
+fn run_task_get(input: TaskGetInput) -> Result<String, String> {
+    crate::task::execute_task_get(input)
+}
+
+fn run_task_list(input: TaskListInput) -> Result<String, String> {
+    crate::task::execute_task_list(input)
+}
+
+fn run_task_update(input: TaskUpdateInput) -> Result<String, String> {
+    crate::task::execute_task_update(input)
+}
+
+fn run_task_stop(input: TaskStopInput) -> Result<String, String> {
+    crate::task::execute_task_stop(input)
+}
+
+fn run_enter_plan_mode(input: EnterPlanModeInput) -> Result<String, String> {
+    crate::plan_mode::execute_enter_plan_mode(input)
+}
+
+fn run_exit_plan_mode(input: ExitPlanModeInput) -> Result<String, String> {
+    crate::plan_mode::execute_exit_plan_mode(input)
+}
+
+fn run_enter_worktree(input: EnterWorktreeInput) -> Result<String, String> {
+    crate::worktree::execute_enter_worktree(input)
+}
+
+fn run_exit_worktree(input: ExitWorktreeInput) -> Result<String, String> {
+    crate::worktree::execute_exit_worktree(input)
+}
+
+fn run_cron_create(input: CronCreateInput) -> Result<String, String> {
+    crate::cron::execute_cron_create(input)
+}
+
+fn run_cron_delete(input: CronDeleteInput) -> Result<String, String> {
+    crate::cron::execute_cron_delete(input)
+}
+
+fn run_cron_list(input: CronListInput) -> Result<String, String> {
+    crate::cron::execute_cron_list(input)
+}
+
+fn run_list_mcp_resources(input: ListMcpResourcesInput) -> Result<String, String> {
+    crate::mcp_resource::execute_list_mcp_resources(input)
+}
+
+fn run_read_mcp_resource(input: ReadMcpResourceInput) -> Result<String, String> {
+    crate::mcp_resource::execute_read_mcp_resource(input)
+}
+
+fn run_mcp_search(input: McpSearchInput) -> Result<String, String> {
+    crate::mcp_resource::execute_mcp_search(input)
+}
+
+fn run_team_create(input: TeamCreateInput) -> Result<String, String> {
+    crate::collab::execute_team_create(input)
+}
+
+fn run_team_delete(input: TeamDeleteInput) -> Result<String, String> {
+    crate::collab::execute_team_delete(input)
+}
+
+fn run_send_message(input: SendMessageInput) -> Result<String, String> {
+    crate::collab::execute_send_message(input)
+}
+
+fn run_slash_command(input: SlashCommandInput) -> Result<String, String> {
+    crate::collab::execute_slash_command(input)
 }
 
 fn to_pretty_json<T: serde::Serialize>(value: T) -> Result<String, String> {
@@ -667,6 +787,7 @@ fn execute_multi_edit(input: MultiEditInput) -> Result<MultiEditOutput, String> 
             &op.old_string,
             &op.new_string,
             op.replace_all.unwrap_or(false),
+            None, // MultiEdit does not track per-op mtime
         )
         .map_err(|error| format!("edit[{i}] failed: {error}"))?;
     }
