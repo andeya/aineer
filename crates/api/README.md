@@ -2,6 +2,8 @@
 
 AI provider API clients and streaming for [Codineer](https://github.com/andeya/codineer).
 
+[中文文档](README_CN.md)
+
 This crate handles communication with AI model providers (Anthropic, OpenAI-compatible, xAI/Grok), including request construction, SSE stream parsing, authentication, and retry logic.
 
 ## Note

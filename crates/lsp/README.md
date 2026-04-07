@@ -2,6 +2,8 @@
 
 Language Server Protocol (LSP) client integration for [Codineer](https://github.com/andeya/codineer).
 
+[中文文档](README_CN.md)
+
 This crate provides the LSP transport layer used by Codineer to communicate with language servers. It manages server lifecycle (spawn, initialize, shutdown), JSON-RPC message framing, and async diagnostics polling via `tokio::sync::watch`.
 
 ### Supported operations

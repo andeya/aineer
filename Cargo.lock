@@ -245,6 +245,7 @@ dependencies = [
 name = "codineer-api"
 version = "0.6.9"
 dependencies = [
+ "codineer-core",
  "codineer-runtime",
  "reqwest",
  "serde",
@@ -273,6 +274,7 @@ dependencies = [
  "rustyline",
  "serde_json",
  "syntect",
+ "thiserror",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -293,6 +295,7 @@ dependencies = [
 name = "codineer-core"
 version = "0.6.9"
 dependencies = [
+ "serde",
  "strum",
  "thiserror",
 ]
@@ -309,9 +312,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "codineer-mcp"
+version = "0.6.9"
+dependencies = [
+ "codineer-core",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tokio-tungstenite",
+]
+
+[[package]]
 name = "codineer-plugins"
 version = "0.6.9"
 dependencies = [
+ "codineer-core",
  "codineer-runtime",
  "serde",
  "serde_json",
@@ -325,8 +343,8 @@ dependencies = [
  "base64",
  "codineer-core",
  "codineer-lsp",
+ "codineer-mcp",
  "dunce",
- "futures-util",
  "getrandom 0.2.17",
  "glob",
  "grep-regex",
@@ -334,15 +352,11 @@ dependencies = [
  "ignore",
  "keyring",
  "lopdf",
- "regex",
- "reqwest",
  "serde",
  "serde_json",
  "sha2",
  "similar",
  "tokio",
- "tokio-tungstenite",
- "walkdir",
 ]
 
 [[package]]
@@ -1909,18 +1923,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed2bf2547551a7053d6fdfafda3f938979645c44812fbfcda098faae3f1a362d"
 dependencies = [
  "bitflags 2.11.0",
-]
-
-[[package]]
-name = "regex"
-version = "1.12.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e10754a14b9137dd7b1e3e5b0493cc9171fdd105e0ab477f51b72e7f3ac0e276"
-dependencies = [
- "aho-corasick",
- "memchr",
- "regex-automata",
- "regex-syntax",
 ]
 
 [[package]]

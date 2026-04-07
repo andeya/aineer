@@ -18,6 +18,7 @@ categories = ["command-line-utilities", "development-tools"]
 # NOTE: Keep internal crate versions in sync with workspace.package.version above.
 [workspace.dependencies]
 lsp = { path = "crates/lsp", version = "0.6", package = "codineer-lsp" }
+mcp = { path = "crates/mcp", version = "0.6", package = "codineer-mcp" }
 runtime = { path = "crates/runtime", version = "0.6", package = "codineer-runtime" }
 api = { path = "crates/api", version = "0.6", package = "codineer-api" }
 plugins = { path = "crates/plugins", version = "0.6", package = "codineer-plugins" }

@@ -2,7 +2,9 @@
 
 Core runtime engine for [Codineer](https://github.com/andeya/codineer).
 
-This crate implements the session lifecycle, configuration loading, MCP (Model Context Protocol) client, system prompt assembly, permission management, sandboxing, and conversation orchestration.
+[中文文档](README_CN.md)
+
+This crate implements the session lifecycle, configuration loading, system prompt assembly, permission management, sandboxing, error recovery, and conversation orchestration. MCP transport is handled by the separate `codineer-mcp` crate.
 
 ### File operations highlights
 
@@ -13,7 +15,12 @@ This crate implements the session lifecycle, configuration loading, MCP (Model C
 
 ### Conversation orchestration
 
-`run_turn_with_blocks` executes tools in three phases: sequential prefix → concurrent batch (via `execute_batch` on `ToolExecutor`) → sequential suffix, controlled by each tool's `is_concurrency_safe` flag.
+`run_turn_with_blocks` orchestrates each turn through four distinct methods:
+
+1. **`stream_with_recovery`** — sends the API request with automatic retry/recovery on transient failures.
+2. **`check_permissions`** — runs sequential permission checks and observer pre-hooks for each pending tool use.
+3. **`execute_tools`** — executes approved tools (concurrently when safe via `execute_batch` on `ToolExecutor`, otherwise sequentially).
+4. **`apply_post_hooks`** — runs observer post-hooks and builds result messages for the session.
 
 ## Note
 

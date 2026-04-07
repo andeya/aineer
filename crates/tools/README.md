@@ -2,6 +2,8 @@
 
 AI-callable tool definitions and execution for [Codineer](https://github.com/andeya/codineer).
 
+[中文文档](README_CN.md)
+
 This crate implements the built-in tools available to the AI agent:
 
 | Category            | Tools                                                                                             |

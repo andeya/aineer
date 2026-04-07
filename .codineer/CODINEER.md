@@ -15,19 +15,24 @@ This file provides persistent context to Codineer when working with this reposit
 
 ```
 crates/
-  api/          # HTTP client, provider abstractions (Anthropic, OpenAI-compat, codineer-provider)
-  runtime/      # Core engine: config, session, permissions, sandbox, MCP, prompts, hooks,
-                #   file ops (ripgrep-core grep/glob, PDF/image, atomic writes, mtime conflict)
-  tools/        # Built-in tool implementations:
-                #   file I/O, bash/PowerShell/REPL, web fetch/search, notebook editing,
-                #   sub-agent orchestration, LSP bridge, task management, plan mode,
-                #   git worktree, cron jobs, MCP resources, agent collaboration
-  plugins/      # Plugin system: manifest, discovery, install, bundled embedding
-  commands/     # Slash-command specs, discovery (skills, agents), git helpers
-  lsp/          # LSP client: JSON-RPC transport, hover, completion, go-to-definition,
-                #   references, symbols, rename, formatting, diagnostics polling
-  codineer-cli/ # CLI entry point, REPL, banner, init, session store, bootstrap
-.codineer/      # Project config committed to repo (settings.json, CODINEER.md, .gitignore)
+  codineer-core/  # Shared foundational types: events, observer, config, errors, cancel,
+                  #   prompt types, elicitation, telemetry, loop state
+  api/            # HTTP client, provider abstractions (Anthropic, OpenAI-compat, codineer-provider)
+  mcp/            # MCP (Model Context Protocol) client: stdio/remote transport, resource/prompt
+                  #   management, OAuth PKCE flow, JSON-RPC types
+  runtime/        # Core engine: config, session, permissions, sandbox, prompts, hooks,
+                  #   file ops (ripgrep-core grep/glob, PDF/image, atomic writes, mtime conflict),
+                  #   conversation orchestration, error recovery, compaction, swarm
+  tools/          # Built-in tool implementations:
+                  #   file I/O, bash/PowerShell/REPL, web fetch/search, notebook editing,
+                  #   sub-agent orchestration, LSP bridge, task management, plan mode,
+                  #   git worktree, cron jobs, MCP resources, agent collaboration
+  plugins/        # Plugin system: manifest, discovery, install, bundled embedding
+  commands/       # Slash-command specs, discovery (skills, agents), git helpers
+  lsp/            # LSP client: JSON-RPC transport, hover, completion, go-to-definition,
+                  #   references, symbols, rename, formatting, diagnostics polling
+  codineer-cli/   # CLI entry point, REPL, banner, init, session store, bootstrap
+.codineer/        # Project config committed to repo (settings.json, CODINEER.md, .gitignore)
 ```
 
 ## Languages & toolchain
@@ -51,7 +56,8 @@ cargo test --workspace
 ## Coding conventions
 
 - **No external `lazy_static`** — use `std::sync::OnceLock` for one-time initialization.
-- **Error types**: prefer `Box<dyn std::error::Error>` at boundaries; typed errors inside crates.
+- **Error types**: use `CliError` (thiserror enum) at CLI boundaries; `McpTransportError` for MCP
+  transport; `ApiError` for API clients; `RuntimeError` for the core engine. Avoid `Box<dyn Error>`.
 - **Paths**: always use `runtime::codineer_runtime_dir(cwd)` (not raw `.codineer` joins) for
   runtime artifacts (sessions, agents, todos, sandbox dirs). Use `runtime::find_project_codineer_dir(cwd)`
   to locate the nearest initialized `.codineer/` without falling back to home.

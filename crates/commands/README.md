@@ -2,6 +2,8 @@
 
 Slash commands and agent/skill discovery for [Codineer](https://github.com/andeya/codineer).
 
+[中文文档](README_CN.md)
+
 This crate implements the REPL slash-command system (`/help`, `/model`, `/config`, `/compact`, etc.) and provides agent and skill discovery used by the CLI interface.
 
 ## Note

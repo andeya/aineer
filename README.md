@@ -317,14 +317,15 @@ codineer
 
 A **framed welcome banner** shows workspace, directory, model, session, and a copy-paste `codineer --resume …` line. The banner and separator adapt to the current terminal width in real time — narrow terminals switch to a single-column layout automatically. The prompt is **`❯`**. Type naturally. Use **slash commands** (Tab-autocomplete supported):
 
-| Category       | Commands                                                                 |
-| -------------- | ------------------------------------------------------------------------ |
-| **Info**       | `/help` `/status` `/version` `/model` `/cost` `/config` `/memory`        |
-| **Session**    | `/compact` `/clear` `/session` `/resume` `/export`                       |
-| **Git**        | `/diff` `/branch` `/commit` `/commit-push-pr` `/pr` `/issue` `/worktree` |
-| **Agents**     | `/agents` `/skills` `/plugin`                                            |
-| **Advanced**   | `/ultraplan` `/bughunter` `/teleport` `/debug-tool-call` `/vim`          |
-| **Navigation** | `/init` `/permissions` `/exit`                                           |
+| Category        | Commands                                                                 |
+| --------------- | ------------------------------------------------------------------------ |
+| **Info**        | `/help` `/status` `/version` `/model` `/cost` `/config` `/memory`        |
+| **Session**     | `/compact` `/clear` `/session` `/resume` `/export`                       |
+| **Git**         | `/diff` `/branch` `/commit` `/commit-push-pr` `/pr` `/issue` `/worktree` |
+| **Agents**      | `/agents` `/skills` `/plugin`                                            |
+| **Advanced**    | `/ultraplan` `/bughunter` `/teleport` `/debug-tool-call` `/vim`          |
+| **Diagnostics** | `/doctor`                                                                |
+| **Navigation**  | `/init` `/permissions` `/exit`                                           |
 
 **Keyboard shortcuts:**
 
@@ -469,22 +470,22 @@ Inspect merged config at runtime: `/config`, `/config env`, `/config model`
 
 Set via shell export **or** the `"env"` section in settings.json (shell exports take precedence):
 
-| Variable                   | Purpose                                                                                                    |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `ANTHROPIC_API_KEY`        | Claude API key                                                                                             |
-| `ANTHROPIC_AUTH_TOKEN`     | Bearer token (alternative)                                                                                 |
-| `XAI_API_KEY`              | xAI / Grok API key                                                                                         |
-| `OPENAI_API_KEY`           | OpenAI API key                                                                                             |
-| `OPENROUTER_API_KEY`       | OpenRouter API key                                                                                         |
-| `GROQ_API_KEY`             | Groq Cloud API key                                                                                         |
-| `GEMINI_API_KEY`           | Google Gemini API key ([free from AI Studio](https://aistudio.google.com/apikey))                          |
-| `DASHSCOPE_API_KEY`        | Alibaba Cloud DashScope (OpenAI-compatible)                                                                |
-| `OLLAMA_HOST`              | Ollama endpoint (e.g. `http://192.168.1.100:11434`)                                                        |
-| `CODINEER_WORKSPACE_ROOT`  | Override workspace root                                                                                    |
-| `CODINEER_CONFIG_HOME`     | Override global config dir (default `~/.codineer`); `settings.json` is read from this directory             |
-| `CODINEER_PERMISSION_MODE` | Default permission mode                                                                                    |
-| `NO_COLOR`                 | Disable ANSI colors                                                                                        |
-| `CLICOLOR=0`               | Disable ANSI colors (alternative)                                                                          |
+| Variable                   | Purpose                                                                                         |
+| -------------------------- | ----------------------------------------------------------------------------------------------- |
+| `ANTHROPIC_API_KEY`        | Claude API key                                                                                  |
+| `ANTHROPIC_AUTH_TOKEN`     | Bearer token (alternative)                                                                      |
+| `XAI_API_KEY`              | xAI / Grok API key                                                                              |
+| `OPENAI_API_KEY`           | OpenAI API key                                                                                  |
+| `OPENROUTER_API_KEY`       | OpenRouter API key                                                                              |
+| `GROQ_API_KEY`             | Groq Cloud API key                                                                              |
+| `GEMINI_API_KEY`           | Google Gemini API key ([free from AI Studio](https://aistudio.google.com/apikey))               |
+| `DASHSCOPE_API_KEY`        | Alibaba Cloud DashScope (OpenAI-compatible)                                                     |
+| `OLLAMA_HOST`              | Ollama endpoint (e.g. `http://192.168.1.100:11434`)                                             |
+| `CODINEER_WORKSPACE_ROOT`  | Override workspace root                                                                         |
+| `CODINEER_CONFIG_HOME`     | Override global config dir (default `~/.codineer`); `settings.json` is read from this directory |
+| `CODINEER_PERMISSION_MODE` | Default permission mode                                                                         |
+| `NO_COLOR`                 | Disable ANSI colors                                                                             |
+| `CLICOLOR=0`               | Disable ANSI colors (alternative)                                                               |
 
 **Credential chain (per-provider, in priority order):**
 
@@ -601,61 +602,63 @@ Skills are discovered from the project's `.codineer/skills/` (or `~/.codineer/sk
 
 ### Built-in tools
 
-| Category | Tool | Description |
-| -------- | ---- | ----------- |
-| **File I/O** | `read_file` | Read file contents (text, PDF text extraction, image base64) |
-| | `write_file` | Create or overwrite files (atomic writes, mtime tracking) |
-| | `edit_file` | Targeted string replacement with conflict detection |
-| | `glob_search` | Find files by glob pattern (.gitignore-aware) |
-| | `grep_search` | Search file contents with regex (ripgrep-powered) |
-| **Shell** | `bash` | Execute shell commands with timeout and background support |
-| | `PowerShell` | Execute PowerShell commands (Windows / cross-platform) |
-| | `REPL` | Run code in Python, Node, or shell |
-| **Web** | `WebFetch` | Fetch and summarize web pages |
-| | `WebSearch` | Web search via DuckDuckGo |
-| **Notebook** | `NotebookEdit` | Edit Jupyter notebook cells |
-| **Agent** | `Agent` | Launch sub-agents for parallel tasks |
-| | `SendUserMessage` | Send a message to the user |
-| **LSP** | `Lsp` | Language server operations (hover, completion, go-to-definition, references, symbols, rename, formatting, diagnostics) |
-| **Task management** | `TaskCreate` | Create a background task with optional command |
-| | `TaskGet` | Get task status and output |
-| | `TaskList` | List all tasks |
-| | `TaskUpdate` | Update task title, description, or status |
-| | `TaskStop` | Stop a running task |
-| **Plan mode** | `EnterPlanMode` | Enter read-only planning mode |
-| | `ExitPlanMode` | Exit planning mode |
-| **Git worktree** | `EnterWorktree` | Create and enter an isolated git worktree |
-| | `ExitWorktree` | Exit and optionally clean up worktree |
-| **Cron** | `CronCreate` | Create a managed cron job |
-| | `CronDelete` | Delete a managed cron job |
-| | `CronList` | List managed cron jobs |
-| **MCP resources** | `ListMcpResources` | List available MCP resources |
-| | `ReadMcpResource` | Read an MCP resource by URI |
-| | `MCPSearch` | Full-text search across MCP resources |
-| **Collaboration** | `TeamCreate` | Create a named agent team |
-| | `TeamDelete` | Delete an agent team |
-| | `SendMessage` | Send a message to an agent or team |
-| | `SlashCommand` | Invoke a registered slash command |
-| **Misc** | `TodoWrite` | Manage structured task lists |
-| | `Skill` | Execute skill prompts |
-| | `ToolSearch` | Search available tools |
-| | `Config` | Read/write config values |
-| | `StructuredOutput` | Return structured JSON |
-| | `Sleep` | Pause execution for a duration |
+| Category            | Tool               | Description                                                                                                            |
+| ------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| **File I/O**        | `read_file`        | Read file contents (text, PDF text extraction, image base64)                                                           |
+|                     | `write_file`       | Create or overwrite files (atomic writes, mtime tracking)                                                              |
+|                     | `edit_file`        | Targeted string replacement with conflict detection                                                                    |
+|                     | `glob_search`      | Find files by glob pattern (.gitignore-aware)                                                                          |
+|                     | `grep_search`      | Search file contents with regex (ripgrep-powered)                                                                      |
+| **Shell**           | `bash`             | Execute shell commands with timeout and background support                                                             |
+|                     | `PowerShell`       | Execute PowerShell commands (Windows / cross-platform)                                                                 |
+|                     | `REPL`             | Run code in Python, Node, or shell                                                                                     |
+| **Web**             | `WebFetch`         | Fetch and summarize web pages                                                                                          |
+|                     | `WebSearch`        | Web search via DuckDuckGo                                                                                              |
+| **Notebook**        | `NotebookEdit`     | Edit Jupyter notebook cells                                                                                            |
+| **Agent**           | `Agent`            | Launch sub-agents for parallel tasks                                                                                   |
+|                     | `SendUserMessage`  | Send a message to the user                                                                                             |
+| **LSP**             | `Lsp`              | Language server operations (hover, completion, go-to-definition, references, symbols, rename, formatting, diagnostics) |
+| **Task management** | `TaskCreate`       | Create a background task with optional command                                                                         |
+|                     | `TaskGet`          | Get task status and output                                                                                             |
+|                     | `TaskList`         | List all tasks                                                                                                         |
+|                     | `TaskUpdate`       | Update task title, description, or status                                                                              |
+|                     | `TaskStop`         | Stop a running task                                                                                                    |
+| **Plan mode**       | `EnterPlanMode`    | Enter read-only planning mode                                                                                          |
+|                     | `ExitPlanMode`     | Exit planning mode                                                                                                     |
+| **Git worktree**    | `EnterWorktree`    | Create and enter an isolated git worktree                                                                              |
+|                     | `ExitWorktree`     | Exit and optionally clean up worktree                                                                                  |
+| **Cron**            | `CronCreate`       | Create a managed cron job                                                                                              |
+|                     | `CronDelete`       | Delete a managed cron job                                                                                              |
+|                     | `CronList`         | List managed cron jobs                                                                                                 |
+| **MCP resources**   | `ListMcpResources` | List available MCP resources                                                                                           |
+|                     | `ReadMcpResource`  | Read an MCP resource by URI                                                                                            |
+|                     | `MCPSearch`        | Full-text search across MCP resources                                                                                  |
+| **Collaboration**   | `TeamCreate`       | Create a named agent team                                                                                              |
+|                     | `TeamDelete`       | Delete an agent team                                                                                                   |
+|                     | `SendMessage`      | Send a message to an agent or team                                                                                     |
+|                     | `SlashCommand`     | Invoke a registered slash command                                                                                      |
+| **Misc**            | `TodoWrite`        | Manage structured task lists                                                                                           |
+|                     | `Skill`            | Execute skill prompts                                                                                                  |
+|                     | `ToolSearch`       | Search available tools                                                                                                 |
+|                     | `Config`           | Read/write config values                                                                                               |
+|                     | `StructuredOutput` | Return structured JSON                                                                                                 |
+|                     | `Sleep`            | Pause execution for a duration                                                                                         |
 
 ### Crate structure
 
 All crates are published to crates.io. Install `codineer-cli` — the others are internal dependencies.
 
-| Crate               | Role                          |
-| ------------------- | ----------------------------- |
-| `codineer-cli`      | CLI binary (**install this**) |
-| `codineer-runtime`  | Core runtime engine           |
-| `codineer-api`      | AI provider API clients       |
-| `codineer-tools`    | Tool definitions & execution  |
-| `codineer-plugins`  | Plugin system and hooks       |
-| `codineer-commands` | Slash commands                |
-| `codineer-lsp`      | LSP client integration        |
+| Crate               | Role                                  |
+| ------------------- | ------------------------------------- |
+| `codineer-cli`      | CLI binary (**install this**)         |
+| `codineer-core`     | Shared types, events, observer traits |
+| `codineer-runtime`  | Core runtime engine                   |
+| `codineer-api`      | AI provider API clients               |
+| `codineer-mcp`      | MCP protocol client & transport       |
+| `codineer-tools`    | Tool definitions & execution          |
+| `codineer-plugins`  | Plugin system and hooks               |
+| `codineer-commands` | Slash commands                        |
+| `codineer-lsp`      | LSP client integration                |
 
 ---
 

@@ -1,3 +1,5 @@
+//! Language Server Protocol client for workspace diagnostics and symbols.
+
 mod client;
 mod error;
 mod manager;
