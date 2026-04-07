@@ -3,9 +3,10 @@ use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
 
 use lsp_types::{Diagnostic, Range};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LspServerConfig {
     pub name: String,
     pub command: String,
@@ -79,6 +80,44 @@ impl Display for SymbolLocation {
         )
     }
 }
+
+/// Hover result returned by `textDocument/hover`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HoverResult {
+    /// Markdown-formatted or plain-text hover contents.
+    pub contents: String,
+    /// Optional source range this hover applies to.
+    pub range: Option<Range>,
+}
+
+/// A single completion suggestion from `textDocument/completion`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompletionItem {
+    /// Display label shown in the completion list.
+    pub label: String,
+    /// Human-readable kind string (e.g. `"Function"`, `"Variable"`).
+    pub kind: Option<String>,
+    /// Short detail string (e.g. return type or signature).
+    pub detail: Option<String>,
+    /// Markdown documentation for this item.
+    pub documentation: Option<String>,
+    /// Text to insert when accepted; defaults to `label` when absent.
+    pub insert_text: Option<String>,
+}
+
+/// A flat document symbol entry from `textDocument/documentSymbol`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocumentSymbolInfo {
+    /// Symbol name.
+    pub name: String,
+    /// Human-readable symbol kind (e.g. `"Class"`, `"Method"`).
+    pub kind: String,
+    /// Location of this symbol in its source file.
+    pub location: SymbolLocation,
+}
+
+/// Re-export `TextEdit` so callers don't need a direct `lsp-types` dependency.
+pub use lsp_types::TextEdit as LspTextEdit;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct LspContextEnrichment {
@@ -175,7 +214,7 @@ pub(crate) fn normalize_extension(extension: &str) -> String {
     }
 }
 
-fn diagnostic_severity_label(severity: Option<lsp_types::DiagnosticSeverity>) -> &'static str {
+pub fn diagnostic_severity_label(severity: Option<lsp_types::DiagnosticSeverity>) -> &'static str {
     match severity {
         Some(lsp_types::DiagnosticSeverity::ERROR) => "error",
         Some(lsp_types::DiagnosticSeverity::WARNING) => "warning",
@@ -320,4 +359,24 @@ mod tests {
         assert_eq!(config.language_id_for(Path::new("style.css")), None);
         assert_eq!(config.language_id_for(Path::new("Makefile")), None);
     }
+
+    #[test]
+    fn lsp_server_config_serializes_and_deserializes() {
+        let config = LspServerConfig {
+            name: "rust-analyzer".to_string(),
+            command: "rust-analyzer".to_string(),
+            args: vec!["--stdio".to_string()],
+            env: BTreeMap::from([("RUST_LOG".to_string(), "info".to_string())]),
+            workspace_root: PathBuf::from("/workspace"),
+            initialization_options: None,
+            extension_to_language: BTreeMap::from([(".rs".to_string(), "rust".to_string())]),
+        };
+        let json = serde_json::to_string(&config).expect("serialize should succeed");
+        let roundtripped: LspServerConfig =
+            serde_json::from_str(&json).expect("deserialize should succeed");
+        assert_eq!(config, roundtripped);
+    }
+
+    #[allow(dead_code)]
+    fn _assert_text_edit_reexported(_: LspTextEdit) {}
 }

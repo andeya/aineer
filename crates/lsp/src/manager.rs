@@ -1,15 +1,17 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
-use lsp_types::Position;
+use lsp_types::{Position, TextEdit};
+use serde_json::Value;
 use tokio::sync::Mutex;
 
 use crate::client::LspClient;
 use crate::error::LspError;
 use crate::types::{
-    normalize_extension, FileDiagnostics, LspContextEnrichment, LspServerConfig, SymbolLocation,
-    WorkspaceDiagnostics,
+    normalize_extension, CompletionItem, DocumentSymbolInfo, FileDiagnostics, HoverResult,
+    LspContextEnrichment, LspServerConfig, SymbolLocation, WorkspaceDiagnostics,
 };
 
 pub struct LspManager {
@@ -46,6 +48,14 @@ impl LspManager {
         })
     }
 
+    /// Build an `LspManager` from a JSON array of server config objects.
+    /// Each element must be deserializable as [`LspServerConfig`].
+    pub fn from_json_config(configs: &Value) -> Result<Self, LspError> {
+        let configs: Vec<LspServerConfig> = serde_json::from_value(configs.clone())
+            .map_err(|e| LspError::Protocol(format!("invalid LSP config JSON: {e}")))?;
+        Self::new(configs)
+    }
+
     #[must_use]
     pub fn supports_path(&self, path: &Path) -> bool {
         path.extension().is_some_and(|extension| {
@@ -61,10 +71,28 @@ impl LspManager {
             .await
     }
 
+    /// Sync a document from disk and notify the server.
     pub async fn sync_document_from_disk(&self, path: &Path) -> Result<(), LspError> {
-        let contents = std::fs::read_to_string(path)?;
+        let contents = tokio::fs::read_to_string(path).await?;
         self.change_document(path, &contents).await?;
         self.save_document(path).await
+    }
+
+    /// Sync a document from disk and wait for fresh diagnostics (up to `timeout`).
+    pub async fn sync_and_await_diagnostics(
+        &self,
+        path: &Path,
+        timeout: Duration,
+    ) -> Result<WorkspaceDiagnostics, LspError> {
+        let client = self.client_for_path(path).await?;
+        let min_version = client.diagnostics_version() + 1;
+        let contents = tokio::fs::read_to_string(path).await?;
+        client.change_document(path, &contents).await?;
+        client.save_document(path).await?;
+        client
+            .wait_for_diagnostics_update(min_version, timeout)
+            .await;
+        self.collect_workspace_diagnostics().await
     }
 
     pub async fn change_document(&self, path: &Path, text: &str) -> Result<(), LspError> {
@@ -109,6 +137,97 @@ impl LspManager {
             .await?;
         dedupe_locations(&mut locations);
         Ok(locations)
+    }
+
+    /// Request hover information at the given position.
+    pub async fn hover(
+        &self,
+        path: &Path,
+        position: Position,
+    ) -> Result<Option<HoverResult>, LspError> {
+        self.client_for_path(path)
+            .await?
+            .hover(path, position)
+            .await
+    }
+
+    /// Request code completion at the given position.
+    pub async fn completion(
+        &self,
+        path: &Path,
+        position: Position,
+    ) -> Result<Vec<CompletionItem>, LspError> {
+        self.client_for_path(path)
+            .await?
+            .completion(path, position)
+            .await
+    }
+
+    /// Request document symbol outline.
+    pub async fn document_symbols(&self, path: &Path) -> Result<Vec<DocumentSymbolInfo>, LspError> {
+        self.client_for_path(path)
+            .await?
+            .document_symbols(path)
+            .await
+    }
+
+    /// Search workspace symbols matching `query`.
+    /// Aggregates results from every connected LSP server.
+    pub async fn workspace_symbols(&self, query: &str) -> Result<Vec<SymbolLocation>, LspError> {
+        let clients = self
+            .clients
+            .lock()
+            .await
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let mut all = Vec::new();
+        for client in clients {
+            let mut locs = client.workspace_symbols(query).await?;
+            all.append(&mut locs);
+        }
+        dedupe_locations(&mut all);
+        Ok(all)
+    }
+
+    /// Rename a symbol at the given position.
+    pub async fn rename(
+        &self,
+        path: &Path,
+        position: Position,
+        new_name: &str,
+    ) -> Result<BTreeMap<std::path::PathBuf, Vec<TextEdit>>, LspError> {
+        self.client_for_path(path)
+            .await?
+            .rename(path, position, new_name)
+            .await
+    }
+
+    /// Format a document using the server's formatter.
+    pub async fn formatting(
+        &self,
+        path: &Path,
+        tab_size: u32,
+        insert_spaces: bool,
+    ) -> Result<Vec<TextEdit>, LspError> {
+        self.client_for_path(path)
+            .await?
+            .formatting(path, tab_size, insert_spaces)
+            .await
+    }
+
+    /// Returns the server capabilities for the LSP server that handles `path`.
+    /// Useful for clients that want to check what the server supports.
+    pub async fn server_capabilities(
+        &self,
+        path: &Path,
+    ) -> Result<lsp_types::ServerCapabilities, LspError> {
+        Ok(self
+            .client_for_path(path)
+            .await?
+            .server_capabilities()
+            .await)
     }
 
     pub async fn collect_workspace_diagnostics(&self) -> Result<WorkspaceDiagnostics, LspError> {

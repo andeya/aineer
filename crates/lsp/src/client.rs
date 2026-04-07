@@ -3,17 +3,22 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use lsp_types::{
-    Diagnostic, GotoDefinitionResponse, Location, LocationLink, Position, PublishDiagnosticsParams,
+    CompletionResponse, Diagnostic, DocumentSymbolResponse, GotoDefinitionResponse,
+    InitializeResult, Location, LocationLink, Position, PublishDiagnosticsParams,
+    ServerCapabilities, TextEdit,
 };
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{oneshot, watch, Mutex};
 
 use crate::error::LspError;
-use crate::types::{LspServerConfig, SymbolLocation};
+use crate::types::{
+    CompletionItem, DocumentSymbolInfo, HoverResult, LspServerConfig, SymbolLocation,
+};
 
 type PendingMap = BTreeMap<i64, oneshot::Sender<Result<Value, LspError>>>;
 
@@ -23,8 +28,11 @@ pub(crate) struct LspClient {
     child: Mutex<Child>,
     pending_requests: Arc<Mutex<PendingMap>>,
     diagnostics: Arc<Mutex<BTreeMap<String, Vec<Diagnostic>>>>,
+    /// Monotonically increasing version; incremented on every `publishDiagnostics`.
+    diag_version_tx: Arc<watch::Sender<u64>>,
     open_documents: Mutex<BTreeMap<PathBuf, i32>>,
     next_request_id: AtomicI64,
+    server_capabilities: Arc<Mutex<ServerCapabilities>>,
 }
 
 impl LspClient {
@@ -49,14 +57,17 @@ impl LspClient {
             .ok_or_else(|| LspError::Protocol("missing LSP stdout pipe".to_string()))?;
         let stderr = child.stderr.take();
 
+        let (diag_version_tx, _diag_version_rx) = watch::channel(0u64);
         let client = Self {
             config,
             writer: Mutex::new(BufWriter::new(stdin)),
             child: Mutex::new(child),
             pending_requests: Arc::new(Mutex::new(BTreeMap::new())),
             diagnostics: Arc::new(Mutex::new(BTreeMap::new())),
+            diag_version_tx: Arc::new(diag_version_tx),
             open_documents: Mutex::new(BTreeMap::new()),
             next_request_id: AtomicI64::new(1),
+            server_capabilities: Arc::new(Mutex::new(ServerCapabilities::default())),
         };
 
         client.spawn_reader(stdout);
@@ -74,8 +85,7 @@ impl LspClient {
         if self.is_document_open(path).await {
             return Ok(());
         }
-
-        let contents = std::fs::read_to_string(path)?;
+        let contents = tokio::fs::read_to_string(path).await?;
         self.open_document(path, &contents).await
     }
 
@@ -226,6 +236,255 @@ impl LspClient {
         Ok(location_to_symbol_locations(response.unwrap_or_default()))
     }
 
+    /// Request hover information at the given position.
+    pub(crate) async fn hover(
+        &self,
+        path: &Path,
+        position: Position,
+    ) -> Result<Option<HoverResult>, LspError> {
+        if self
+            .server_capabilities
+            .lock()
+            .await
+            .hover_provider
+            .is_none()
+        {
+            return Ok(None);
+        }
+        self.ensure_document_open(path).await?;
+        let response = self
+            .request::<Option<lsp_types::Hover>>(
+                "textDocument/hover",
+                json!({
+                    "textDocument": { "uri": file_url(path)? },
+                    "position": position,
+                }),
+            )
+            .await?;
+        Ok(response.map(|h| HoverResult {
+            contents: hover_contents_to_string(&h.contents),
+            range: h.range,
+        }))
+    }
+
+    /// Request code completion at the given position.
+    pub(crate) async fn completion(
+        &self,
+        path: &Path,
+        position: Position,
+    ) -> Result<Vec<CompletionItem>, LspError> {
+        if self
+            .server_capabilities
+            .lock()
+            .await
+            .completion_provider
+            .is_none()
+        {
+            return Ok(Vec::new());
+        }
+        self.ensure_document_open(path).await?;
+        let response = self
+            .request::<Option<CompletionResponse>>(
+                "textDocument/completion",
+                json!({
+                    "textDocument": { "uri": file_url(path)? },
+                    "position": position,
+                    "context": { "triggerKind": 1 },
+                }),
+            )
+            .await?;
+
+        let items = match response {
+            None => return Ok(Vec::new()),
+            Some(CompletionResponse::Array(items)) => items,
+            Some(CompletionResponse::List(list)) => list.items,
+        };
+        Ok(items.into_iter().map(lsp_item_to_completion_item).collect())
+    }
+
+    /// Request document symbol outline.
+    pub(crate) async fn document_symbols(
+        &self,
+        path: &Path,
+    ) -> Result<Vec<DocumentSymbolInfo>, LspError> {
+        if self
+            .server_capabilities
+            .lock()
+            .await
+            .document_symbol_provider
+            .is_none()
+        {
+            return Ok(Vec::new());
+        }
+        self.ensure_document_open(path).await?;
+        let response = self
+            .request::<Option<DocumentSymbolResponse>>(
+                "textDocument/documentSymbol",
+                json!({
+                    "textDocument": { "uri": file_url(path)? },
+                }),
+            )
+            .await?;
+
+        Ok(match response {
+            None => Vec::new(),
+            Some(DocumentSymbolResponse::Flat(items)) => items
+                .into_iter()
+                .filter_map(|info| {
+                    uri_to_path(&info.location.uri.to_string()).map(|p| DocumentSymbolInfo {
+                        name: info.name,
+                        kind: symbol_kind_label(info.kind).to_string(),
+                        location: SymbolLocation {
+                            path: p,
+                            range: info.location.range,
+                        },
+                    })
+                })
+                .collect(),
+            Some(DocumentSymbolResponse::Nested(items)) => {
+                let mut result = Vec::new();
+                flatten_document_symbols(items, path, &mut result);
+                result
+            }
+        })
+    }
+
+    /// Search workspace symbols matching `query`.
+    pub(crate) async fn workspace_symbols(
+        &self,
+        query: &str,
+    ) -> Result<Vec<SymbolLocation>, LspError> {
+        if self
+            .server_capabilities
+            .lock()
+            .await
+            .workspace_symbol_provider
+            .is_none()
+        {
+            return Ok(Vec::new());
+        }
+        let response = self
+            .request::<Option<Value>>("workspace/symbol", json!({ "query": query }))
+            .await?;
+
+        let arr = match response {
+            Some(Value::Array(arr)) => arr,
+            _ => return Ok(Vec::new()),
+        };
+
+        let mut locations = Vec::new();
+        for item in arr {
+            if let Some(loc) = item.get("location") {
+                let uri_str = loc.get("uri").and_then(Value::as_str);
+                let range_val = loc.get("range");
+                if let (Some(uri), Some(rv)) = (uri_str, range_val) {
+                    if let (Some(path), Ok(range)) = (
+                        uri_to_path(uri),
+                        serde_json::from_value::<lsp_types::Range>(rv.clone()),
+                    ) {
+                        locations.push(SymbolLocation { path, range });
+                    }
+                }
+            }
+        }
+        Ok(locations)
+    }
+
+    /// Rename a symbol at the given position.
+    pub(crate) async fn rename(
+        &self,
+        path: &Path,
+        position: Position,
+        new_name: &str,
+    ) -> Result<BTreeMap<PathBuf, Vec<TextEdit>>, LspError> {
+        if self
+            .server_capabilities
+            .lock()
+            .await
+            .rename_provider
+            .is_none()
+        {
+            return Ok(BTreeMap::new());
+        }
+        self.ensure_document_open(path).await?;
+        let response = self
+            .request::<Option<lsp_types::WorkspaceEdit>>(
+                "textDocument/rename",
+                json!({
+                    "textDocument": { "uri": file_url(path)? },
+                    "position": position,
+                    "newName": new_name,
+                }),
+            )
+            .await?;
+        Ok(response.map(workspace_edit_to_changes).unwrap_or_default())
+    }
+
+    /// Format a document using the server's formatter.
+    pub(crate) async fn formatting(
+        &self,
+        path: &Path,
+        tab_size: u32,
+        insert_spaces: bool,
+    ) -> Result<Vec<TextEdit>, LspError> {
+        if self
+            .server_capabilities
+            .lock()
+            .await
+            .document_formatting_provider
+            .is_none()
+        {
+            return Ok(Vec::new());
+        }
+        self.ensure_document_open(path).await?;
+        let response = self
+            .request::<Option<Vec<TextEdit>>>(
+                "textDocument/formatting",
+                json!({
+                    "textDocument": { "uri": file_url(path)? },
+                    "options": {
+                        "tabSize": tab_size,
+                        "insertSpaces": insert_spaces,
+                    },
+                }),
+            )
+            .await?;
+        Ok(response.unwrap_or_default())
+    }
+
+    /// Returns a snapshot of the server's declared capabilities.
+    pub(crate) async fn server_capabilities(&self) -> ServerCapabilities {
+        self.server_capabilities.lock().await.clone()
+    }
+
+    /// Returns the current diagnostics-update version counter.
+    /// The counter increments every time the server sends `publishDiagnostics`.
+    pub(crate) fn diagnostics_version(&self) -> u64 {
+        *self.diag_version_tx.borrow()
+    }
+
+    /// Block until the diagnostics version reaches at least `min_version`, or until `timeout`
+    /// elapses.  Returns a snapshot of all current diagnostics.
+    pub(crate) async fn wait_for_diagnostics_update(
+        &self,
+        min_version: u64,
+        timeout: Duration,
+    ) -> BTreeMap<String, Vec<Diagnostic>> {
+        let mut rx = self.diag_version_tx.subscribe();
+        let _ = tokio::time::timeout(timeout, async {
+            loop {
+                if *rx.borrow_and_update() >= min_version {
+                    break;
+                }
+                if rx.changed().await.is_err() {
+                    break;
+                }
+            }
+        })
+        .await;
+        self.diagnostics_snapshot().await
+    }
+
     pub(crate) async fn diagnostics_snapshot(&self) -> BTreeMap<String, Vec<Diagnostic>> {
         self.diagnostics.lock().await.clone()
     }
@@ -244,11 +503,10 @@ impl LspClient {
     }
 
     fn spawn_reader(&self, stdout: ChildStdout) {
-        let diagnostics = &self.diagnostics;
-        let pending_requests = &self.pending_requests;
+        let diagnostics = self.diagnostics.clone();
+        let pending_requests = self.pending_requests.clone();
+        let diag_version_tx = self.diag_version_tx.clone();
 
-        let diagnostics = diagnostics.clone();
-        let pending_requests = pending_requests.clone();
         tokio::spawn(async move {
             let mut reader = BufReader::new(stdout);
             let result = async {
@@ -282,6 +540,8 @@ impl LspClient {
                         diagnostics_map
                             .insert(notification.uri.to_string(), notification.diagnostics);
                     }
+                    drop(diagnostics_map);
+                    diag_version_tx.send_modify(|v| *v += 1);
                 }
                 Ok::<(), LspError>(())
             }
@@ -317,8 +577,8 @@ impl LspClient {
 
     async fn initialize(&self) -> Result<(), LspError> {
         let workspace_uri = file_url(&self.config.workspace_root)?;
-        let _ = self
-            .request::<Value>(
+        let result = self
+            .request::<InitializeResult>(
                 "initialize",
                 json!({
                     "processId": std::process::id(),
@@ -337,11 +597,28 @@ impl LspClient {
                             "definition": {
                                 "linkSupport": true,
                             },
-                            "references": {}
+                            "references": {},
+                            "hover": {
+                                "contentFormat": ["markdown", "plaintext"],
+                            },
+                            "completion": {
+                                "completionItem": {
+                                    "snippetSupport": false,
+                                    "documentationFormat": ["markdown", "plaintext"],
+                                },
+                            },
+                            "documentSymbol": {
+                                "hierarchicalDocumentSymbolSupport": true,
+                            },
+                            "rename": {
+                                "prepareSupport": false,
+                            },
+                            "formatting": {},
                         },
                         "workspace": {
                             "configuration": false,
                             "workspaceFolders": true,
+                            "symbol": {},
                         },
                         "general": {
                             "positionEncodings": ["utf-16"],
@@ -350,6 +627,7 @@ impl LspClient {
                 }),
             )
             .await?;
+        *self.server_capabilities.lock().await = result.capabilities;
         self.notify("initialized", json!({})).await
     }
 
@@ -400,6 +678,168 @@ impl LspClient {
         writer.flush().await?;
         Ok(())
     }
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+fn hover_contents_to_string(contents: &lsp_types::HoverContents) -> String {
+    match contents {
+        lsp_types::HoverContents::Scalar(item) => match item {
+            lsp_types::MarkedString::String(s) => s.clone(),
+            lsp_types::MarkedString::LanguageString(ls) => ls.value.clone(),
+        },
+        lsp_types::HoverContents::Array(items) => items
+            .iter()
+            .map(|item| match item {
+                lsp_types::MarkedString::String(s) => s.as_str(),
+                lsp_types::MarkedString::LanguageString(ls) => ls.value.as_str(),
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n"),
+        lsp_types::HoverContents::Markup(markup) => markup.value.clone(),
+    }
+}
+
+fn lsp_item_to_completion_item(item: lsp_types::CompletionItem) -> CompletionItem {
+    let documentation = item.documentation.map(|doc| match doc {
+        lsp_types::Documentation::String(s) => s,
+        lsp_types::Documentation::MarkupContent(mc) => mc.value,
+    });
+    CompletionItem {
+        label: item.label,
+        kind: completion_kind_label(item.kind),
+        detail: item.detail,
+        documentation,
+        insert_text: item.insert_text,
+    }
+}
+
+fn completion_kind_label(kind: Option<lsp_types::CompletionItemKind>) -> Option<String> {
+    use lsp_types::CompletionItemKind as K;
+    let k = kind?;
+    let pairs: &[(lsp_types::CompletionItemKind, &str)] = &[
+        (K::TEXT, "Text"),
+        (K::METHOD, "Method"),
+        (K::FUNCTION, "Function"),
+        (K::CONSTRUCTOR, "Constructor"),
+        (K::FIELD, "Field"),
+        (K::VARIABLE, "Variable"),
+        (K::CLASS, "Class"),
+        (K::INTERFACE, "Interface"),
+        (K::MODULE, "Module"),
+        (K::PROPERTY, "Property"),
+        (K::UNIT, "Unit"),
+        (K::VALUE, "Value"),
+        (K::ENUM, "Enum"),
+        (K::KEYWORD, "Keyword"),
+        (K::SNIPPET, "Snippet"),
+        (K::COLOR, "Color"),
+        (K::FILE, "File"),
+        (K::REFERENCE, "Reference"),
+        (K::FOLDER, "Folder"),
+        (K::ENUM_MEMBER, "EnumMember"),
+        (K::CONSTANT, "Constant"),
+        (K::STRUCT, "Struct"),
+        (K::EVENT, "Event"),
+        (K::OPERATOR, "Operator"),
+        (K::TYPE_PARAMETER, "TypeParameter"),
+    ];
+    pairs.iter().find_map(|(kv, label)| {
+        if k == *kv {
+            Some((*label).to_string())
+        } else {
+            None
+        }
+    })
+}
+
+fn symbol_kind_label(kind: lsp_types::SymbolKind) -> &'static str {
+    use lsp_types::SymbolKind as K;
+    let pairs: &[(lsp_types::SymbolKind, &str)] = &[
+        (K::FILE, "File"),
+        (K::MODULE, "Module"),
+        (K::NAMESPACE, "Namespace"),
+        (K::PACKAGE, "Package"),
+        (K::CLASS, "Class"),
+        (K::METHOD, "Method"),
+        (K::PROPERTY, "Property"),
+        (K::FIELD, "Field"),
+        (K::CONSTRUCTOR, "Constructor"),
+        (K::ENUM, "Enum"),
+        (K::INTERFACE, "Interface"),
+        (K::FUNCTION, "Function"),
+        (K::VARIABLE, "Variable"),
+        (K::CONSTANT, "Constant"),
+        (K::STRING, "String"),
+        (K::NUMBER, "Number"),
+        (K::BOOLEAN, "Boolean"),
+        (K::ARRAY, "Array"),
+        (K::OBJECT, "Object"),
+        (K::KEY, "Key"),
+        (K::NULL, "Null"),
+        (K::ENUM_MEMBER, "EnumMember"),
+        (K::STRUCT, "Struct"),
+        (K::EVENT, "Event"),
+        (K::OPERATOR, "Operator"),
+        (K::TYPE_PARAMETER, "TypeParameter"),
+    ];
+    pairs
+        .iter()
+        .find_map(|(kv, label)| if kind == *kv { Some(*label) } else { None })
+        .unwrap_or("Unknown")
+}
+
+fn flatten_document_symbols(
+    items: Vec<lsp_types::DocumentSymbol>,
+    path: &Path,
+    result: &mut Vec<DocumentSymbolInfo>,
+) {
+    for symbol in items {
+        result.push(DocumentSymbolInfo {
+            name: symbol.name,
+            kind: symbol_kind_label(symbol.kind).to_string(),
+            location: SymbolLocation {
+                path: path.to_path_buf(),
+                range: symbol.selection_range,
+            },
+        });
+        flatten_document_symbols(symbol.children.unwrap_or_default(), path, result);
+    }
+}
+
+fn workspace_edit_to_changes(edit: lsp_types::WorkspaceEdit) -> BTreeMap<PathBuf, Vec<TextEdit>> {
+    let mut result: BTreeMap<PathBuf, Vec<TextEdit>> = BTreeMap::new();
+
+    if let Some(changes) = edit.changes {
+        for (uri, edits) in changes {
+            if let Some(path) = uri_to_path(uri.as_str()) {
+                result.entry(path).or_default().extend(edits);
+            }
+        }
+    }
+
+    if let Some(doc_changes) = edit.document_changes {
+        match doc_changes {
+            lsp_types::DocumentChanges::Edits(text_doc_edits) => {
+                for doc_edit in text_doc_edits {
+                    if let Some(path) = uri_to_path(doc_edit.text_document.uri.as_str()) {
+                        let edits: Vec<TextEdit> = doc_edit
+                            .edits
+                            .into_iter()
+                            .filter_map(|e| match e {
+                                lsp_types::OneOf::Left(text_edit) => Some(text_edit),
+                                lsp_types::OneOf::Right(_) => None,
+                            })
+                            .collect();
+                        result.entry(path).or_default().extend(edits);
+                    }
+                }
+            }
+            lsp_types::DocumentChanges::Operations(_) => {}
+        }
+    }
+
+    result
 }
 
 async fn read_message<R>(reader: &mut BufReader<R>) -> Result<Option<Value>, LspError>

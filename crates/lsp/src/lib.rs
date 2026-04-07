@@ -4,9 +4,11 @@ mod manager;
 mod types;
 
 pub use error::LspError;
+pub use lsp_types::{DiagnosticSeverity, Position};
 pub use manager::LspManager;
 pub use types::{
-    FileDiagnostics, LspContextEnrichment, LspServerConfig, SymbolLocation, WorkspaceDiagnostics,
+    diagnostic_severity_label, CompletionItem, DocumentSymbolInfo, FileDiagnostics, HoverResult,
+    LspContextEnrichment, LspServerConfig, LspTextEdit, SymbolLocation, WorkspaceDiagnostics,
 };
 
 #[cfg(test)]
@@ -86,6 +88,12 @@ while True:
                 "capabilities": {
                     "definitionProvider": True,
                     "referencesProvider": True,
+                    "hoverProvider": True,
+                    "completionProvider": {"triggerCharacters": ["."]},
+                    "documentSymbolProvider": True,
+                    "workspaceSymbolProvider": True,
+                    "renameProvider": True,
+                    "documentFormattingProvider": True,
                     "textDocumentSync": 1,
                 }
             },
@@ -153,6 +161,102 @@ while True:
                 },
             ],
         })
+    elif method == "textDocument/hover":
+        write_message({
+            "jsonrpc": "2.0",
+            "id": message["id"],
+            "result": {
+                "contents": {
+                    "kind": "markdown",
+                    "value": "**mock hover** documentation",
+                },
+                "range": {
+                    "start": {"line": 0, "character": 0},
+                    "end": {"line": 0, "character": 3},
+                },
+            },
+        })
+    elif method == "textDocument/completion":
+        write_message({
+            "jsonrpc": "2.0",
+            "id": message["id"],
+            "result": [
+                {"label": "foo", "kind": 3},
+                {"label": "bar", "kind": 6, "detail": "i32"},
+            ],
+        })
+    elif method == "textDocument/documentSymbol":
+        uri = message["params"]["textDocument"]["uri"]
+        write_message({
+            "jsonrpc": "2.0",
+            "id": message["id"],
+            "result": [
+                {
+                    "name": "main",
+                    "kind": 12,
+                    "location": {
+                        "uri": uri,
+                        "range": {
+                            "start": {"line": 0, "character": 0},
+                            "end": {"line": 0, "character": 12},
+                        },
+                    },
+                }
+            ],
+        })
+    elif method == "workspace/symbol":
+        write_message({
+            "jsonrpc": "2.0",
+            "id": message["id"],
+            "result": [
+                {
+                    "name": "MockSymbol",
+                    "kind": 5,
+                    "location": {
+                        "uri": "file:///mock/symbol.rs",
+                        "range": {
+                            "start": {"line": 2, "character": 0},
+                            "end": {"line": 2, "character": 10},
+                        },
+                    },
+                }
+            ],
+        })
+    elif method == "textDocument/rename":
+        uri = message["params"]["textDocument"]["uri"]
+        new_name = message["params"]["newName"]
+        write_message({
+            "jsonrpc": "2.0",
+            "id": message["id"],
+            "result": {
+                "changes": {
+                    uri: [
+                        {
+                            "range": {
+                                "start": {"line": 0, "character": 0},
+                                "end": {"line": 0, "character": 3},
+                            },
+                            "newText": new_name,
+                        }
+                    ]
+                }
+            },
+        })
+    elif method == "textDocument/formatting":
+        uri = message["params"]["textDocument"]["uri"]
+        write_message({
+            "jsonrpc": "2.0",
+            "id": message["id"],
+            "result": [
+                {
+                    "range": {
+                        "start": {"line": 0, "character": 0},
+                        "end": {"line": 0, "character": 0},
+                    },
+                    "newText": "// formatted\n",
+                }
+            ],
+        })
     elif method == "shutdown":
         write_message({"jsonrpc": "2.0", "id": message["id"], "result": None})
     elif method == "exit":
@@ -182,29 +286,32 @@ while True:
         .expect("diagnostics should arrive from mock server");
     }
 
+    fn make_manager(python: String, root: &std::path::Path, script_path: PathBuf) -> LspManager {
+        LspManager::new(vec![LspServerConfig {
+            name: "rust-analyzer".to_string(),
+            command: python,
+            args: vec![script_path.display().to_string()],
+            env: BTreeMap::new(),
+            workspace_root: root.to_path_buf(),
+            initialization_options: None,
+            extension_to_language: BTreeMap::from([(".rs".to_string(), "rust".to_string())]),
+        }])
+        .expect("manager should build")
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn collects_diagnostics_and_symbol_navigation_from_mock_server() {
         let Some(python) = python3_path() else {
             return;
         };
 
-        // given
         let root = temp_dir("manager");
         fs::create_dir_all(root.join("src")).expect("workspace root should exist");
         let script_path = write_mock_server_script(&root);
         let source_path = root.join("src").join("main.rs");
         fs::write(&source_path, "fn main() {}\nlet value = 1;\n")
             .expect("source file should exist");
-        let manager = LspManager::new(vec![LspServerConfig {
-            name: "rust-analyzer".to_string(),
-            command: python,
-            args: vec![script_path.display().to_string()],
-            env: BTreeMap::new(),
-            workspace_root: root.clone(),
-            initialization_options: None,
-            extension_to_language: BTreeMap::from([(".rs".to_string(), "rust".to_string())]),
-        }])
-        .expect("manager should build");
+        let manager = make_manager(python, &root, script_path);
         manager
             .open_document(
                 &source_path,
@@ -214,7 +321,6 @@ while True:
             .expect("document should open");
         wait_for_diagnostics(&manager).await;
 
-        // when
         let diagnostics = manager
             .collect_workspace_diagnostics()
             .await
@@ -228,7 +334,6 @@ while True:
             .await
             .expect("references request should succeed");
 
-        // then
         assert_eq!(diagnostics.files.len(), 1);
         assert_eq!(diagnostics.total_diagnostics(), 1);
         assert_eq!(
@@ -244,28 +349,93 @@ while True:
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn hover_completion_symbols_rename_formatting_from_mock_server() {
+        let Some(python) = python3_path() else {
+            return;
+        };
+
+        let root = temp_dir("new-methods");
+        fs::create_dir_all(root.join("src")).expect("workspace root should exist");
+        let script_path = write_mock_server_script(&root);
+        let source_path = root.join("src").join("lib.rs");
+        fs::write(&source_path, "fn main() {}\n").expect("source file should exist");
+        let manager = make_manager(python, &root, script_path);
+        manager
+            .open_document(&source_path, "fn main() {}\n")
+            .await
+            .expect("document should open");
+        wait_for_diagnostics(&manager).await;
+
+        // hover
+        let hover = manager
+            .hover(&source_path, Position::new(0, 0))
+            .await
+            .expect("hover should succeed");
+        assert!(hover.is_some());
+        assert!(hover.unwrap().contents.contains("mock hover"));
+
+        // completion
+        let items = manager
+            .completion(&source_path, Position::new(0, 0))
+            .await
+            .expect("completion should succeed");
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].label, "foo");
+        assert_eq!(items[0].kind.as_deref(), Some("Function"));
+        assert_eq!(items[1].label, "bar");
+        assert_eq!(items[1].kind.as_deref(), Some("Variable"));
+
+        // document symbols
+        let symbols = manager
+            .document_symbols(&source_path)
+            .await
+            .expect("document symbols should succeed");
+        assert_eq!(symbols.len(), 1);
+        assert_eq!(symbols[0].name, "main");
+        assert_eq!(symbols[0].kind, "Function");
+
+        // workspace symbols
+        let ws_symbols = manager
+            .workspace_symbols("Mock")
+            .await
+            .expect("workspace symbols should succeed");
+        assert_eq!(ws_symbols.len(), 1);
+        assert_eq!(ws_symbols[0].start_line(), 3);
+
+        // rename
+        let edits = manager
+            .rename(&source_path, Position::new(0, 0), "new_main")
+            .await
+            .expect("rename should succeed");
+        assert!(!edits.is_empty());
+        let (_, file_edits) = edits.into_iter().next().unwrap();
+        assert_eq!(file_edits[0].new_text, "new_main");
+
+        // formatting
+        let fmt_edits = manager
+            .formatting(&source_path, 4, true)
+            .await
+            .expect("formatting should succeed");
+        assert_eq!(fmt_edits.len(), 1);
+        assert!(fmt_edits[0].new_text.contains("formatted"));
+
+        manager.shutdown().await.expect("shutdown should succeed");
+        fs::remove_dir_all(root).expect("temp workspace should be removed");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn renders_runtime_context_enrichment_for_prompt_usage() {
         let Some(python) = python3_path() else {
             return;
         };
 
-        // given
         let root = temp_dir("prompt");
         fs::create_dir_all(root.join("src")).expect("workspace root should exist");
         let script_path = write_mock_server_script(&root);
         let source_path = root.join("src").join("lib.rs");
         fs::write(&source_path, "pub fn answer() -> i32 { 42 }\n")
             .expect("source file should exist");
-        let manager = LspManager::new(vec![LspServerConfig {
-            name: "rust-analyzer".to_string(),
-            command: python,
-            args: vec![script_path.display().to_string()],
-            env: BTreeMap::new(),
-            workspace_root: root.clone(),
-            initialization_options: None,
-            extension_to_language: BTreeMap::from([(".rs".to_string(), "rust".to_string())]),
-        }])
-        .expect("manager should build");
+        let manager = make_manager(python, &root, script_path);
         manager
             .open_document(
                 &source_path,
@@ -275,14 +445,12 @@ while True:
             .expect("document should open");
         wait_for_diagnostics(&manager).await;
 
-        // when
         let enrichment = manager
             .context_enrichment(&source_path, Position::new(0, 0))
             .await
             .expect("context enrichment should succeed");
         let rendered = enrichment.render_prompt_section();
 
-        // then
         assert!(rendered.contains("# LSP context"));
         assert!(rendered.contains("Workspace diagnostics: 1 across 1 file(s)"));
         assert!(rendered.contains("Definitions:"));
@@ -291,5 +459,24 @@ while True:
 
         manager.shutdown().await.expect("shutdown should succeed");
         fs::remove_dir_all(root).expect("temp workspace should be removed");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn from_json_config_builds_manager() {
+        let config_json = serde_json::json!([
+            {
+                "name": "rust-analyzer",
+                "command": "echo",
+                "args": [],
+                "env": {},
+                "workspace_root": "/workspace",
+                "initialization_options": null,
+                "extension_to_language": {".rs": "rust"},
+            }
+        ]);
+        let manager =
+            LspManager::from_json_config(&config_json).expect("manager should build from JSON");
+        assert!(manager.supports_path(std::path::Path::new("main.rs")));
+        assert!(!manager.supports_path(std::path::Path::new("main.py")));
     }
 }
