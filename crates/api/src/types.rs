@@ -1,19 +1,27 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub use codineer_core::prompt_types::{
+    BlockKind, CacheControl, CacheScope, CacheType, SystemBlock, ThinkingConfig, ThinkingMode,
+};
+
+// ── Message request ─────────────────────────────────────────────────
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MessageRequest {
     pub model: String,
     pub max_tokens: u32,
     pub messages: Vec<InputMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub system: Option<String>,
+    pub system: Option<Vec<SystemBlock>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<ToolDefinition>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_choice: Option<ToolChoice>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<ThinkingConfig>,
 }
 
 impl MessageRequest {
@@ -103,6 +111,8 @@ pub struct ToolDefinition {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub input_schema: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_control: Option<CacheControl>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -249,23 +259,52 @@ mod tests {
             model: "claude-opus-4-6".to_string(),
             max_tokens: 4096,
             messages: vec![InputMessage::user_text("hello")],
-            system: Some("you are helpful".to_string()),
+            system: Some(SystemBlock::from_plain("you are helpful")),
             tools: Some(vec![ToolDefinition {
                 name: "read_file".to_string(),
                 description: Some("Read a file".to_string()),
                 input_schema: json!({"type": "object", "properties": {"path": {"type": "string"}}}),
+                cache_control: None,
             }]),
             tool_choice: Some(ToolChoice::Auto),
             stream: false,
+            thinking: None,
         };
         let json = serde_json::to_string(&request).expect("serialize");
         let deserialized: MessageRequest = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(deserialized, request);
         assert!(!json.contains("\"stream\""));
+        assert!(!json.contains("\"thinking\""));
 
         let streaming = request.with_streaming();
         let json = serde_json::to_string(&streaming).expect("serialize streaming");
         assert!(json.contains("\"stream\":true"));
+    }
+
+    #[test]
+    fn system_block_serializes_with_cache_control() {
+        let block = SystemBlock::cached("static section", CacheControl::global_1h());
+        let json = serde_json::to_value(&block).expect("serialize");
+        assert_eq!(json["type"], "text");
+        assert_eq!(json["text"], "static section");
+        assert_eq!(json["cache_control"]["type"], "ephemeral");
+        assert_eq!(json["cache_control"]["ttl"], "1h");
+        assert_eq!(json["cache_control"]["scope"], "global");
+    }
+
+    #[test]
+    fn thinking_config_round_trips() {
+        let enabled = ThinkingConfig::enabled(10000);
+        let json = serde_json::to_value(&enabled).expect("serialize");
+        assert_eq!(json["type"], "enabled");
+        assert_eq!(json["budget_tokens"], 10000);
+        let rt: ThinkingConfig = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(rt, enabled);
+
+        let disabled = ThinkingConfig::disabled();
+        let json = serde_json::to_value(&disabled).expect("serialize");
+        assert_eq!(json["type"], "disabled");
+        assert!(json.get("budget_tokens").is_none());
     }
 
     #[test]

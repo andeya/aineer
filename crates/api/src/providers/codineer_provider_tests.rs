@@ -1,4 +1,3 @@
-use super::{ALT_REQUEST_ID_HEADER, REQUEST_ID_HEADER};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::{Mutex, OnceLock};
@@ -8,10 +7,13 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use runtime::{clear_oauth_credentials, save_oauth_credentials, OAuthConfig};
 
 use super::{
-    now_unix_timestamp, oauth_token_is_expired, resolve_saved_oauth_token,
-    resolve_startup_auth_source, AuthSource, CodineerApiClient, OAuthTokenSet,
+    now_unix_timestamp, resolve_saved_oauth_token, resolve_startup_auth_source, AuthSource,
+    CodineerApiClient, OAuthTokenSet,
 };
-use crate::providers::RetryPolicy;
+use crate::providers::{
+    backoff_for_attempt, is_retryable_status, request_id_from_headers, RetryPolicy,
+    ALT_REQUEST_ID_HEADER, REQUEST_ID_HEADER,
+};
 use crate::types::{ContentBlockDelta, MessageRequest};
 
 fn env_lock() -> std::sync::MutexGuard<'static, ()> {
@@ -173,18 +175,20 @@ fn auth_source_from_saved_oauth_when_env_absent() {
 
 #[test]
 fn oauth_token_expiry_uses_expires_at_timestamp() {
-    assert!(oauth_token_is_expired(&OAuthTokenSet {
+    assert!(OAuthTokenSet {
         access_token: "access-token".to_string(),
         refresh_token: None,
         expires_at: Some(1),
         scopes: Vec::new(),
-    }));
-    assert!(!oauth_token_is_expired(&OAuthTokenSet {
+    }
+    .is_expired());
+    assert!(!OAuthTokenSet {
         access_token: "access-token".to_string(),
         refresh_token: None,
         expires_at: Some(now_unix_timestamp() + 60),
         scopes: Vec::new(),
-    }));
+    }
+    .is_expired());
 }
 
 #[test]
@@ -317,6 +321,7 @@ fn message_request_stream_helper_sets_stream_true() {
         tools: None,
         tool_choice: None,
         stream: false,
+        thinking: None,
     };
 
     assert!(request.with_streaming().stream);
@@ -324,35 +329,36 @@ fn message_request_stream_helper_sets_stream_true() {
 
 #[test]
 fn backoff_doubles_until_maximum() {
-    let client = CodineerApiClient::new("test-key").with_retry_policy(RetryPolicy {
+    let policy = RetryPolicy {
         max_retries: 3,
         initial_backoff: Duration::from_millis(10),
         max_backoff: Duration::from_millis(25),
-    });
+    };
+    let _ = CodineerApiClient::new("test-key").with_retry_policy(policy);
     assert_eq!(
-        client.backoff_for_attempt(1).expect("attempt 1"),
+        backoff_for_attempt(1, &policy).expect("attempt 1"),
         Duration::from_millis(10)
     );
     assert_eq!(
-        client.backoff_for_attempt(2).expect("attempt 2"),
+        backoff_for_attempt(2, &policy).expect("attempt 2"),
         Duration::from_millis(20)
     );
     assert_eq!(
-        client.backoff_for_attempt(3).expect("attempt 3"),
+        backoff_for_attempt(3, &policy).expect("attempt 3"),
         Duration::from_millis(25)
     );
 }
 
 #[test]
 fn retryable_statuses_are_detected() {
-    assert!(super::is_retryable_status(
-        reqwest::StatusCode::TOO_MANY_REQUESTS
+    assert!(is_retryable_status(
+        reqwest::StatusCode::TOO_MANY_REQUESTS.as_u16()
     ));
-    assert!(super::is_retryable_status(
-        reqwest::StatusCode::INTERNAL_SERVER_ERROR
+    assert!(is_retryable_status(
+        reqwest::StatusCode::INTERNAL_SERVER_ERROR.as_u16()
     ));
-    assert!(!super::is_retryable_status(
-        reqwest::StatusCode::UNAUTHORIZED
+    assert!(!is_retryable_status(
+        reqwest::StatusCode::UNAUTHORIZED.as_u16()
     ));
 }
 
@@ -372,7 +378,7 @@ fn request_id_uses_primary_or_fallback_header() {
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert(REQUEST_ID_HEADER, "req_primary".parse().expect("header"));
     assert_eq!(
-        super::request_id_from_headers(&headers).as_deref(),
+        request_id_from_headers(&headers).as_deref(),
         Some("req_primary")
     );
 
@@ -382,7 +388,7 @@ fn request_id_uses_primary_or_fallback_header() {
         "req_fallback".parse().expect("header"),
     );
     assert_eq!(
-        super::request_id_from_headers(&headers).as_deref(),
+        request_id_from_headers(&headers).as_deref(),
         Some("req_fallback")
     );
 }

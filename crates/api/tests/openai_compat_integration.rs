@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 use codineer_api::{
     ContentBlockDelta, ContentBlockDeltaEvent, ContentBlockStartEvent, ContentBlockStopEvent,
     InputContentBlock, InputMessage, MessageRequest, OpenAiCompatClient, OpenAiCompatConfig,
-    OutputContentBlock, ProviderClient, StreamEvent, ToolChoice, ToolDefinition,
+    OutputContentBlock, ProviderClient, StreamEvent, SystemBlock, ToolChoice, ToolDefinition,
 };
 use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -370,7 +370,7 @@ fn sample_request(stream: bool) -> MessageRequest {
                 text: "Say hello".to_string(),
             }],
         }],
-        system: Some("Use tools when needed".to_string()),
+        system: Some(SystemBlock::from_plain("Use tools when needed")),
         tools: Some(vec![ToolDefinition {
             name: "weather".to_string(),
             description: Some("Fetches weather".to_string()),
@@ -379,9 +379,11 @@ fn sample_request(stream: bool) -> MessageRequest {
                 "properties": {"city": {"type": "string"}},
                 "required": ["city"]
             }),
+            cache_control: None,
         }]),
         tool_choice: Some(ToolChoice::Auto),
         stream,
+        thinking: None,
     }
 }
 

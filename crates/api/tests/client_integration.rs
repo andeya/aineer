@@ -5,7 +5,8 @@ use std::time::Duration;
 use codineer_api::{
     ApiError, AuthSource, CodineerApiClient, ContentBlockDelta, ContentBlockDeltaEvent,
     ContentBlockStartEvent, InputContentBlock, InputMessage, MessageDeltaEvent, MessageRequest,
-    OutputContentBlock, ProviderClient, RetryPolicy, StreamEvent, ToolChoice, ToolDefinition,
+    OutputContentBlock, ProviderClient, RetryPolicy, StreamEvent, SystemBlock, ToolChoice,
+    ToolDefinition,
 };
 use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -308,6 +309,7 @@ async fn live_stream_smoke_test() {
             tools: None,
             tool_choice: None,
             stream: false,
+            thinking: None,
         })
         .await
         .expect("live stream should start");
@@ -476,7 +478,7 @@ fn sample_request(stream: bool) -> MessageRequest {
                 },
             ],
         }],
-        system: Some("Use tools when needed".to_string()),
+        system: Some(SystemBlock::from_plain("Use tools when needed")),
         tools: Some(vec![ToolDefinition {
             name: "get_weather".to_string(),
             description: Some("Fetches the weather".to_string()),
@@ -485,8 +487,10 @@ fn sample_request(stream: bool) -> MessageRequest {
                 "properties": {"city": {"type": "string"}},
                 "required": ["city"]
             }),
+            cache_control: None,
         }]),
         tool_choice: Some(ToolChoice::Auto),
         stream,
+        thinking: None,
     }
 }

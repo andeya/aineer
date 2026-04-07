@@ -5,7 +5,7 @@ use super::{
 };
 use crate::error::ApiError;
 use crate::types::{
-    InputContentBlock, InputMessage, MessageRequest, ToolChoice, ToolDefinition,
+    InputContentBlock, InputMessage, MessageRequest, SystemBlock, ToolChoice, ToolDefinition,
     ToolResultContentBlock,
 };
 use serde_json::json;
@@ -31,14 +31,16 @@ fn request_translation_uses_openai_compatible_shape() {
                 },
             ],
         }],
-        system: Some("be helpful".to_string()),
+        system: Some(SystemBlock::from_plain("be helpful")),
         tools: Some(vec![ToolDefinition {
             name: "weather".to_string(),
             description: Some("Get weather".to_string()),
             input_schema: json!({"type": "object"}),
+            cache_control: None,
         }]),
         tool_choice: Some(ToolChoice::Auto),
         stream: false,
+        thinking: None,
     });
 
     assert_eq!(payload["messages"][0]["role"], json!("system"));
@@ -63,6 +65,7 @@ fn chat_completion_strips_custom_provider_prefix_for_upstream_model() {
         tools: None,
         tool_choice: None,
         stream: false,
+        thinking: None,
     });
     assert_eq!(payload["model"], json!("qwen-plus-2025-07-28"));
 }
@@ -77,6 +80,7 @@ fn chat_completion_clamps_max_tokens_to_openai_compat_cap() {
         tools: None,
         tool_choice: None,
         stream: false,
+        thinking: None,
     });
     assert_eq!(payload["max_tokens"], json!(32_768));
 }
@@ -91,6 +95,7 @@ fn chat_completion_clamps_max_tokens_minimum_to_one() {
         tools: None,
         tool_choice: None,
         stream: false,
+        thinking: None,
     });
     assert_eq!(payload["max_tokens"], json!(1));
 }
@@ -144,6 +149,7 @@ fn chat_completion_preserves_openrouter_model_after_provider_prefix() {
         tools: None,
         tool_choice: None,
         stream: false,
+        thinking: None,
     });
     assert_eq!(payload["model"], json!("meta-llama/llama-3.1-8b:free"));
 }

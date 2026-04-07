@@ -138,7 +138,7 @@ impl MessageStream {
 }
 
 pub use codineer_provider::{
-    oauth_token_is_expired, resolve_saved_oauth_token, resolve_startup_auth_source, OAuthTokenSet,
+    resolve_saved_oauth_token, resolve_startup_auth_source, OAuthTokenSet,
 };
 #[must_use]
 pub fn read_base_url() -> String {

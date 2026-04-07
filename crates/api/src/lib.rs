@@ -1,3 +1,5 @@
+//! Anthropic and OpenAI-compatible API client with streaming support.
+
 mod client;
 mod error;
 mod providers;
@@ -13,8 +15,8 @@ fn default_http_client() -> reqwest::Client {
 }
 
 pub use client::{
-    oauth_token_is_expired, read_base_url, read_xai_base_url, resolve_saved_oauth_token,
-    resolve_startup_auth_source, MessageStream, OAuthTokenSet, ProviderClient,
+    read_base_url, read_xai_base_url, resolve_saved_oauth_token, resolve_startup_auth_source,
+    MessageStream, OAuthTokenSet, ProviderClient,
 };
 pub use error::ApiError;
 pub use providers::codineer_provider::{AuthSource, CodineerApiClient};
@@ -26,8 +28,9 @@ pub use providers::{
 };
 pub use sse::{parse_frame, SseParser};
 pub use types::{
-    ContentBlockDelta, ContentBlockDeltaEvent, ContentBlockStartEvent, ContentBlockStopEvent,
-    ImageSource, InputContentBlock, InputMessage, MessageDelta, MessageDeltaEvent, MessageRequest,
-    MessageResponse, MessageStartEvent, MessageStopEvent, OutputContentBlock, StreamEvent,
+    BlockKind, CacheControl, CacheScope, CacheType, ContentBlockDelta, ContentBlockDeltaEvent,
+    ContentBlockStartEvent, ContentBlockStopEvent, ImageSource, InputContentBlock, InputMessage,
+    MessageDelta, MessageDeltaEvent, MessageRequest, MessageResponse, MessageStartEvent,
+    MessageStopEvent, OutputContentBlock, StreamEvent, SystemBlock, ThinkingConfig, ThinkingMode,
     ToolChoice, ToolDefinition, ToolResultContentBlock, Usage,
 };

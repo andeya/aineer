@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use crate::error::ApiError;
+
 pub mod codineer_provider;
 pub mod openai_compat;
 
@@ -330,6 +332,47 @@ impl ProviderKind {
             Self::Custom => "Custom",
         }
     }
+}
+
+// ── Shared provider helpers ──
+
+pub(crate) const REQUEST_ID_HEADER: &str = "request-id";
+pub(crate) const ALT_REQUEST_ID_HEADER: &str = "x-request-id";
+
+pub(crate) fn read_env_non_empty(key: &str) -> Result<Option<String>, ApiError> {
+    match std::env::var(key) {
+        Ok(val) if !val.is_empty() => Ok(Some(val)),
+        Ok(_) | Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(e) => Err(ApiError::from(e)),
+    }
+}
+
+pub(crate) const fn is_retryable_status(status: u16) -> bool {
+    matches!(status, 408 | 409 | 429 | 500 | 502 | 503 | 504)
+}
+
+pub(crate) fn request_id_from_headers(headers: &reqwest::header::HeaderMap) -> Option<String> {
+    headers
+        .get(REQUEST_ID_HEADER)
+        .or_else(|| headers.get(ALT_REQUEST_ID_HEADER))
+        .and_then(|v| v.to_str().ok())
+        .map(String::from)
+}
+
+pub(crate) fn backoff_for_attempt(
+    attempt: u32,
+    policy: &RetryPolicy,
+) -> Result<Duration, ApiError> {
+    let Some(multiplier) = 1_u32.checked_shl(attempt.saturating_sub(1)) else {
+        return Err(ApiError::BackoffOverflow {
+            attempt,
+            base_delay: policy.initial_backoff,
+        });
+    };
+    Ok(policy
+        .initial_backoff
+        .checked_mul(multiplier)
+        .map_or(policy.max_backoff, |delay| delay.min(policy.max_backoff)))
 }
 
 #[cfg(test)]

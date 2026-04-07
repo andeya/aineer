@@ -40,13 +40,8 @@ pub enum ApiError {
     },
     #[error("invalid sse frame: {0}")]
     InvalidSseFrame(&'static str),
-    #[error(
-        "retry backoff overflowed on attempt {attempt} with base delay {base_delay:?}"
-    )]
-    BackoffOverflow {
-        attempt: u32,
-        base_delay: Duration,
-    },
+    #[error("retry backoff overflowed on attempt {attempt} with base delay {base_delay:?}")]
+    BackoffOverflow { attempt: u32, base_delay: Duration },
     #[error("response payload exceeded {limit} byte limit")]
     ResponsePayloadTooLarge { limit: usize },
     /// In-stream error object from the Anthropic Messages SSE protocol (`type: "error"`).

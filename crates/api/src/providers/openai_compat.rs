@@ -8,8 +8,11 @@ use std::collections::VecDeque;
 use serde::{Deserialize, Deserializer};
 use serde_json::{json, Value};
 
+use super::{
+    backoff_for_attempt, is_retryable_status, parse_custom_provider_prefix, read_env_non_empty,
+    request_id_from_headers, RetryPolicy,
+};
 use crate::error::ApiError;
-use crate::providers::{parse_custom_provider_prefix, RetryPolicy};
 use crate::types::{
     InputContentBlock, InputMessage, MessageRequest, MessageResponse, OutputContentBlock,
     ToolChoice, ToolDefinition, ToolResultContentBlock, Usage,
@@ -22,8 +25,6 @@ pub use openai_compat_stream::MessageStream;
 
 pub const DEFAULT_XAI_BASE_URL: &str = "https://api.x.ai/v1";
 pub const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
-const REQUEST_ID_HEADER: &str = "request-id";
-const ALT_REQUEST_ID_HEADER: &str = "x-request-id";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OpenAiCompatConfig {
@@ -213,7 +214,7 @@ impl OpenAiCompatClient {
                 break retryable_error;
             }
 
-            tokio::time::sleep(self.backoff_for_attempt(attempts)?).await;
+            tokio::time::sleep(backoff_for_attempt(attempts, &self.retry)?).await;
         };
 
         Err(ApiError::RetriesExhausted {
@@ -241,22 +242,6 @@ impl OpenAiCompatClient {
             .send()
             .await
             .map_err(ApiError::from)
-    }
-
-    fn backoff_for_attempt(&self, attempt: u32) -> Result<std::time::Duration, ApiError> {
-        let Some(multiplier) = 1_u32.checked_shl(attempt.saturating_sub(1)) else {
-            return Err(ApiError::BackoffOverflow {
-                attempt,
-                base_delay: self.retry.initial_backoff,
-            });
-        };
-        Ok(self
-            .retry
-            .initial_backoff
-            .checked_mul(multiplier)
-            .map_or(self.retry.max_backoff, |delay| {
-                delay.min(self.retry.max_backoff)
-            }))
     }
 }
 
@@ -353,10 +338,15 @@ fn upstream_openai_model(model: &str) -> String {
 
 fn build_chat_completion_request(request: &MessageRequest) -> Value {
     let mut messages = Vec::new();
-    if let Some(system) = request.system.as_ref().filter(|value| !value.is_empty()) {
+    if let Some(blocks) = request.system.as_ref().filter(|b| !b.is_empty()) {
+        let content = blocks
+            .iter()
+            .map(|b| b.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n\n");
         messages.push(json!({
             "role": "system",
-            "content": system,
+            "content": content,
         }));
     }
     for message in &request.messages {
@@ -372,6 +362,10 @@ fn build_chat_completion_request(request: &MessageRequest) -> Value {
         "messages": messages,
         "stream": request.stream,
     });
+
+    if request.stream {
+        payload["stream_options"] = json!({ "include_usage": true });
+    }
 
     if let Some(tools) = &request.tools {
         payload["tools"] =
@@ -602,14 +596,6 @@ where
 // Env / URL / HTTP helpers
 // ---------------------------------------------------------------------------
 
-fn read_env_non_empty(key: &str) -> Result<Option<String>, ApiError> {
-    match std::env::var(key) {
-        Ok(value) if !value.is_empty() => Ok(Some(value)),
-        Ok(_) | Err(std::env::VarError::NotPresent) => Ok(None),
-        Err(error) => Err(ApiError::from(error)),
-    }
-}
-
 #[must_use]
 pub fn has_api_key(key: &str) -> bool {
     read_env_non_empty(key)
@@ -652,14 +638,6 @@ fn merge_url_query(path: &str, base_query: Option<&str>, extra_query: Option<&st
     }
 }
 
-fn request_id_from_headers(headers: &reqwest::header::HeaderMap) -> Option<String> {
-    headers
-        .get(REQUEST_ID_HEADER)
-        .or_else(|| headers.get(ALT_REQUEST_ID_HEADER))
-        .and_then(|value| value.to_str().ok())
-        .map(ToOwned::to_owned)
-}
-
 async fn expect_success(response: reqwest::Response) -> Result<reqwest::Response, ApiError> {
     let status = response.status();
     if status.is_success() {
@@ -669,7 +647,7 @@ async fn expect_success(response: reqwest::Response) -> Result<reqwest::Response
     let url = response.url().to_string();
     let body = response.text().await.unwrap_or_default();
     let parsed_error = serde_json::from_str::<ErrorEnvelope>(&body).ok();
-    let retryable = is_retryable_status(status);
+    let retryable = is_retryable_status(status.as_u16());
 
     Err(ApiError::Api {
         status,
@@ -683,10 +661,6 @@ async fn expect_success(response: reqwest::Response) -> Result<reqwest::Response
         url: Some(url),
         retryable,
     })
-}
-
-const fn is_retryable_status(status: reqwest::StatusCode) -> bool {
-    matches!(status.as_u16(), 408 | 409 | 429 | 500 | 502 | 503 | 504)
 }
 
 fn normalize_finish_reason(value: &str) -> String {

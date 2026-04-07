@@ -7,15 +7,16 @@ use runtime::{
 };
 use serde::Deserialize;
 
+use super::{
+    backoff_for_attempt, is_retryable_status, read_env_non_empty, request_id_from_headers,
+    RetryPolicy,
+};
 use crate::error::ApiError;
-use crate::providers::RetryPolicy;
 use crate::sse::SseParser;
 use crate::types::{MessageRequest, MessageResponse, StreamEvent};
 
 pub const DEFAULT_BASE_URL: &str = "https://api.anthropic.com";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
-const REQUEST_ID_HEADER: &str = "request-id";
-const ALT_REQUEST_ID_HEADER: &str = "x-request-id";
 
 #[derive(Clone, PartialEq, Eq)]
 pub enum AuthSource {
@@ -104,6 +105,14 @@ pub struct OAuthTokenSet {
     pub expires_at: Option<u64>,
     #[serde(default)]
     pub scopes: Vec<String>,
+}
+
+impl OAuthTokenSet {
+    #[must_use]
+    pub fn is_expired(&self) -> bool {
+        self.expires_at
+            .is_some_and(|expires_at| expires_at <= now_unix_timestamp())
+    }
 }
 
 impl From<OAuthTokenSet> for AuthSource {
@@ -323,7 +332,7 @@ impl CodineerApiClient {
                 break;
             }
 
-            tokio::time::sleep(self.backoff_for_attempt(attempts)?).await;
+            tokio::time::sleep(backoff_for_attempt(attempts, &self.retry)?).await;
         }
 
         Err(ApiError::RetriesExhausted {
@@ -349,22 +358,6 @@ impl CodineerApiClient {
         request_builder = request_builder.json(request);
         request_builder.send().await.map_err(ApiError::from)
     }
-
-    fn backoff_for_attempt(&self, attempt: u32) -> Result<std::time::Duration, ApiError> {
-        let Some(multiplier) = 1_u32.checked_shl(attempt.saturating_sub(1)) else {
-            return Err(ApiError::BackoffOverflow {
-                attempt,
-                base_delay: self.retry.initial_backoff,
-            });
-        };
-        Ok(self
-            .retry
-            .initial_backoff
-            .checked_mul(multiplier)
-            .map_or(self.retry.max_backoff, |delay| {
-                delay.min(self.retry.max_backoff)
-            }))
-    }
 }
 
 impl AuthSource {
@@ -382,7 +375,7 @@ impl AuthSource {
             return Ok(Self::BearerToken(bearer_token));
         }
         match load_saved_oauth_token() {
-            Ok(Some(token_set)) if oauth_token_is_expired(&token_set) => {
+            Ok(Some(token_set)) if token_set.is_expired() => {
                 if token_set.refresh_token.is_some() {
                     Err(ApiError::Auth(
                         "saved OAuth token is expired; load runtime OAuth config to refresh it"
@@ -400,13 +393,6 @@ impl AuthSource {
             Err(error) => Err(error),
         }
     }
-}
-
-#[must_use]
-pub fn oauth_token_is_expired(token_set: &OAuthTokenSet) -> bool {
-    token_set
-        .expires_at
-        .is_some_and(|expires_at| expires_at <= now_unix_timestamp())
 }
 
 pub fn resolve_saved_oauth_token(config: &OAuthConfig) -> Result<Option<OAuthTokenSet>, ApiError> {
@@ -445,7 +431,7 @@ where
             &["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"],
         ));
     };
-    if !oauth_token_is_expired(&token_set) {
+    if !token_set.is_expired() {
         return Ok(AuthSource::BearerToken(token_set.access_token));
     }
     if token_set.refresh_token.is_none() {
@@ -466,7 +452,7 @@ fn resolve_saved_oauth_token_set(
     config: &OAuthConfig,
     token_set: OAuthTokenSet,
 ) -> Result<OAuthTokenSet, ApiError> {
-    if !oauth_token_is_expired(&token_set) {
+    if !token_set.is_expired() {
         return Ok(token_set);
     }
     let Some(refresh_token) = token_set.refresh_token.clone() else {
@@ -529,14 +515,6 @@ fn now_unix_timestamp() -> u64 {
         .map_or(0, |duration| duration.as_secs())
 }
 
-fn read_env_non_empty(key: &str) -> Result<Option<String>, ApiError> {
-    match std::env::var(key) {
-        Ok(value) if !value.is_empty() => Ok(Some(value)),
-        Ok(_) | Err(std::env::VarError::NotPresent) => Ok(None),
-        Err(error) => Err(ApiError::from(error)),
-    }
-}
-
 #[cfg(test)]
 fn read_api_key() -> Result<String, ApiError> {
     let auth = AuthSource::from_env_or_saved()?;
@@ -559,14 +537,6 @@ fn read_auth_token() -> Option<String> {
 #[must_use]
 pub fn read_base_url() -> String {
     std::env::var("ANTHROPIC_BASE_URL").unwrap_or_else(|_| DEFAULT_BASE_URL.to_string())
-}
-
-fn request_id_from_headers(headers: &reqwest::header::HeaderMap) -> Option<String> {
-    headers
-        .get(REQUEST_ID_HEADER)
-        .or_else(|| headers.get(ALT_REQUEST_ID_HEADER))
-        .and_then(|value| value.to_str().ok())
-        .map(ToOwned::to_owned)
 }
 
 #[derive(Debug)]
@@ -620,7 +590,7 @@ async fn expect_success(response: reqwest::Response) -> Result<reqwest::Response
     let url = response.url().to_string();
     let body = response.text().await.unwrap_or_else(|_| String::new());
     let parsed_error = serde_json::from_str::<ApiErrorEnvelope>(&body).ok();
-    let retryable = is_retryable_status(status);
+    let retryable = is_retryable_status(status.as_u16());
 
     Err(ApiError::Api {
         status,
@@ -634,10 +604,6 @@ async fn expect_success(response: reqwest::Response) -> Result<reqwest::Response
         url: Some(url),
         retryable,
     })
-}
-
-const fn is_retryable_status(status: reqwest::StatusCode) -> bool {
-    matches!(status.as_u16(), 408 | 409 | 429 | 500 | 502 | 503 | 504)
 }
 
 #[derive(Debug, Deserialize)]
