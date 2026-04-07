@@ -11,6 +11,7 @@ use runtime::{
 };
 
 mod agent;
+pub mod builtin;
 pub mod tool_output;
 mod collab;
 mod config_tool;
@@ -603,7 +604,7 @@ fn clamp_sleep_inner(requested_ms: u64) -> (u64, String) {
 }
 
 #[allow(clippy::needless_pass_by_value)]
-fn execute_sleep(input: SleepInput) -> SleepOutput {
+pub(crate) fn execute_sleep(input: SleepInput) -> SleepOutput {
     let (duration_ms, message) = clamp_sleep_inner(input.duration_ms);
     std::thread::sleep(Duration::from_millis(duration_ms));
     SleepOutput {
@@ -659,7 +660,7 @@ fn is_image_path(path: &Path) -> bool {
     )
 }
 
-fn execute_structured_output(input: StructuredOutputInput) -> StructuredOutputResult {
+pub(crate) fn execute_structured_output(input: StructuredOutputInput) -> StructuredOutputResult {
     StructuredOutputResult {
         data: String::from("Structured output provided successfully"),
         structured_output: input.0,
