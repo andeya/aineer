@@ -6,7 +6,7 @@
 //! - Typed recovery strategies (see `recovery.rs`)
 //! - `#[from]` automatic conversion from downstream errors
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum RuntimeError {
     #[error("max iterations exceeded ({iterations})")]
     MaxIterations { iterations: usize },
@@ -33,6 +33,13 @@ pub enum RuntimeError {
 }
 
 impl RuntimeError {
+    /// Backward-compatible constructor mapping to `Other`.
+    /// Prefer using specific variants when the error category is known.
+    #[must_use]
+    pub fn new(message: impl Into<String>) -> Self {
+        Self::Other(message.into())
+    }
+
     /// Check if this error represents a context overflow.
     #[must_use]
     pub fn is_context_overflow(&self) -> bool {

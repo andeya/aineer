@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter};
 
+pub use codineer_core::error::RuntimeError;
+
 use crate::compact::{
     compact_session, estimate_session_tokens, CompactionConfig, CompactionResult,
 };
@@ -121,28 +123,6 @@ impl Display for ToolError {
 impl std::error::Error for ToolError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RuntimeError {
-    message: String,
-}
-
-impl RuntimeError {
-    #[must_use]
-    pub fn new(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-        }
-    }
-}
-
-impl Display for RuntimeError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.message)
-    }
-}
-
-impl std::error::Error for RuntimeError {}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TurnSummary {
     pub assistant_messages: Vec<ConversationMessage>,
     pub tool_results: Vec<ConversationMessage>,
@@ -243,9 +223,9 @@ where
         loop {
             iterations += 1;
             if iterations > self.max_iterations {
-                return Err(RuntimeError::new(
-                    "conversation loop exceeded the maximum number of iterations",
-                ));
+                return Err(RuntimeError::MaxIterations {
+                    iterations: self.max_iterations,
+                });
             }
 
             let request = ApiRequest {
@@ -473,15 +453,10 @@ fn build_assistant_message(
     flush_text_block(&mut text, &mut blocks);
 
     if !finished {
-        return Err(RuntimeError::new(
-            "assistant stream ended without a message stop event",
-        ));
+        return Err(RuntimeError::IncompleteStream);
     }
     if blocks.is_empty() {
-        return Err(RuntimeError::new(
-            "assistant stream produced no content (empty reply from the model API; \
-             try upgrading codineer, check provider stream vs non-stream, or verify model id and API key)",
-        ));
+        return Err(RuntimeError::EmptyReply);
     }
 
     Ok((
