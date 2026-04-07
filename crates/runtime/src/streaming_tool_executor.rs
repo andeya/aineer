@@ -64,10 +64,7 @@ impl StreamingToolExecutor {
     ///
     /// Sequential tools are executed in order. Concurrent-safe tools
     /// are batched together for parallel execution when supported.
-    pub fn drain_ready<T: ToolExecutor>(
-        &mut self,
-        executor: &mut T,
-    ) -> Vec<CompletedToolCall> {
+    pub fn drain_ready<T: ToolExecutor>(&mut self, executor: &mut T) -> Vec<CompletedToolCall> {
         let mut results = Vec::new();
 
         while let Some(queued) = self.queue.front_mut() {
@@ -211,7 +208,9 @@ mod tests {
             id: "id-1".into(),
             name: "bash".into(),
             input: "rm -rf /".into(),
-            slot: ToolSlot::Denied { reason: "blocked".into() },
+            slot: ToolSlot::Denied {
+                reason: "blocked".into(),
+            },
         });
 
         let results = ste.drain_ready(&mut executor);

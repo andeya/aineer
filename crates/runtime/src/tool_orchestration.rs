@@ -37,10 +37,7 @@ pub struct ToolCall {
 ///
 /// Consecutive concurrent calls are grouped into a single batch.
 /// Sequential calls get their own single-call batch.
-pub fn partition_tool_calls<T: ToolExecutor>(
-    calls: &[ToolCall],
-    executor: &T,
-) -> Vec<ToolBatch> {
+pub fn partition_tool_calls<T: ToolExecutor>(calls: &[ToolCall], executor: &T) -> Vec<ToolBatch> {
     let mut batches = Vec::new();
     let mut concurrent_group = Vec::new();
 
@@ -84,17 +81,11 @@ fn flush_concurrent(group: &mut Vec<ToolCall>, batches: &mut Vec<ToolBatch>) {
     }
     let calls = std::mem::take(group);
     let concurrent = calls.len() > 1;
-    batches.push(ToolBatch {
-        calls,
-        concurrent,
-    });
+    batches.push(ToolBatch { calls, concurrent });
 }
 
 /// Execute a single batch, returning results in the same order.
-pub fn execute_batch<T: ToolExecutor>(
-    batch: &ToolBatch,
-    executor: &mut T,
-) -> Vec<ToolCallResult> {
+pub fn execute_batch<T: ToolExecutor>(batch: &ToolBatch, executor: &mut T) -> Vec<ToolCallResult> {
     if batch.concurrent && batch.calls.len() > 1 {
         if let Some(batch_results) = executor.execute_batch(
             &batch
@@ -218,7 +209,12 @@ mod tests {
     fn denied_calls_isolated() {
         let executor = MockExecutor { safe_tools: vec![] };
         let calls = vec![
-            call("bash", ToolSlot::Denied { reason: "blocked".into() }),
+            call(
+                "bash",
+                ToolSlot::Denied {
+                    reason: "blocked".into(),
+                },
+            ),
             call("read_file", ToolSlot::Sequential),
         ];
         let batches = partition_tool_calls(&calls, &executor);
@@ -242,7 +238,12 @@ mod tests {
     fn execute_denied_returns_error() {
         let mut executor = MockExecutor { safe_tools: vec![] };
         let batch = ToolBatch {
-            calls: vec![call("bash", ToolSlot::Denied { reason: "no".into() })],
+            calls: vec![call(
+                "bash",
+                ToolSlot::Denied {
+                    reason: "no".into(),
+                },
+            )],
             concurrent: false,
         };
         let results = execute_batch(&batch, &mut executor);

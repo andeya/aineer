@@ -1,3 +1,5 @@
+//! Conversation runtime, configuration, tools, and session management.
+
 mod bash;
 pub mod compact;
 mod config;
@@ -6,18 +8,15 @@ pub mod credentials;
 mod file_ops;
 mod hooks;
 mod json;
-mod mcp;
-mod mcp_client;
-mod mcp_remote;
-mod mcp_stdio;
 mod oauth;
 mod permissions;
 mod prompt;
+pub mod recovery;
 mod remote;
 pub mod sandbox;
 mod session;
-pub mod recovery;
 pub mod streaming_tool_executor;
+pub mod swarm;
 pub mod token_budget;
 mod tool;
 pub mod tool_orchestration;
@@ -25,6 +24,9 @@ pub mod tool_result;
 mod usage;
 
 pub use bash::{execute_bash, BashCommandInput, BashCommandOutput};
+pub use codineer_core::prompt_types::{
+    BlockKind, CacheControl, CacheScope, CacheType, SystemBlock, ThinkingConfig, ThinkingMode,
+};
 pub use compact::{
     compact_session, estimate_session_tokens, format_compact_summary,
     get_compact_continuation_message, should_compact, CompactionConfig, CompactionResult,
@@ -46,7 +48,7 @@ pub use file_ops::{
     EditFileOutput, GlobSearchOutput, GrepOutputMode, GrepSearchInput, GrepSearchOutput,
     ReadFileOutput, StructuredPatchHunk, TextFilePayload, WriteFileOutput,
 };
-pub use hooks::{HookCommandSource, HookDispatcher, HookEvent, HookRunResult, HookRunner};
+pub use hooks::HookDispatcher;
 pub use json::JsonValue;
 pub use lsp::{
     FileDiagnostics, LspContextEnrichment, LspError, LspManager, LspServerConfig, SymbolLocation,
@@ -54,16 +56,12 @@ pub use lsp::{
 };
 pub use mcp::{
     mcp_server_signature, mcp_tool_name, mcp_tool_prefix, normalize_name_for_mcp,
-    scoped_mcp_config_hash, unwrap_mcp_proxy_url,
-};
-pub use mcp_client::McpClientBootstrap;
-pub use mcp_stdio::{
-    ManagedMcpTool, McpServerManager, McpServerManagerError, McpStdioProcess, McpTool,
+    scoped_mcp_config_hash, unwrap_mcp_proxy_url, ManagedMcpTool, McpClientBootstrap,
+    McpRemoteClient, McpServerManager, McpServerManagerError, McpStdioProcess, McpTool,
     McpToolCallContent, McpToolCallResult, UnsupportedMcpServer,
 };
 pub use oauth::{
-    clear_oauth_credentials, generate_pkce_pair, generate_state, load_oauth_credentials,
-    loopback_redirect_uri, parse_oauth_callback_query, parse_oauth_callback_request_target,
+    clear_oauth_credentials, generate_state, load_oauth_credentials, loopback_redirect_uri,
     save_oauth_credentials, OAuthAuthorizationRequest, OAuthCallbackParams, OAuthRefreshRequest,
     OAuthTokenExchangeRequest, OAuthTokenSet, PkceCodePair,
 };
@@ -72,8 +70,8 @@ pub use permissions::{
     PermissionPrompter, PermissionRequest,
 };
 pub use prompt::{
-    load_system_prompt, load_system_prompt_with_lsp, ContextFile, ProjectContext, PromptCache,
-    SystemPromptBuilder,
+    load_system_prompt, load_system_prompt_with_lsp, ContextFile, InstructionLoader,
+    ProjectContext, PromptBuildError, PromptCache, SystemPromptBuilder,
 };
 pub use remote::{
     inherited_upstream_proxy_env, RemoteSessionContext, UpstreamProxyBootstrap, UpstreamProxyState,

@@ -17,6 +17,18 @@ pub struct OAuthTokenSet {
     pub scopes: Vec<String>,
 }
 
+impl OAuthTokenSet {
+    #[must_use]
+    pub fn is_expired(&self) -> bool {
+        self.expires_at.is_some_and(|expires_at| {
+            expires_at
+                <= std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_secs())
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PkceCodePair {
     pub verifier: String,
@@ -231,13 +243,15 @@ impl OAuthRefreshRequest {
     }
 }
 
-pub fn generate_pkce_pair() -> io::Result<PkceCodePair> {
-    let verifier = generate_random_token(32)?;
-    Ok(PkceCodePair {
-        challenge: code_challenge_s256(&verifier),
-        verifier,
-        challenge_method: PkceChallengeMethod::S256,
-    })
+impl PkceCodePair {
+    pub fn generate() -> io::Result<Self> {
+        let verifier = generate_random_token(32)?;
+        Ok(Self {
+            challenge: code_challenge_s256(&verifier),
+            verifier,
+            challenge_method: PkceChallengeMethod::S256,
+        })
+    }
 }
 
 pub fn generate_state() -> io::Result<String> {
@@ -344,30 +358,32 @@ pub fn clear_oauth_credentials() -> io::Result<()> {
     write_credentials_root(&path, &root)
 }
 
-pub fn parse_oauth_callback_request_target(target: &str) -> Result<OAuthCallbackParams, String> {
-    let (path, query) = target
-        .split_once('?')
-        .map_or((target, ""), |(path, query)| (path, query));
-    if path != "/callback" {
-        return Err(format!("unexpected callback path: {path}"));
+impl OAuthCallbackParams {
+    pub fn from_request_target(target: &str) -> Result<Self, String> {
+        let (path, query) = target
+            .split_once('?')
+            .map_or((target, ""), |(path, query)| (path, query));
+        if path != "/callback" {
+            return Err(format!("unexpected callback path: {path}"));
+        }
+        Self::from_query(query)
     }
-    parse_oauth_callback_query(query)
-}
 
-pub fn parse_oauth_callback_query(query: &str) -> Result<OAuthCallbackParams, String> {
-    let mut params = BTreeMap::new();
-    for pair in query.split('&').filter(|pair| !pair.is_empty()) {
-        let (key, value) = pair
-            .split_once('=')
-            .map_or((pair, ""), |(key, value)| (key, value));
-        params.insert(percent_decode(key)?, percent_decode(value)?);
+    pub fn from_query(query: &str) -> Result<Self, String> {
+        let mut params = BTreeMap::new();
+        for pair in query.split('&').filter(|pair| !pair.is_empty()) {
+            let (key, value) = pair
+                .split_once('=')
+                .map_or((pair, ""), |(key, value)| (key, value));
+            params.insert(percent_decode(key)?, percent_decode(value)?);
+        }
+        Ok(Self {
+            code: params.get("code").cloned(),
+            state: params.get("state").cloned(),
+            error: params.get("error").cloned(),
+            error_description: params.get("error_description").cloned(),
+        })
     }
-    Ok(OAuthCallbackParams {
-        code: params.get("code").cloned(),
-        state: params.get("state").cloned(),
-        error: params.get("error").cloned(),
-        error_description: params.get("error_description").cloned(),
-    })
 }
 
 fn generate_random_token(bytes: usize) -> io::Result<String> {
@@ -521,10 +537,9 @@ mod tests {
 
     use super::{
         clear_from_keyring, clear_oauth_credentials, code_challenge_s256, credentials_path,
-        generate_pkce_pair, generate_state, load_from_keyring, load_oauth_credentials,
-        loopback_redirect_uri, parse_oauth_callback_query, parse_oauth_callback_request_target,
-        save_oauth_credentials, OAuthAuthorizationRequest, OAuthConfig, OAuthRefreshRequest,
-        OAuthTokenExchangeRequest, OAuthTokenSet,
+        generate_state, load_from_keyring, load_oauth_credentials, loopback_redirect_uri,
+        save_oauth_credentials, OAuthAuthorizationRequest, OAuthCallbackParams, OAuthConfig,
+        OAuthRefreshRequest, OAuthTokenExchangeRequest, OAuthTokenSet, PkceCodePair,
     };
 
     fn sample_config() -> OAuthConfig {
@@ -563,7 +578,7 @@ mod tests {
 
     #[test]
     fn generates_pkce_pair_and_state() {
-        let pair = generate_pkce_pair().expect("pkce pair");
+        let pair = PkceCodePair::generate().expect("pkce pair");
         let state = generate_state().expect("state");
         assert!(!pair.verifier.is_empty());
         assert!(!pair.challenge.is_empty());
@@ -573,7 +588,7 @@ mod tests {
     #[test]
     fn builds_authorize_url_and_form_requests() {
         let config = sample_config();
-        let pair = generate_pkce_pair().expect("pkce");
+        let pair = PkceCodePair::generate().expect("pkce");
         let url = OAuthAuthorizationRequest::from_config(
             &config,
             loopback_redirect_uri(4545),
@@ -648,17 +663,18 @@ mod tests {
 
     #[test]
     fn parses_callback_query_and_target() {
-        let params =
-            parse_oauth_callback_query("code=abc123&state=state-1&error_description=needs%20login")
-                .expect("parse query");
+        let params = OAuthCallbackParams::from_query(
+            "code=abc123&state=state-1&error_description=needs%20login",
+        )
+        .expect("parse query");
         assert_eq!(params.code.as_deref(), Some("abc123"));
         assert_eq!(params.state.as_deref(), Some("state-1"));
         assert_eq!(params.error_description.as_deref(), Some("needs login"));
 
-        let params = parse_oauth_callback_request_target("/callback?code=abc&state=xyz")
+        let params = OAuthCallbackParams::from_request_target("/callback?code=abc&state=xyz")
             .expect("parse callback target");
         assert_eq!(params.code.as_deref(), Some("abc"));
         assert_eq!(params.state.as_deref(), Some("xyz"));
-        assert!(parse_oauth_callback_request_target("/wrong?code=abc").is_err());
+        assert!(OAuthCallbackParams::from_request_target("/wrong?code=abc").is_err());
     }
 }

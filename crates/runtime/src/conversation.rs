@@ -5,20 +5,19 @@ pub use codineer_core::error::RuntimeError;
 
 use codineer_core::events::RuntimeEvent;
 use codineer_core::observer::RuntimeObserver;
+use codineer_core::prompt_types::SystemBlock;
 
 use crate::compact::{
     compact_session, estimate_session_tokens, CompactionConfig, CompactionResult,
 };
-use crate::config::RuntimeFeatureConfig;
-use crate::config::RuntimeHookConfig;
-use crate::hooks::{HookRunResult, HookRunner};
 use crate::permissions::{PermissionOutcome, PermissionPolicy, PermissionPrompter};
+use crate::recovery::{RecoveryEngine, RecoveryStrategy};
 use crate::session::{ContentBlock, ConversationMessage, Session};
 use crate::usage::{TokenUsage, UsageTracker};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApiRequest {
-    pub system_prompt: Vec<String>,
+    pub system_prompt: Vec<SystemBlock>,
     pub messages: Vec<ConversationMessage>,
 }
 
@@ -34,11 +33,15 @@ pub enum AssistantEvent {
     MessageStop,
 }
 
-pub trait ApiClient {
+pub trait ApiClient: Send + Sync {
     fn stream(&mut self, request: ApiRequest) -> Result<Vec<AssistantEvent>, RuntimeError>;
+
+    /// Returns the model name currently being used for requests.
+    /// This may differ from the originally configured model after a fallback.
+    fn active_model(&self) -> &str;
 }
 
-pub trait ToolExecutor {
+pub trait ToolExecutor: Send + Sync {
     fn execute(&mut self, tool_name: &str, input: &str) -> Result<String, ToolError>;
 
     /// Returns `true` if `tool_name` can safely run concurrently with other tools
@@ -138,10 +141,10 @@ pub struct ConversationRuntime<C, T, O: RuntimeObserver = ()> {
     api_client: C,
     tool_executor: T,
     permission_policy: PermissionPolicy,
-    system_prompt: Vec<String>,
+    system_prompt: Vec<SystemBlock>,
     max_iterations: usize,
     usage_tracker: UsageTracker,
-    hook_runner: HookRunner<RuntimeHookConfig>,
+    recovery: RecoveryEngine,
     observer: O,
 }
 
@@ -157,28 +160,7 @@ where
         api_client: C,
         tool_executor: T,
         permission_policy: PermissionPolicy,
-        system_prompt: Vec<String>,
-        observer: O,
-    ) -> Self {
-        Self::new_with_features(
-            session,
-            api_client,
-            tool_executor,
-            permission_policy,
-            system_prompt,
-            &RuntimeFeatureConfig::default(),
-            observer,
-        )
-    }
-
-    #[must_use]
-    pub fn new_with_features(
-        session: Session,
-        api_client: C,
-        tool_executor: T,
-        permission_policy: PermissionPolicy,
-        system_prompt: Vec<String>,
-        feature_config: &RuntimeFeatureConfig,
+        system_prompt: Vec<SystemBlock>,
         observer: O,
     ) -> Self {
         let usage_tracker = UsageTracker::from_session(&session);
@@ -190,12 +172,12 @@ where
             system_prompt,
             max_iterations: 200,
             usage_tracker,
-            hook_runner: HookRunner::from_feature_config(feature_config),
+            recovery: RecoveryEngine::new(true),
             observer,
         }
     }
 
-    pub fn update_system_prompt(&mut self, system_prompt: Vec<String>) {
+    pub fn update_system_prompt(&mut self, system_prompt: Vec<SystemBlock>) {
         self.system_prompt = system_prompt;
     }
 
@@ -245,26 +227,13 @@ where
                 turn: iterations,
             });
 
-            let request = ApiRequest {
-                system_prompt: self.system_prompt.clone(),
-                messages: self.session.messages.clone(),
-            };
-            let events = self.api_client.stream(request)?;
+            let events = self.stream_with_recovery()?;
             let (assistant_message, usage) = build_assistant_message(events)?;
             if let Some(usage) = usage {
                 self.usage_tracker.record(usage);
             }
-            let pending_tool_uses = assistant_message
-                .blocks
-                .iter()
-                .filter_map(|block| match block {
-                    ContentBlock::ToolUse { id, name, input } => {
-                        Some((id.clone(), name.clone(), input.clone()))
-                    }
-                    _ => None,
-                })
-                .collect::<Vec<_>>();
 
+            let pending_tool_uses = extract_tool_uses(&assistant_message);
             self.session.messages.push(assistant_message.clone());
             assistant_messages.push(assistant_message);
 
@@ -276,180 +245,12 @@ where
                 break;
             }
 
-            // ── Phase A: Sequential permission checks + pre-hooks ────────────
-            // Each element is either:
-            //   Ok(pre_hook)  → approved, ready to execute
-            //   Err(msg)      → already resolved (denied / hook blocked)
-            let mut slot_status: Vec<Result<HookRunResult, ConversationMessage>> =
-                Vec::with_capacity(pending_tool_uses.len());
-
-            for (tool_use_id, tool_name, input) in &pending_tool_uses {
-                let permission_outcome = if let Some(prompt) = prompter.as_mut() {
-                    self.permission_policy
-                        .authorize(tool_name, input, Some(*prompt))
-                } else {
-                    self.permission_policy.authorize(tool_name, input, None)
-                };
-
-                match permission_outcome {
-                    PermissionOutcome::Deny { reason } => {
-                        slot_status.push(Err(ConversationMessage::tool_result(
-                            tool_use_id.clone(),
-                            tool_name.clone(),
-                            reason,
-                            true,
-                        )));
-                    }
-                    PermissionOutcome::Allow => {
-                        let observer_directive = self.observer.on_event(
-                            &RuntimeEvent::PreToolUse {
-                                tool_name,
-                                tool_use_id,
-                                input,
-                            },
-                        );
-                        if observer_directive.is_denied() {
-                            let deny_msg = observer_directive
-                                .deny_reason()
-                                .unwrap_or("observer denied tool")
-                                .to_string();
-                            slot_status.push(Err(ConversationMessage::tool_result(
-                                tool_use_id.clone(),
-                                tool_name.clone(),
-                                deny_msg,
-                                true,
-                            )));
-                            continue;
-                        }
-
-                        let pre_hook = self.hook_runner.run_pre_tool_use(tool_name, input);
-                        if pre_hook.is_denied() {
-                            let deny_msg = format_hook_message(
-                                &pre_hook,
-                                &format!("PreToolUse hook denied tool `{tool_name}`"),
-                            );
-                            slot_status.push(Err(ConversationMessage::tool_result(
-                                tool_use_id.clone(),
-                                tool_name.clone(),
-                                deny_msg,
-                                true,
-                            )));
-                        } else {
-                            slot_status.push(Ok(pre_hook));
-                        }
-                    }
-                }
-            }
-
-            // Indices of tools that passed permission + pre-hook.
-            let ready_indices: Vec<usize> = slot_status
-                .iter()
-                .enumerate()
-                .filter_map(|(i, s)| s.is_ok().then_some(i))
-                .collect();
-
-            // ── Phase B: Tool execution (concurrent when safe, else sequential) ──
-            //
-            // exec_outputs[j]  corresponds to  ready_indices[j].
-            let exec_outputs: Vec<Result<String, ToolError>> = {
-                let all_concurrent = ready_indices.len() > 1
-                    && ready_indices.iter().all(|&i| {
-                        self.tool_executor
-                            .is_concurrency_safe(&pending_tool_uses[i].1)
-                    });
-
-                if all_concurrent {
-                    // Build the slice of (name, input) pairs for the batch call.
-                    let calls: Vec<(&str, &str)> = ready_indices
-                        .iter()
-                        .map(|&i| {
-                            (
-                                pending_tool_uses[i].1.as_str(),
-                                pending_tool_uses[i].2.as_str(),
-                            )
-                        })
-                        .collect();
-
-                    // Try executor's parallel batch; fall back to sequential
-                    // if it returns None (e.g. StaticToolExecutor in tests).
-                    if let Some(batch) = self.tool_executor.execute_batch(&calls) {
-                        batch
-                    } else {
-                        let mut out = Vec::with_capacity(ready_indices.len());
-                        for &i in &ready_indices {
-                            out.push(
-                                self.tool_executor
-                                    .execute(&pending_tool_uses[i].1, &pending_tool_uses[i].2),
-                            );
-                        }
-                        out
-                    }
-                } else {
-                    let mut out = Vec::with_capacity(ready_indices.len());
-                    for &i in &ready_indices {
-                        out.push(
-                            self.tool_executor
-                                .execute(&pending_tool_uses[i].1, &pending_tool_uses[i].2),
-                        );
-                    }
-                    out
-                }
-            };
-
-            // Map slot-index → execution result for Phase C lookup.
-            let mut exec_lookup: BTreeMap<usize, Result<String, ToolError>> =
-                ready_indices.into_iter().zip(exec_outputs).collect();
-
-            // ── Phase C: Post-hooks + session update (sequential, order preserved) ──
-            for (i, ((tool_use_id, tool_name, input), slot)) in
-                pending_tool_uses.into_iter().zip(slot_status).enumerate()
-            {
-                let result_message = match slot {
-                    Err(resolved) => resolved,
-                    Ok(pre_hook) => {
-                        let (mut output, mut is_error) = match exec_lookup
-                            .remove(&i)
-                            .expect("execution result must exist for every approved slot")
-                        {
-                            Ok(o) => (o, false),
-                            Err(e) => (e.to_string(), true),
-                        };
-                        output = merge_hook_feedback(pre_hook.messages(), output, false);
-
-                        let post_hook = self
-                            .hook_runner
-                            .run_post_tool_use(&tool_name, &input, &output, is_error);
-                        if post_hook.is_denied() {
-                            is_error = true;
-                        }
-                        output = merge_hook_feedback(
-                            post_hook.messages(),
-                            output,
-                            post_hook.is_denied(),
-                        );
-
-                        if is_error {
-                            let _ = self.observer.on_event(
-                                &RuntimeEvent::PostToolUseFailure {
-                                    tool_name: &tool_name,
-                                    tool_use_id: &tool_use_id,
-                                    error: &output,
-                                },
-                            );
-                        } else {
-                            let _ = self.observer.on_event(&RuntimeEvent::PostToolUse {
-                                tool_name: &tool_name,
-                                tool_use_id: &tool_use_id,
-                                output: &output,
-                                is_error: false,
-                            });
-                        }
-
-                        ConversationMessage::tool_result(tool_use_id, tool_name, output, is_error)
-                    }
-                };
-                self.session.messages.push(result_message.clone());
-                tool_results.push(result_message);
+            let slot_status = self.check_permissions(&pending_tool_uses, &mut prompter);
+            let exec_results = self.execute_tools(&pending_tool_uses, &slot_status);
+            let messages = self.apply_post_hooks(pending_tool_uses, slot_status, exec_results);
+            for msg in messages {
+                self.session.messages.push(msg.clone());
+                tool_results.push(msg);
             }
         }
 
@@ -459,6 +260,184 @@ where
             iterations,
             usage: self.usage_tracker.cumulative_usage(),
         })
+    }
+
+    /// Send API request with automatic recovery on transient failures.
+    fn stream_with_recovery(&mut self) -> Result<Vec<AssistantEvent>, RuntimeError> {
+        loop {
+            let request = ApiRequest {
+                system_prompt: self.system_prompt.clone(),
+                messages: self.session.messages.clone(),
+            };
+            match self.api_client.stream(request) {
+                Ok(events) => {
+                    self.recovery.reset();
+                    return Ok(events);
+                }
+                Err(RuntimeError::Api(ref msg)) => {
+                    let kind = self.recovery.classify(0, None, Some(msg));
+                    let strategy = self.recovery.select_strategy(&kind);
+                    self.recovery.record_attempt(&strategy);
+                    match strategy {
+                        RecoveryStrategy::Retry { .. }
+                        | RecoveryStrategy::AutocompactRetry
+                        | RecoveryStrategy::ReactiveCompactRetry
+                        | RecoveryStrategy::StreamingFallback => continue,
+                        RecoveryStrategy::GiveUp { reason } => {
+                            return Err(RuntimeError::RecoveryExhausted {
+                                kind: format!("{kind:?}"),
+                                reason,
+                            });
+                        }
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
+    /// Run permission checks and pre-hook observers for each pending tool use.
+    fn check_permissions(
+        &mut self,
+        pending: &[(String, String, String)],
+        prompter: &mut Option<&mut dyn PermissionPrompter>,
+    ) -> Vec<Result<Vec<String>, ConversationMessage>> {
+        let mut slots = Vec::with_capacity(pending.len());
+        for (tool_use_id, tool_name, input) in pending {
+            let outcome = if let Some(prompt) = prompter.as_mut() {
+                self.permission_policy
+                    .authorize(tool_name, input, Some(*prompt))
+            } else {
+                self.permission_policy.authorize(tool_name, input, None)
+            };
+            match outcome {
+                PermissionOutcome::Deny { reason } => {
+                    slots.push(Err(ConversationMessage::tool_result(
+                        tool_use_id.clone(),
+                        tool_name.clone(),
+                        reason,
+                        true,
+                    )));
+                }
+                PermissionOutcome::Allow => {
+                    let directive = self.observer.on_event(&RuntimeEvent::PreToolUse {
+                        tool_name,
+                        tool_use_id,
+                        input,
+                    });
+                    if directive.is_denied() {
+                        let deny_msg = directive
+                            .deny_reason()
+                            .unwrap_or("hook denied tool")
+                            .to_string();
+                        slots.push(Err(ConversationMessage::tool_result(
+                            tool_use_id.clone(),
+                            tool_name.clone(),
+                            deny_msg,
+                            true,
+                        )));
+                    } else {
+                        slots.push(Ok(directive.messages));
+                    }
+                }
+            }
+        }
+        slots
+    }
+
+    /// Execute approved tools (concurrently when safe, otherwise sequentially).
+    fn execute_tools(
+        &mut self,
+        pending: &[(String, String, String)],
+        slots: &[Result<Vec<String>, ConversationMessage>],
+    ) -> BTreeMap<usize, Result<String, ToolError>> {
+        let ready: Vec<usize> = slots
+            .iter()
+            .enumerate()
+            .filter_map(|(i, s)| s.is_ok().then_some(i))
+            .collect();
+
+        let outputs = self.run_tool_batch(pending, &ready);
+        ready.into_iter().zip(outputs).collect()
+    }
+
+    fn run_tool_batch(
+        &mut self,
+        pending: &[(String, String, String)],
+        ready: &[usize],
+    ) -> Vec<Result<String, ToolError>> {
+        let try_concurrent = ready.len() > 1
+            && ready
+                .iter()
+                .all(|&i| self.tool_executor.is_concurrency_safe(&pending[i].1));
+
+        if try_concurrent {
+            let calls: Vec<(&str, &str)> = ready
+                .iter()
+                .map(|&i| (pending[i].1.as_str(), pending[i].2.as_str()))
+                .collect();
+            if let Some(batch) = self.tool_executor.execute_batch(&calls) {
+                return batch;
+            }
+        }
+        ready
+            .iter()
+            .map(|&i| self.tool_executor.execute(&pending[i].1, &pending[i].2))
+            .collect()
+    }
+
+    /// Run post-hooks and build result messages for the session.
+    fn apply_post_hooks(
+        &mut self,
+        pending: Vec<(String, String, String)>,
+        slots: Vec<Result<Vec<String>, ConversationMessage>>,
+        mut exec_results: BTreeMap<usize, Result<String, ToolError>>,
+    ) -> Vec<ConversationMessage> {
+        let mut results = Vec::with_capacity(pending.len());
+        for (i, ((tool_use_id, tool_name, _input), slot)) in
+            pending.into_iter().zip(slots).enumerate()
+        {
+            let msg = match slot {
+                Err(resolved) => resolved,
+                Ok(pre_messages) => {
+                    let (mut output, mut is_error) = match exec_results
+                        .remove(&i)
+                        .expect("execution result must exist for every approved slot")
+                    {
+                        Ok(o) => (o, false),
+                        Err(e) => (e.to_string(), true),
+                    };
+                    output = merge_hook_feedback(&pre_messages, output, false);
+
+                    let post_directive = if is_error {
+                        self.observer.on_event(&RuntimeEvent::PostToolUseFailure {
+                            tool_name: &tool_name,
+                            tool_use_id: &tool_use_id,
+                            error: &output,
+                        })
+                    } else {
+                        self.observer.on_event(&RuntimeEvent::PostToolUse {
+                            tool_name: &tool_name,
+                            tool_use_id: &tool_use_id,
+                            output: &output,
+                            is_error: false,
+                        })
+                    };
+                    if post_directive.is_denied() {
+                        is_error = true;
+                    }
+                    output = merge_hook_feedback(
+                        &post_directive.messages,
+                        output,
+                        post_directive.is_denied(),
+                    );
+
+                    ConversationMessage::tool_result(tool_use_id, tool_name, output, is_error)
+                }
+            };
+            results.push(msg);
+        }
+        results
     }
 
     #[must_use]
@@ -477,6 +456,11 @@ where
     }
 
     #[must_use]
+    pub fn active_model(&self) -> &str {
+        self.api_client.active_model()
+    }
+
+    #[must_use]
     pub fn session(&self) -> &Session {
         &self.session
     }
@@ -485,6 +469,18 @@ where
     pub fn into_session(self) -> Session {
         self.session
     }
+}
+
+fn extract_tool_uses(msg: &ConversationMessage) -> Vec<(String, String, String)> {
+    msg.blocks
+        .iter()
+        .filter_map(|block| match block {
+            ContentBlock::ToolUse { id, name, input } => {
+                Some((id.clone(), name.clone(), input.clone()))
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 fn build_assistant_message(
@@ -532,14 +528,6 @@ fn flush_text_block(text: &mut String, blocks: &mut Vec<ContentBlock>) {
     }
 }
 
-fn format_hook_message(result: &HookRunResult, fallback: &str) -> String {
-    if result.messages().is_empty() {
-        fallback.to_string()
-    } else {
-        result.messages().join("\n")
-    }
-}
-
 fn merge_hook_feedback(messages: &[String], output: String, denied: bool) -> String {
     if messages.is_empty() {
         return output;
@@ -558,7 +546,7 @@ fn merge_hook_feedback(messages: &[String], output: String, denied: bool) -> Str
     sections.join("\n\n")
 }
 
-type ToolHandler = Box<dyn FnMut(&str) -> Result<String, ToolError>>;
+type ToolHandler = Box<dyn Fn(&str) -> Result<String, ToolError> + Send + Sync>;
 
 #[derive(Default)]
 pub struct StaticToolExecutor {
@@ -575,7 +563,7 @@ impl StaticToolExecutor {
     pub fn register(
         mut self,
         tool_name: impl Into<String>,
-        handler: impl FnMut(&str) -> Result<String, ToolError> + 'static,
+        handler: impl Fn(&str) -> Result<String, ToolError> + Send + Sync + 'static,
     ) -> Self {
         self.handlers.insert(tool_name.into(), Box::new(handler));
         self
@@ -585,7 +573,7 @@ impl StaticToolExecutor {
 impl ToolExecutor for StaticToolExecutor {
     fn execute(&mut self, tool_name: &str, input: &str) -> Result<String, ToolError> {
         self.handlers
-            .get_mut(tool_name)
+            .get(tool_name)
             .ok_or_else(|| ToolError::new(format!("unknown tool: {tool_name}")))?(input)
     }
 }
@@ -597,6 +585,8 @@ mod tests {
         StaticToolExecutor,
     };
     use crate::compact::CompactionConfig;
+    use crate::config::RuntimeHookConfig;
+    use crate::hooks::HookDispatcher;
     use crate::permissions::{
         PermissionMode, PermissionPolicy, PermissionPromptDecision, PermissionPrompter,
         PermissionRequest,
@@ -604,6 +594,7 @@ mod tests {
     use crate::prompt::{ProjectContext, SystemPromptBuilder};
     use crate::session::{ContentBlock, MessageRole, Session};
     use crate::usage::TokenUsage;
+    use codineer_core::prompt_types::SystemBlock;
     use std::path::PathBuf;
 
     struct ScriptedApiClient {
@@ -611,6 +602,10 @@ mod tests {
     }
 
     impl ApiClient for ScriptedApiClient {
+        fn active_model(&self) -> &str {
+            "test-model"
+        }
+
         fn stream(&mut self, request: ApiRequest) -> Result<Vec<AssistantEvent>, RuntimeError> {
             self.call_count += 1;
             match self.call_count {
@@ -731,6 +726,10 @@ mod tests {
 
         struct SingleCallApiClient;
         impl ApiClient for SingleCallApiClient {
+            fn active_model(&self) -> &str {
+                "test-model"
+            }
+
             fn stream(&mut self, request: ApiRequest) -> Result<Vec<AssistantEvent>, RuntimeError> {
                 if request
                     .messages
@@ -758,7 +757,7 @@ mod tests {
             SingleCallApiClient,
             StaticToolExecutor::new(),
             PermissionPolicy::new(PermissionMode::WorkspaceWrite),
-            vec!["system".to_string()],
+            SystemBlock::from_plain("system"),
             (),
         );
 
@@ -776,9 +775,12 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn denies_tool_use_when_pre_tool_hook_blocks() {
-        use crate::config::{RuntimeFeatureConfig, RuntimeHookConfig};
         struct SingleCallApiClient;
         impl ApiClient for SingleCallApiClient {
+            fn active_model(&self) -> &str {
+                "test-model"
+            }
+
             fn stream(&mut self, request: ApiRequest) -> Result<Vec<AssistantEvent>, RuntimeError> {
                 if request
                     .messages
@@ -801,11 +803,11 @@ mod tests {
             }
         }
 
-        let deny_config = RuntimeFeatureConfig::default().with_hooks(RuntimeHookConfig::new(
+        let observer = HookDispatcher::from_hook_config(&RuntimeHookConfig::new(
             vec!["printf 'blocked by hook'; exit 2".to_string()],
             Vec::new(),
         ));
-        let mut runtime = ConversationRuntime::new_with_features(
+        let mut runtime = ConversationRuntime::new(
             Session::new(),
             SingleCallApiClient,
             StaticToolExecutor::new().register("blocked", |_input| {
@@ -813,9 +815,8 @@ mod tests {
             }),
             PermissionPolicy::new(PermissionMode::DangerFullAccess)
                 .with_tool_requirement("blocked", PermissionMode::WorkspaceWrite),
-            vec!["system".to_string()],
-            &deny_config,
-            (),
+            SystemBlock::from_plain("system"),
+            observer,
         );
 
         let summary = runtime
@@ -842,12 +843,15 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn appends_post_tool_hook_feedback_to_tool_result() {
-        use crate::config::{RuntimeFeatureConfig, RuntimeHookConfig};
         struct TwoCallApiClient {
             calls: usize,
         }
 
         impl ApiClient for TwoCallApiClient {
+            fn active_model(&self) -> &str {
+                "test-model"
+            }
+
             fn stream(&mut self, request: ApiRequest) -> Result<Vec<AssistantEvent>, RuntimeError> {
                 self.calls += 1;
                 match self.calls {
@@ -874,19 +878,18 @@ mod tests {
             }
         }
 
-        let hook_config = RuntimeFeatureConfig::default().with_hooks(RuntimeHookConfig::new(
+        let observer = HookDispatcher::from_hook_config(&RuntimeHookConfig::new(
             vec!["printf 'pre hook ran'".to_string()],
             vec!["printf 'post hook ran'".to_string()],
         ));
-        let mut runtime = ConversationRuntime::new_with_features(
+        let mut runtime = ConversationRuntime::new(
             Session::new(),
             TwoCallApiClient { calls: 0 },
             StaticToolExecutor::new().register("add", |_input| Ok("4".to_string())),
             PermissionPolicy::new(PermissionMode::DangerFullAccess)
                 .with_tool_requirement("add", PermissionMode::WorkspaceWrite),
-            vec!["system".to_string()],
-            &hook_config,
-            (),
+            SystemBlock::from_plain("system"),
+            observer,
         );
 
         let summary = runtime
@@ -922,6 +925,10 @@ mod tests {
     fn reconstructs_usage_tracker_from_restored_session() {
         struct SimpleApi;
         impl ApiClient for SimpleApi {
+            fn active_model(&self) -> &str {
+                "test-model"
+            }
+
             fn stream(
                 &mut self,
                 _request: ApiRequest,
@@ -953,7 +960,7 @@ mod tests {
             SimpleApi,
             StaticToolExecutor::new(),
             PermissionPolicy::new(PermissionMode::DangerFullAccess),
-            vec!["system".to_string()],
+            SystemBlock::from_plain("system"),
             (),
         );
 
@@ -965,6 +972,10 @@ mod tests {
     fn compacts_session_after_turns() {
         struct SimpleApi;
         impl ApiClient for SimpleApi {
+            fn active_model(&self) -> &str {
+                "test-model"
+            }
+
             fn stream(
                 &mut self,
                 _request: ApiRequest,
@@ -981,7 +992,7 @@ mod tests {
             SimpleApi,
             StaticToolExecutor::new(),
             PermissionPolicy::new(PermissionMode::DangerFullAccess),
-            vec!["system".to_string()],
+            SystemBlock::from_plain("system"),
             (),
         );
         runtime.run_turn("a", None).expect("turn a");

@@ -4,6 +4,8 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use codineer_core::prompt_types::{CacheControl, SystemBlock};
+
 use crate::config::{ConfigError, ConfigLoader, RuntimeConfig};
 use lsp::LspContextEnrichment;
 
@@ -62,7 +64,8 @@ impl ProjectContext {
         current_date: impl Into<String>,
     ) -> std::io::Result<Self> {
         let cwd = cwd.into();
-        let instruction_files = discover_instruction_files(&cwd)?;
+        let loader = InstructionLoader::new(&cwd);
+        let instruction_files = loader.load()?;
         Ok(Self {
             cwd,
             current_date: current_date.into(),
@@ -81,6 +84,179 @@ impl ProjectContext {
         context.git_diff = read_git_diff(&context.cwd);
         Ok(context)
     }
+}
+
+// ── Instruction file loader ─────────────────────────────────────────
+
+const MAX_INCLUDE_DEPTH: usize = 5;
+
+/// Discovers and loads instruction files from the filesystem.
+///
+/// Supports:
+/// - Ancestor chain discovery (root → cwd)
+/// - Global `~/.codineer/CODINEER.md`
+/// - `rules/*.md` glob inside `.codineer/` directories
+/// - `@include path/to/file.md` recursive expansion
+/// - Per-file and total character budgets
+pub struct InstructionLoader {
+    cwd: PathBuf,
+    home_dir: Option<PathBuf>,
+    max_file_chars: usize,
+    max_total_chars: usize,
+}
+
+impl InstructionLoader {
+    #[must_use]
+    pub fn new(cwd: impl Into<PathBuf>) -> Self {
+        Self {
+            cwd: cwd.into(),
+            home_dir: dirs_home(),
+            max_file_chars: MAX_INSTRUCTION_FILE_CHARS,
+            max_total_chars: MAX_TOTAL_INSTRUCTION_CHARS,
+        }
+    }
+
+    #[must_use]
+    pub fn with_home(mut self, home: impl Into<PathBuf>) -> Self {
+        self.home_dir = Some(home.into());
+        self
+    }
+
+    #[must_use]
+    pub fn with_limits(mut self, per_file: usize, total: usize) -> Self {
+        self.max_file_chars = per_file;
+        self.max_total_chars = total;
+        self
+    }
+
+    /// Load all instruction files: global → ancestor chain → cwd.
+    pub fn load(&self) -> std::io::Result<Vec<ContextFile>> {
+        let mut files = Vec::new();
+
+        if let Some(ref home) = self.home_dir {
+            let global_file = home.join(".codineer").join("CODINEER.md");
+            push_context_file(&mut files, global_file)?;
+        }
+
+        let mut directories = Vec::new();
+        let mut cursor = Some(self.cwd.as_path());
+        while let Some(dir) = cursor {
+            directories.push(dir.to_path_buf());
+            cursor = dir.parent();
+        }
+        directories.reverse();
+
+        for dir in &directories {
+            self.discover_dir(dir, &mut files)?;
+        }
+
+        let mut files = dedupe_instruction_files(files);
+        for file in &mut files {
+            *file = self.expand_includes(file, 0)?;
+        }
+        files = self.apply_budgets(files);
+        Ok(files)
+    }
+
+    /// Discover files from a single directory (fixed names + rules/*.md glob).
+    fn discover_dir(&self, dir: &Path, files: &mut Vec<ContextFile>) -> std::io::Result<()> {
+        let codineer_dir = dir.join(".codineer");
+        push_context_file(files, codineer_dir.join("CODINEER.md"))?;
+        push_context_file(files, dir.join("CODINEER.md"))?;
+
+        if codineer_dir.is_dir() {
+            let rules_dir = codineer_dir.join("rules");
+            if rules_dir.is_dir() {
+                let mut rule_paths: Vec<PathBuf> = Vec::new();
+                for entry in fs::read_dir(&rules_dir)? {
+                    let entry = entry?;
+                    let path = entry.path();
+                    if path.extension().is_some_and(|e| e == "md") && path.is_file() {
+                        rule_paths.push(path);
+                    }
+                }
+                rule_paths.sort();
+                for path in rule_paths {
+                    push_context_file(files, path)?;
+                }
+            }
+        }
+
+        push_context_file(files, dir.join("CODINEER.local.md"))?;
+        push_context_file(files, codineer_dir.join("instructions.md"))?;
+        Ok(())
+    }
+
+    /// Recursively expand `@include path/to/file.md` directives in file content.
+    fn expand_includes(&self, file: &ContextFile, depth: usize) -> std::io::Result<ContextFile> {
+        if depth >= MAX_INCLUDE_DEPTH || !file.content.contains("@include ") {
+            return Ok(file.clone());
+        }
+        let base_dir = file.path.parent().unwrap_or(&self.cwd);
+        let mut expanded = String::with_capacity(file.content.len());
+        let mut lines = file.content.lines().peekable();
+        while let Some(line) = lines.next() {
+            if let Some(include_path) = line.strip_prefix("@include ").map(str::trim) {
+                if !include_path.is_empty() {
+                    let resolved = base_dir.join(include_path);
+                    match fs::read_to_string(&resolved) {
+                        Ok(included_content) => {
+                            let included_file = ContextFile {
+                                path: resolved,
+                                content: included_content,
+                            };
+                            let sub = self.expand_includes(&included_file, depth + 1)?;
+                            expanded.push_str(&sub.content);
+                            if !sub.content.ends_with('\n') && lines.peek().is_some() {
+                                expanded.push('\n');
+                            }
+                            continue;
+                        }
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(e) => return Err(e),
+                    }
+                }
+            }
+            expanded.push_str(line);
+            if lines.peek().is_some() {
+                expanded.push('\n');
+            }
+        }
+        Ok(ContextFile {
+            path: file.path.clone(),
+            content: expanded,
+        })
+    }
+
+    /// Apply per-file and total truncation budgets.
+    fn apply_budgets(&self, files: Vec<ContextFile>) -> Vec<ContextFile> {
+        let mut result = Vec::with_capacity(files.len());
+        let mut total_chars = 0;
+        for file in files {
+            if total_chars >= self.max_total_chars {
+                break;
+            }
+            let remaining = self.max_total_chars - total_chars;
+            let budget = remaining.min(self.max_file_chars);
+            let content = if file.content.len() > budget {
+                let mut truncated = file.content[..budget].to_string();
+                truncated.push_str("\n... (truncated)");
+                truncated
+            } else {
+                file.content.clone()
+            };
+            total_chars += content.len();
+            result.push(ContextFile {
+                path: file.path,
+                content,
+            });
+        }
+        result
+    }
+}
+
+fn dirs_home() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(PathBuf::from)
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -141,8 +317,44 @@ impl SystemPromptBuilder {
         self
     }
 
+    /// Build segmented system prompt blocks.
+    ///
+    /// Everything before `SYSTEM_PROMPT_DYNAMIC_BOUNDARY` is static and gets
+    /// `CacheControl::global_1h()`. Everything after is dynamic with
+    /// `CacheControl::ephemeral()`.
     #[must_use]
-    pub fn build(&self) -> Vec<String> {
+    pub fn build(&self) -> Vec<SystemBlock> {
+        let mut static_parts = Vec::new();
+        static_parts.push(get_simple_intro_section(self.output_style_name.is_some()));
+        if let (Some(name), Some(prompt)) = (&self.output_style_name, &self.output_style_prompt) {
+            static_parts.push(format!("# Output Style: {name}\n{prompt}"));
+        }
+        static_parts.push(get_simple_system_section());
+        static_parts.push(get_simple_doing_tasks_section());
+        static_parts.push(get_actions_section());
+
+        let mut dynamic_parts = Vec::new();
+        dynamic_parts.push(self.environment_section());
+        if let Some(project_context) = &self.project_context {
+            dynamic_parts.push(render_project_context(project_context));
+            if !project_context.instruction_files.is_empty() {
+                dynamic_parts.push(render_instruction_files(&project_context.instruction_files));
+            }
+        }
+        if let Some(config) = &self.config {
+            dynamic_parts.push(render_config_section(config));
+        }
+        dynamic_parts.extend(self.append_sections.iter().cloned());
+
+        vec![
+            SystemBlock::cached(static_parts.join("\n\n"), CacheControl::global_1h()),
+            SystemBlock::cached(dynamic_parts.join("\n\n"), CacheControl::ephemeral()),
+        ]
+    }
+
+    /// Build raw string sections (for PromptCache and legacy callers).
+    #[must_use]
+    pub fn build_raw_sections(&self) -> Vec<String> {
         let mut sections = Vec::new();
         sections.push(get_simple_intro_section(self.output_style_name.is_some()));
         if let (Some(name), Some(prompt)) = (&self.output_style_name, &self.output_style_prompt) {
@@ -168,7 +380,7 @@ impl SystemPromptBuilder {
 
     #[must_use]
     pub fn render(&self) -> String {
-        self.build().join("\n\n")
+        self.build_raw_sections().join("\n\n")
     }
 
     pub(crate) fn environment_section(&self) -> String {
@@ -201,32 +413,32 @@ impl SystemPromptBuilder {
 /// Dynamic sections are rebuilt only when the input hash changes.
 #[derive(Debug)]
 pub struct PromptCache {
-    static_segments: Vec<String>,
+    static_text: Option<String>,
     cached_dynamic_hash: u64,
-    cached_full: Vec<String>,
+    cached_full: Vec<SystemBlock>,
 }
 
 impl PromptCache {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            static_segments: Vec::new(),
+            static_text: None,
             cached_dynamic_hash: 0,
             cached_full: Vec::new(),
         }
     }
 
-    /// Build prompt sections, reusing cached static segments.
+    /// Build prompt blocks, reusing cached static text.
     /// Only regenerates when dynamic inputs change.
-    pub fn build(&mut self, builder: &SystemPromptBuilder) -> Vec<String> {
-        if self.static_segments.is_empty() {
-            self.static_segments = Self::compute_static(builder.output_style_name.is_some());
+    pub fn build(&mut self, builder: &SystemPromptBuilder) -> Vec<SystemBlock> {
+        if self.static_text.is_none() {
+            let mut static_parts = Self::compute_static(builder.output_style_name.is_some());
             if let (Some(name), Some(prompt)) =
                 (&builder.output_style_name, &builder.output_style_prompt)
             {
-                self.static_segments
-                    .insert(1, format!("# Output Style: {name}\n{prompt}"));
+                static_parts.insert(1, format!("# Output Style: {name}\n{prompt}"));
             }
+            self.static_text = Some(static_parts.join("\n\n"));
         }
 
         let dynamic_hash = self.hash_dynamic(builder);
@@ -234,23 +446,30 @@ impl PromptCache {
             return self.cached_full.clone();
         }
 
-        let mut sections = self.static_segments.clone();
-        sections.push(SYSTEM_PROMPT_DYNAMIC_BOUNDARY.to_string());
-        sections.push(builder.environment_section());
+        let mut dynamic_parts = Vec::new();
+        dynamic_parts.push(builder.environment_section());
         if let Some(project_context) = &builder.project_context {
-            sections.push(render_project_context(project_context));
+            dynamic_parts.push(render_project_context(project_context));
             if !project_context.instruction_files.is_empty() {
-                sections.push(render_instruction_files(&project_context.instruction_files));
+                dynamic_parts.push(render_instruction_files(&project_context.instruction_files));
             }
         }
         if let Some(config) = &builder.config {
-            sections.push(render_config_section(config));
+            dynamic_parts.push(render_config_section(config));
         }
-        sections.extend(builder.append_sections.iter().cloned());
+        dynamic_parts.extend(builder.append_sections.iter().cloned());
+
+        let blocks = vec![
+            SystemBlock::cached(
+                self.static_text.clone().unwrap_or_default(),
+                CacheControl::global_1h(),
+            ),
+            SystemBlock::cached(dynamic_parts.join("\n\n"), CacheControl::ephemeral()),
+        ];
 
         self.cached_dynamic_hash = dynamic_hash;
-        self.cached_full = sections.clone();
-        sections
+        self.cached_full = blocks.clone();
+        blocks
     }
 
     fn compute_static(has_output_style: bool) -> Vec<String> {
@@ -291,29 +510,6 @@ impl Default for PromptCache {
 #[must_use]
 pub fn prepend_bullets(items: Vec<String>) -> Vec<String> {
     items.into_iter().map(|item| format!(" - {item}")).collect()
-}
-
-fn discover_instruction_files(cwd: &Path) -> std::io::Result<Vec<ContextFile>> {
-    let mut directories = Vec::new();
-    let mut cursor = Some(cwd);
-    while let Some(dir) = cursor {
-        directories.push(dir.to_path_buf());
-        cursor = dir.parent();
-    }
-    directories.reverse();
-
-    let mut files = Vec::new();
-    for dir in directories {
-        for candidate in [
-            dir.join(".codineer").join("CODINEER.md"),
-            dir.join("CODINEER.md"),
-            dir.join("CODINEER.local.md"),
-            dir.join(".codineer").join("instructions.md"),
-        ] {
-            push_context_file(&mut files, candidate)?;
-        }
-    }
-    Ok(dedupe_instruction_files(files))
 }
 
 fn push_context_file(files: &mut Vec<ContextFile>, path: PathBuf) -> std::io::Result<()> {
@@ -511,7 +707,7 @@ pub fn load_system_prompt(
     current_date: impl Into<String>,
     os_name: impl Into<String>,
     os_version: impl Into<String>,
-) -> Result<Vec<String>, PromptBuildError> {
+) -> Result<Vec<SystemBlock>, PromptBuildError> {
     load_system_prompt_with_lsp(cwd, current_date, os_name, os_version, None)
 }
 
@@ -521,7 +717,7 @@ pub fn load_system_prompt_with_lsp(
     os_name: impl Into<String>,
     os_version: impl Into<String>,
     lsp_context: Option<&LspContextEnrichment>,
-) -> Result<Vec<String>, PromptBuildError> {
+) -> Result<Vec<SystemBlock>, PromptBuildError> {
     let cwd = cwd.into();
     let project_context = ProjectContext::discover_with_git(&cwd, current_date.into())?;
     let config = ConfigLoader::default_for(&cwd).load()?;
@@ -838,13 +1034,13 @@ mod tests {
         std::env::set_var("HOME", &root);
         std::env::set_var("CODINEER_CONFIG_HOME", root.join("missing-home"));
         std::env::set_current_dir(&root).expect("change cwd");
-        let prompt = super::load_system_prompt(&root, "2026-03-31", "linux", "6.8")
-            .expect("system prompt should load")
-            .join(
-                "
-
-",
-            );
+        let blocks = super::load_system_prompt(&root, "2026-03-31", "linux", "6.8")
+            .expect("system prompt should load");
+        let prompt = blocks
+            .iter()
+            .map(|b| b.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n\n");
         std::env::set_current_dir(previous).expect("restore cwd");
         if let Some(value) = original_home {
             std::env::set_var("HOME", value);
@@ -961,8 +1157,7 @@ mod tests {
         let first = cache.build(&builder);
         let second = cache.build(&builder);
         assert_eq!(first, second);
-        // static_segments are populated
-        assert!(!cache.static_segments.is_empty());
+        assert!(cache.static_text.is_some());
     }
 
     #[test]
@@ -990,5 +1185,103 @@ mod tests {
             });
         let v2 = cache.build(&builder2);
         assert_ne!(v1, v2);
+    }
+
+    // ── InstructionLoader tests ─────────────────────────────────────
+
+    #[test]
+    fn instruction_loader_discovers_rules_glob() {
+        let root = temp_dir();
+        let rules_dir = root.join(".codineer").join("rules");
+        fs::create_dir_all(&rules_dir).expect("rules dir");
+        fs::write(rules_dir.join("a-style.md"), "style rules").expect("write");
+        fs::write(rules_dir.join("b-tests.md"), "test rules").expect("write");
+        fs::write(rules_dir.join("not-a-rule.txt"), "ignored").expect("write");
+
+        let loader = super::InstructionLoader::new(&root).with_home(PathBuf::from("/nonexistent"));
+        let files = loader.load().expect("load");
+        let names: Vec<&str> = files
+            .iter()
+            .map(|f| f.path.file_name().unwrap().to_str().unwrap())
+            .collect();
+        assert!(names.contains(&"a-style.md"));
+        assert!(names.contains(&"b-tests.md"));
+        assert!(!names.contains(&"not-a-rule.txt"));
+        let style_idx = names.iter().position(|n| *n == "a-style.md").unwrap();
+        let test_idx = names.iter().position(|n| *n == "b-tests.md").unwrap();
+        assert!(
+            style_idx < test_idx,
+            "rules should be sorted alphabetically"
+        );
+    }
+
+    #[test]
+    fn instruction_loader_expands_includes() {
+        let root = temp_dir();
+        fs::create_dir_all(&root).expect("dir");
+        fs::write(root.join("shared.md"), "shared content").expect("write shared");
+        fs::write(root.join("CODINEER.md"), "base\n@include shared.md\nend").expect("write main");
+
+        let loader = super::InstructionLoader::new(&root).with_home(PathBuf::from("/nonexistent"));
+        let files = loader.load().expect("load");
+        let main = files
+            .iter()
+            .find(|f| f.path.file_name().unwrap() == "CODINEER.md")
+            .unwrap();
+        assert!(
+            main.content.contains("shared content"),
+            "include should be expanded"
+        );
+        assert!(main.content.contains("base"), "original content preserved");
+        assert!(
+            main.content.contains("end"),
+            "content after include preserved"
+        );
+    }
+
+    #[test]
+    fn instruction_loader_respects_max_include_depth() {
+        let root = temp_dir();
+        fs::create_dir_all(&root).expect("dir");
+        fs::write(root.join("CODINEER.md"), "@include a.md").expect("write");
+        fs::write(root.join("a.md"), "@include b.md").expect("write a");
+        fs::write(root.join("b.md"), "@include c.md").expect("write b");
+        fs::write(root.join("c.md"), "@include d.md").expect("write c");
+        fs::write(root.join("d.md"), "@include e.md").expect("write d");
+        fs::write(root.join("e.md"), "@include f.md").expect("write e");
+        fs::write(root.join("f.md"), "leaf").expect("write f");
+
+        let loader = super::InstructionLoader::new(&root).with_home(PathBuf::from("/nonexistent"));
+        let files = loader.load().expect("load");
+        let main = files
+            .iter()
+            .find(|f| f.path.file_name().unwrap() == "CODINEER.md")
+            .unwrap();
+        assert!(
+            !main.content.contains("leaf"),
+            "should not expand beyond max depth"
+        );
+    }
+
+    #[test]
+    fn instruction_loader_applies_budgets() {
+        let root = temp_dir();
+        fs::create_dir_all(&root).expect("dir");
+        let big_content = "x".repeat(500);
+        fs::write(root.join("CODINEER.md"), &big_content).expect("write");
+
+        let loader = super::InstructionLoader::new(&root)
+            .with_home(PathBuf::from("/nonexistent"))
+            .with_limits(100, 200);
+        let files = loader.load().expect("load");
+        let main = files
+            .iter()
+            .find(|f| f.path.file_name().unwrap() == "CODINEER.md")
+            .unwrap();
+        assert!(
+            main.content.len() <= 120,
+            "should be truncated to per-file budget + truncation marker"
+        );
+        assert!(main.content.contains("... (truncated)"));
     }
 }

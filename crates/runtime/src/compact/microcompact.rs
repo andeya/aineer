@@ -4,6 +4,8 @@
 //! tools known to produce ephemeral output (e.g., bash, grep_search) while
 //! preserving results from tools with persistent effects (e.g., write_file).
 
+#![cfg_attr(not(test), allow(dead_code))]
+
 use std::collections::HashSet;
 
 /// Which tools' results can be safely cleared during microcompact.
@@ -22,13 +24,13 @@ static COMPACTABLE_TOOLS: &[&str] = &[
 ];
 
 #[derive(Debug)]
-pub struct MicrocompactStrategy {
+pub(crate) struct MicrocompactStrategy {
     compactable: HashSet<&'static str>,
     keep_recent: usize,
 }
 
 impl MicrocompactStrategy {
-    pub fn new(keep_recent: usize) -> Self {
+    pub(crate) fn new(keep_recent: usize) -> Self {
         Self {
             compactable: COMPACTABLE_TOOLS.iter().copied().collect(),
             keep_recent,
@@ -36,7 +38,7 @@ impl MicrocompactStrategy {
     }
 
     /// Check if any tool results are eligible for clearing.
-    pub fn has_clearable_results(&self, tool_results: &[(String, String)]) -> bool {
+    pub(crate) fn has_clearable_results(&self, tool_results: &[(String, String)]) -> bool {
         if tool_results.len() <= self.keep_recent {
             return false;
         }
@@ -50,7 +52,7 @@ impl MicrocompactStrategy {
     ///
     /// `tool_results` is `(tool_name, tool_result_content)` pairs.
     /// Results from the last `keep_recent` entries are never cleared.
-    pub fn apply(&self, tool_results: &mut [(String, String)]) -> usize {
+    pub(crate) fn apply(&self, tool_results: &mut [(String, String)]) -> usize {
         if tool_results.len() <= self.keep_recent {
             return 0;
         }

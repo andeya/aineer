@@ -5,30 +5,14 @@ use std::path::PathBuf;
 use crate::json::JsonValue;
 use crate::sandbox::SandboxConfig;
 
+pub use codineer_core::config::ConfigSource;
+pub use mcp::{
+    McpConfigCollection, McpManagedProxyServerConfig, McpOAuthConfig, McpRemoteServerConfig,
+    McpSdkServerConfig, McpServerConfig, McpStdioServerConfig, McpTransport,
+    McpWebSocketServerConfig, ScopedMcpServerConfig,
+};
+
 pub const CODINEER_SETTINGS_SCHEMA_NAME: &str = "SettingsSchema";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum ConfigSource {
-    User,
-    Project,
-    Local,
-}
-
-impl ConfigSource {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::User => "user",
-            Self::Project => "project",
-            Self::Local => "local",
-        }
-    }
-}
-
-impl Display for ConfigSource {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResolvedPermissionMode {
@@ -114,78 +98,6 @@ pub struct RuntimeHookConfig {
     pub(crate) commands: BTreeMap<String, Vec<String>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct McpConfigCollection {
-    pub(crate) servers: BTreeMap<String, ScopedMcpServerConfig>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ScopedMcpServerConfig {
-    pub scope: ConfigSource,
-    pub config: McpServerConfig,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum McpTransport {
-    Stdio,
-    Sse,
-    Http,
-    Ws,
-    Sdk,
-    ManagedProxy,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum McpServerConfig {
-    Stdio(McpStdioServerConfig),
-    Sse(McpRemoteServerConfig),
-    Http(McpRemoteServerConfig),
-    Ws(McpWebSocketServerConfig),
-    Sdk(McpSdkServerConfig),
-    ManagedProxy(McpManagedProxyServerConfig),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct McpStdioServerConfig {
-    pub command: String,
-    pub args: Vec<String>,
-    pub env: BTreeMap<String, String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct McpRemoteServerConfig {
-    pub url: String,
-    pub headers: BTreeMap<String, String>,
-    pub headers_helper: Option<String>,
-    pub oauth: Option<McpOAuthConfig>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct McpWebSocketServerConfig {
-    pub url: String,
-    pub headers: BTreeMap<String, String>,
-    pub headers_helper: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct McpSdkServerConfig {
-    pub name: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct McpManagedProxyServerConfig {
-    pub url: String,
-    pub id: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct McpOAuthConfig {
-    pub client_id: Option<String>,
-    pub callback_port: Option<u16>,
-    pub auth_server_metadata_url: Option<String>,
-    pub xaa: Option<bool>,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OAuthConfig {
     pub client_id: String,
@@ -194,6 +106,23 @@ pub struct OAuthConfig {
     pub callback_port: Option<u16>,
     pub manual_redirect_url: Option<String>,
     pub scopes: Vec<String>,
+}
+
+impl Default for OAuthConfig {
+    fn default() -> Self {
+        Self {
+            client_id: String::from("df03b862-78fe-4a2b-bb24-426ac30897b7"),
+            authorize_url: String::from("https://platform.codineer.dev/oauth/authorize"),
+            token_url: String::from("https://platform.codineer.dev/v1/oauth/token"),
+            callback_port: None,
+            manual_redirect_url: None,
+            scopes: vec![
+                String::from("user:profile"),
+                String::from("user:inference"),
+                String::from("user:sessions:codineer"),
+            ],
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -532,39 +461,6 @@ impl RuntimeHookConfig {
         for (event, cmds) in &other.commands {
             let entry = self.commands.entry(event.clone()).or_default();
             extend_unique(entry, cmds);
-        }
-    }
-}
-
-impl McpConfigCollection {
-    #[must_use]
-    pub fn servers(&self) -> &BTreeMap<String, ScopedMcpServerConfig> {
-        &self.servers
-    }
-
-    #[must_use]
-    pub fn get(&self, name: &str) -> Option<&ScopedMcpServerConfig> {
-        self.servers.get(name)
-    }
-}
-
-impl ScopedMcpServerConfig {
-    #[must_use]
-    pub fn transport(&self) -> McpTransport {
-        self.config.transport()
-    }
-}
-
-impl McpServerConfig {
-    #[must_use]
-    pub fn transport(&self) -> McpTransport {
-        match self {
-            Self::Stdio(_) => McpTransport::Stdio,
-            Self::Sse(_) => McpTransport::Sse,
-            Self::Http(_) => McpTransport::Http,
-            Self::Ws(_) => McpTransport::Ws,
-            Self::Sdk(_) => McpTransport::Sdk,
-            Self::ManagedProxy(_) => McpTransport::ManagedProxy,
         }
     }
 }

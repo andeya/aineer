@@ -71,20 +71,30 @@ pub fn check_token_budget(
 
     let max_output = match max_output_tokens {
         Some(max) => max,
-        None => return BudgetDecision::Stop { diminishing_returns: false },
+        None => {
+            return BudgetDecision::Stop {
+                diminishing_returns: false,
+            }
+        }
     };
 
     let hit_cap = output_tokens_this_turn as f64 >= max_output as f64 * COMPLETION_THRESHOLD;
     if !hit_cap {
-        return BudgetDecision::Stop { diminishing_returns: false };
+        return BudgetDecision::Stop {
+            diminishing_returns: false,
+        };
     }
 
     if tracker.continuation_count >= MAX_CONTINUATIONS {
-        return BudgetDecision::Stop { diminishing_returns: false };
+        return BudgetDecision::Stop {
+            diminishing_returns: false,
+        };
     }
 
     if tracker.continuation_count > 0 && tracker.last_delta_tokens < DIMINISHING_THRESHOLD {
-        return BudgetDecision::Stop { diminishing_returns: true };
+        return BudgetDecision::Stop {
+            diminishing_returns: true,
+        };
     }
 
     tracker.continuation_count += 1;
@@ -99,7 +109,9 @@ pub fn check_token_budget(
         )
     };
 
-    BudgetDecision::Continue { nudge_message: nudge }
+    BudgetDecision::Continue {
+        nudge_message: nudge,
+    }
 }
 
 #[cfg(test)]
@@ -110,7 +122,12 @@ mod tests {
     fn no_budget_means_stop() {
         let mut tracker = BudgetTracker::new();
         let decision = check_token_budget(&mut tracker, false, None, 1000);
-        assert_eq!(decision, BudgetDecision::Stop { diminishing_returns: false });
+        assert_eq!(
+            decision,
+            BudgetDecision::Stop {
+                diminishing_returns: false
+            }
+        );
     }
 
     #[test]
@@ -118,7 +135,12 @@ mod tests {
         let mut tracker = BudgetTracker::new();
         // 50% of cap — not hitting threshold
         let decision = check_token_budget(&mut tracker, false, Some(4096), 2000);
-        assert_eq!(decision, BudgetDecision::Stop { diminishing_returns: false });
+        assert_eq!(
+            decision,
+            BudgetDecision::Stop {
+                diminishing_returns: false
+            }
+        );
     }
 
     #[test]
@@ -155,7 +177,12 @@ mod tests {
         let mut tracker = BudgetTracker::new();
         tracker.continuation_count = MAX_CONTINUATIONS;
         let decision = check_token_budget(&mut tracker, false, Some(4096), 3900);
-        assert_eq!(decision, BudgetDecision::Stop { diminishing_returns: false });
+        assert_eq!(
+            decision,
+            BudgetDecision::Stop {
+                diminishing_returns: false
+            }
+        );
     }
 
     #[test]

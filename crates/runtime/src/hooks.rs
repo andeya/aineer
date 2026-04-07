@@ -2,27 +2,12 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::process::Command;
 
-use serde_json::json;
+use serde_json::{json, Value};
 
 use codineer_core::events::{EventKind, RuntimeEvent};
 use codineer_core::observer::{Decision, EventDirective, RuntimeObserver};
 
 use crate::config::{RuntimeFeatureConfig, RuntimeHookConfig};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HookEvent {
-    PreToolUse,
-    PostToolUse,
-}
-
-impl HookEvent {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::PreToolUse => "PreToolUse",
-            Self::PostToolUse => "PostToolUse",
-        }
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HookRunResult {
@@ -50,130 +35,153 @@ impl HookRunResult {
     }
 }
 
-pub trait HookCommandSource {
-    fn pre_tool_use_commands(&self) -> &[String];
-    fn post_tool_use_commands(&self) -> &[String];
+enum ToolHookBody<'a> {
+    Pre { input: &'a str },
+    Post { output: &'a str, is_error: bool },
+    Failure { error: &'a str },
 }
 
-impl HookCommandSource for RuntimeHookConfig {
-    fn pre_tool_use_commands(&self) -> &[String] {
-        self.pre_tool_use()
-    }
-
-    fn post_tool_use_commands(&self) -> &[String] {
-        self.post_tool_use()
+fn tool_event_payload(tool_name: &str, tool_use_id: &str, body: ToolHookBody<'_>) -> Value {
+    match body {
+        ToolHookBody::Pre { input } => json!({
+            "event": "PreToolUse",
+            "tool_name": tool_name,
+            "tool_use_id": tool_use_id,
+            "tool_input": parse_tool_input(input),
+            "tool_input_json": input,
+        }),
+        ToolHookBody::Post { output, is_error } => json!({
+            "event": "PostToolUse",
+            "tool_name": tool_name,
+            "tool_use_id": tool_use_id,
+            "tool_output": output,
+            "tool_result_is_error": is_error,
+        }),
+        ToolHookBody::Failure { error } => json!({
+            "event": "PostToolUseFailure",
+            "tool_name": tool_name,
+            "tool_use_id": tool_use_id,
+            "tool_output": error,
+            "tool_result_is_error": true,
+        }),
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HookRunner<S: HookCommandSource> {
-    source: S,
+fn turn_event_payload(event_name: &str, iteration: usize, turn: usize) -> Value {
+    json!({
+        "event": event_name,
+        "iteration": iteration,
+        "turn": turn,
+    })
 }
 
-impl<S: HookCommandSource> HookRunner<S> {
-    #[must_use]
-    pub fn new(source: S) -> Self {
-        Self { source }
-    }
-
-    #[must_use]
-    pub fn run_pre_tool_use(&self, tool_name: &str, tool_input: &str) -> HookRunResult {
-        run_hook_commands(
-            HookEvent::PreToolUse,
-            self.source.pre_tool_use_commands(),
+/// Build a JSON payload from any [`RuntimeEvent`] for hook stdin.
+fn build_hook_payload(event: &RuntimeEvent<'_>) -> Value {
+    match event {
+        RuntimeEvent::PreToolUse {
             tool_name,
-            tool_input,
-            None,
-            false,
-        )
-    }
-
-    #[must_use]
-    pub fn run_post_tool_use(
-        &self,
-        tool_name: &str,
-        tool_input: &str,
-        tool_output: &str,
-        is_error: bool,
-    ) -> HookRunResult {
-        run_hook_commands(
-            HookEvent::PostToolUse,
-            self.source.post_tool_use_commands(),
+            tool_use_id,
+            input,
+        } => tool_event_payload(tool_name, tool_use_id, ToolHookBody::Pre { input }),
+        RuntimeEvent::PostToolUse {
             tool_name,
-            tool_input,
-            Some(tool_output),
+            tool_use_id,
+            output,
             is_error,
-        )
+        } => tool_event_payload(
+            tool_name,
+            tool_use_id,
+            ToolHookBody::Post {
+                output,
+                is_error: *is_error,
+            },
+        ),
+        RuntimeEvent::PostToolUseFailure {
+            tool_name,
+            tool_use_id,
+            error,
+        } => tool_event_payload(tool_name, tool_use_id, ToolHookBody::Failure { error }),
+        RuntimeEvent::SessionStart { session_id } => json!({
+            "event": "SessionStart",
+            "session_id": session_id,
+        }),
+        RuntimeEvent::SessionEnd { session_id } => json!({
+            "event": "SessionEnd",
+            "session_id": session_id,
+        }),
+        RuntimeEvent::UserPromptSubmit { prompt } => json!({
+            "event": "UserPromptSubmit",
+            "prompt": prompt,
+        }),
+        RuntimeEvent::TurnStart { iteration, turn } => {
+            turn_event_payload("TurnStart", *iteration, *turn)
+        }
+        RuntimeEvent::TurnEnd { iteration, turn } => {
+            turn_event_payload("TurnEnd", *iteration, *turn)
+        }
+        RuntimeEvent::SubagentStart { agent_id, depth } => json!({
+            "event": "SubagentStart",
+            "agent_id": agent_id,
+            "depth": depth,
+        }),
+        RuntimeEvent::SubagentStop { agent_id, depth } => json!({
+            "event": "SubagentStop",
+            "agent_id": agent_id,
+            "depth": depth,
+        }),
+        RuntimeEvent::Stop { reason } => json!({
+            "event": "Stop",
+            "reason": reason.as_ref(),
+        }),
+        RuntimeEvent::Notification { message } => json!({
+            "event": "Notification",
+            "message": message.as_ref(),
+        }),
+        RuntimeEvent::CwdChanged { old, new } => json!({
+            "event": "CwdChanged",
+            "old_cwd": old,
+            "new_cwd": new,
+        }),
+        RuntimeEvent::ConfigChange { key } => json!({
+            "event": "ConfigChange",
+            "key": key,
+        }),
+        RuntimeEvent::FileChanged { path } => json!({
+            "event": "FileChanged",
+            "path": path,
+        }),
+        RuntimeEvent::TaskCreated { task_id } => json!({
+            "event": "TaskCreated",
+            "task_id": task_id,
+        }),
+        RuntimeEvent::TaskCompleted { task_id, success } => json!({
+            "event": "TaskCompleted",
+            "task_id": task_id,
+            "success": success,
+        }),
+        _ => json!({ "event": event.kind().as_ref() }),
     }
 }
 
-impl HookRunner<RuntimeHookConfig> {
-    #[must_use]
-    pub fn from_feature_config(feature_config: &RuntimeFeatureConfig) -> Self {
-        Self::new(feature_config.hooks().clone())
-    }
-}
-
-impl<S: HookCommandSource + Default> Default for HookRunner<S> {
-    fn default() -> Self {
-        Self::new(S::default())
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct HookContext<'a> {
-    event: HookEvent,
-    tool_name: &'a str,
-    tool_input: &'a str,
-    tool_output: Option<&'a str>,
-    is_error: bool,
-    payload: &'a str,
-}
-
-pub fn run_hook_commands(
-    event: HookEvent,
-    commands: &[String],
-    tool_name: &str,
-    tool_input: &str,
-    tool_output: Option<&str>,
-    is_error: bool,
-) -> HookRunResult {
+fn run_commands(event_kind: EventKind, commands: &[String], payload: &Value) -> HookRunResult {
     if commands.is_empty() {
         return HookRunResult::allow(Vec::new());
     }
-
-    let payload = json!({
-        "hook_event_name": event.as_str(),
-        "tool_name": tool_name,
-        "tool_input": parse_tool_input(tool_input),
-        "tool_input_json": tool_input,
-        "tool_output": tool_output,
-        "tool_result_is_error": is_error,
-    })
-    .to_string();
-
-    let ctx = HookContext {
-        event,
-        tool_name,
-        tool_input,
-        tool_output,
-        is_error,
-        payload: &payload,
-    };
+    let payload_str = payload.to_string();
+    let event_name = event_kind.as_ref();
 
     let mut messages = Vec::new();
 
     for command in commands {
-        match run_hook_command(command, &ctx) {
+        match run_hook_command(command, event_name, &payload_str) {
             HookCommandOutcome::Allow { message } => {
                 if let Some(message) = message {
                     messages.push(message);
                 }
             }
             HookCommandOutcome::Deny { message } => {
-                messages.push(message.unwrap_or_else(|| {
-                    format!("{} hook denied tool `{tool_name}`", event.as_str())
-                }));
+                messages
+                    .push(message.unwrap_or_else(|| format!("{event_name} hook denied execution")));
                 return HookRunResult {
                     denied: true,
                     messages,
@@ -186,20 +194,14 @@ pub fn run_hook_commands(
     HookRunResult::allow(messages)
 }
 
-fn run_hook_command(command: &str, ctx: &HookContext<'_>) -> HookCommandOutcome {
+fn run_hook_command(command: &str, event_name: &str, payload: &str) -> HookCommandOutcome {
     let mut child = shell_command(command);
     child.stdin(std::process::Stdio::piped());
     child.stdout(std::process::Stdio::piped());
     child.stderr(std::process::Stdio::piped());
-    child.env("HOOK_EVENT", ctx.event.as_str());
-    child.env("HOOK_TOOL_NAME", ctx.tool_name);
-    child.env("HOOK_TOOL_INPUT", ctx.tool_input);
-    child.env("HOOK_TOOL_IS_ERROR", if ctx.is_error { "1" } else { "0" });
-    if let Some(tool_output) = ctx.tool_output {
-        child.env("HOOK_TOOL_OUTPUT", tool_output);
-    }
+    child.env("HOOK_EVENT", event_name);
 
-    match child.output_with_stdin(ctx.payload.as_bytes()) {
+    match child.output_with_stdin(payload.as_bytes()) {
         Ok(output) => {
             let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
             let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -218,20 +220,12 @@ fn run_hook_command(command: &str, ctx: &HookContext<'_>) -> HookCommandOutcome 
                     ),
                 },
                 None => HookCommandOutcome::Warn {
-                    message: format!(
-                        "{} hook `{command}` terminated by signal while handling `{}`",
-                        ctx.event.as_str(),
-                        ctx.tool_name,
-                    ),
+                    message: format!("{event_name} hook `{command}` terminated by signal",),
                 },
             }
         }
         Err(error) => HookCommandOutcome::Warn {
-            message: format!(
-                "{} hook `{command}` failed to start for `{}`: {error}",
-                ctx.event.as_str(),
-                ctx.tool_name,
-            ),
+            message: format!("{event_name} hook `{command}` failed to start: {error}",),
         },
     }
 }
@@ -248,7 +242,7 @@ fn parse_tool_input(tool_input: &str) -> serde_json::Value {
 
 fn format_hook_warning(command: &str, code: i32, stdout: Option<&str>, stderr: &str) -> String {
     let mut message =
-        format!("Hook `{command}` exited with status {code}; allowing tool execution to continue");
+        format!("Hook `{command}` exited with status {code}; allowing execution to continue");
     if let Some(stdout) = stdout.filter(|stdout| !stdout.is_empty()) {
         message.push_str(": ");
         message.push_str(stdout);
@@ -331,16 +325,16 @@ impl CommandWithStdin {
 /// Event-driven hook dispatcher implementing [`RuntimeObserver`].
 ///
 /// Routes [`RuntimeEvent`]s to shell commands via `HashMap<EventKind>` for O(1) lookup.
-/// Bridges the old `HookRunner` mechanism with the new observer pattern.
+/// All events are dispatched uniformly with a generic JSON payload on stdin.
 #[derive(Debug, Default)]
 pub struct HookDispatcher {
     commands: HashMap<EventKind, Vec<String>>,
 }
 
 impl HookDispatcher {
-    /// Build from a `RuntimeHookConfig`.
+    /// Build from a [`RuntimeHookConfig`].
     ///
-    /// Uses strum's `EventKind::from_str` to parse event names from the config map.
+    /// Parses event names from the config map via `EventKind::from_str`.
     /// Unrecognized event names are silently ignored.
     #[must_use]
     pub fn from_hook_config(config: &RuntimeHookConfig) -> Self {
@@ -355,7 +349,7 @@ impl HookDispatcher {
         Self { commands }
     }
 
-    /// Build from a `RuntimeFeatureConfig` (convenience).
+    /// Build from a [`RuntimeFeatureConfig`] (convenience).
     #[must_use]
     pub fn from_feature_config(feature_config: &RuntimeFeatureConfig) -> Self {
         Self::from_hook_config(feature_config.hooks())
@@ -381,56 +375,9 @@ impl RuntimeObserver for HookDispatcher {
         let Some(commands) = self.commands.get(&kind) else {
             return EventDirective::allow();
         };
-
-        match event {
-            RuntimeEvent::PreToolUse {
-                tool_name, input, ..
-            } => {
-                let result = run_hook_commands(
-                    HookEvent::PreToolUse,
-                    commands,
-                    tool_name,
-                    input,
-                    None,
-                    false,
-                );
-                hook_result_to_directive(result)
-            }
-            RuntimeEvent::PostToolUse {
-                tool_name,
-                tool_use_id: _,
-                output,
-                is_error,
-            } => {
-                let result = run_hook_commands(
-                    HookEvent::PostToolUse,
-                    commands,
-                    tool_name,
-                    "",
-                    Some(output),
-                    *is_error,
-                );
-                hook_result_to_directive(result)
-            }
-            RuntimeEvent::PostToolUseFailure {
-                tool_name, error, ..
-            } => {
-                let result = run_hook_commands(
-                    HookEvent::PostToolUse,
-                    commands,
-                    tool_name,
-                    "",
-                    Some(error),
-                    true,
-                );
-                hook_result_to_directive(result)
-            }
-            _ => {
-                // For non-tool events with registered commands, we don't
-                // have a standard input format yet — just allow.
-                EventDirective::allow()
-            }
-        }
+        let payload = build_hook_payload(event);
+        let result = run_commands(kind, commands, &payload);
+        hook_result_to_directive(result)
     }
 }
 
@@ -460,52 +407,63 @@ fn hook_result_to_directive(result: HookRunResult) -> EventDirective {
 #[cfg(test)]
 #[cfg(unix)]
 mod tests {
-    use super::{HookDispatcher, HookRunResult, HookRunner};
-    use crate::config::{RuntimeFeatureConfig, RuntimeHookConfig};
+    use super::{HookDispatcher, HookRunResult};
+    use crate::config::RuntimeHookConfig;
     use codineer_core::events::{EventKind, RuntimeEvent};
     use codineer_core::observer::RuntimeObserver;
 
     #[test]
     fn allows_exit_code_zero_and_captures_stdout() {
-        let runner = HookRunner::new(RuntimeHookConfig::new(
-            vec!["printf 'pre ok'".to_string()],
-            Vec::new(),
-        ));
-
-        let result = runner.run_pre_tool_use("Read", r#"{"path":"README.md"}"#);
-
-        assert_eq!(result, HookRunResult::allow(vec!["pre ok".to_string()]));
+        let config = RuntimeHookConfig::new(vec!["printf 'pre ok'".to_string()], Vec::new());
+        let mut dispatcher = HookDispatcher::from_hook_config(&config);
+        let event = RuntimeEvent::PreToolUse {
+            tool_name: "Read",
+            tool_use_id: "id-1",
+            input: r#"{"path":"README.md"}"#,
+        };
+        let directive = dispatcher.on_event(&event);
+        assert!(!directive.is_denied());
+        assert_eq!(directive.messages, vec!["pre ok".to_string()]);
     }
 
     #[test]
     fn denies_exit_code_two() {
-        let runner = HookRunner::new(RuntimeHookConfig::new(
+        let config = RuntimeHookConfig::new(
             vec!["printf 'blocked by hook'; exit 2".to_string()],
             Vec::new(),
-        ));
-
-        let result = runner.run_pre_tool_use("Bash", r#"{"command":"pwd"}"#);
-
-        assert!(result.is_denied());
-        assert_eq!(result.messages(), &["blocked by hook".to_string()]);
+        );
+        let mut dispatcher = HookDispatcher::from_hook_config(&config);
+        let event = RuntimeEvent::PreToolUse {
+            tool_name: "Bash",
+            tool_use_id: "id-2",
+            input: r#"{"command":"pwd"}"#,
+        };
+        let directive = dispatcher.on_event(&event);
+        assert!(directive.is_denied());
+        assert!(directive
+            .messages
+            .iter()
+            .any(|m| m.contains("blocked by hook")));
     }
 
     #[test]
     fn warns_for_other_non_zero_statuses() {
-        let runner = HookRunner::from_feature_config(&RuntimeFeatureConfig::default().with_hooks(
-            RuntimeHookConfig::new(
-                vec!["printf 'warning hook'; exit 1".to_string()],
-                Vec::new(),
-            ),
-        ));
-
-        let result = runner.run_pre_tool_use("Edit", r#"{"file":"src/lib.rs"}"#);
-
-        assert!(!result.is_denied());
-        assert!(result
-            .messages()
+        let config = RuntimeHookConfig::new(
+            vec!["printf 'warning hook'; exit 1".to_string()],
+            Vec::new(),
+        );
+        let mut dispatcher = HookDispatcher::from_hook_config(&config);
+        let event = RuntimeEvent::PreToolUse {
+            tool_name: "Edit",
+            tool_use_id: "id-3",
+            input: r#"{"file":"src/lib.rs"}"#,
+        };
+        let directive = dispatcher.on_event(&event);
+        assert!(!directive.is_denied());
+        assert!(directive
+            .messages
             .iter()
-            .any(|message| message.contains("allowing tool execution to continue")));
+            .any(|m| m.contains("allowing execution to continue")));
     }
 
     #[test]
@@ -519,42 +477,12 @@ mod tests {
     }
 
     #[test]
-    fn dispatcher_allows_pre_tool_use() {
-        let config = RuntimeHookConfig::new(
-            vec!["printf 'allowed'".to_string()],
-            Vec::new(),
-        );
-        let mut dispatcher = HookDispatcher::from_hook_config(&config);
-        let event = RuntimeEvent::PreToolUse {
-            tool_name: "Read",
-            tool_use_id: "id-1",
-            input: r#"{"path":"README.md"}"#,
-        };
-        let directive = dispatcher.on_event(&event);
-        assert!(!directive.is_denied());
-        assert_eq!(directive.messages, vec!["allowed".to_string()]);
-    }
-
-    #[test]
-    fn dispatcher_denies_pre_tool_use() {
-        let config = RuntimeHookConfig::new(
-            vec!["printf 'blocked'; exit 2".to_string()],
-            Vec::new(),
-        );
-        let mut dispatcher = HookDispatcher::from_hook_config(&config);
-        let event = RuntimeEvent::PreToolUse {
-            tool_name: "Bash",
-            tool_use_id: "id-2",
-            input: r#"{"command":"rm"}"#,
-        };
-        let directive = dispatcher.on_event(&event);
-        assert!(directive.is_denied());
-    }
-
-    #[test]
     fn dispatcher_allows_unregistered_events() {
         let mut dispatcher = HookDispatcher::default();
-        let event = RuntimeEvent::TurnStart { iteration: 0, turn: 0 };
+        let event = RuntimeEvent::TurnStart {
+            iteration: 0,
+            turn: 0,
+        };
         let directive = dispatcher.on_event(&event);
         assert!(!directive.is_denied());
     }
@@ -564,5 +492,82 @@ mod tests {
         let mut dispatcher = HookDispatcher::default();
         dispatcher.register(EventKind::SessionStart, vec!["echo hello".to_string()]);
         assert_eq!(dispatcher.registered_count(), 1);
+    }
+
+    #[test]
+    fn generic_dispatch_for_session_start() {
+        let mut dispatcher = HookDispatcher::default();
+        dispatcher.register(
+            EventKind::SessionStart,
+            vec!["printf 'session started'".to_string()],
+        );
+        let event = RuntimeEvent::SessionStart { session_id: "s-1" };
+        let directive = dispatcher.on_event(&event);
+        assert!(!directive.is_denied());
+        assert_eq!(directive.messages, vec!["session started".to_string()]);
+    }
+
+    #[test]
+    fn generic_dispatch_for_stop() {
+        let mut dispatcher = HookDispatcher::default();
+        dispatcher.register(EventKind::Stop, vec!["printf 'stopping'".to_string()]);
+        let event = RuntimeEvent::Stop {
+            reason: "user request".into(),
+        };
+        let directive = dispatcher.on_event(&event);
+        assert!(!directive.is_denied());
+        assert_eq!(directive.messages, vec!["stopping".to_string()]);
+    }
+
+    #[test]
+    fn generic_dispatch_for_user_prompt() {
+        let mut dispatcher = HookDispatcher::default();
+        dispatcher.register(
+            EventKind::UserPromptSubmit,
+            vec!["printf 'prompt received'".to_string()],
+        );
+        let event = RuntimeEvent::UserPromptSubmit { prompt: "hello" };
+        let directive = dispatcher.on_event(&event);
+        assert!(!directive.is_denied());
+        assert_eq!(directive.messages, vec!["prompt received".to_string()]);
+    }
+
+    #[test]
+    fn generic_dispatch_for_subagent_start() {
+        let mut dispatcher = HookDispatcher::default();
+        dispatcher.register(
+            EventKind::SubagentStart,
+            vec!["printf 'agent launched'".to_string()],
+        );
+        let event = RuntimeEvent::SubagentStart {
+            agent_id: "a-1",
+            depth: 0,
+        };
+        let directive = dispatcher.on_event(&event);
+        assert!(!directive.is_denied());
+        assert_eq!(directive.messages, vec!["agent launched".to_string()]);
+    }
+
+    #[test]
+    fn low_level_run_commands_allow() {
+        let payload = serde_json::json!({"event": "PreToolUse", "tool_name": "Read"});
+        let result = super::run_commands(
+            EventKind::PreToolUse,
+            &["printf 'pre ok'".to_string()],
+            &payload,
+        );
+        assert_eq!(result, HookRunResult::allow(vec!["pre ok".to_string()]));
+    }
+
+    #[test]
+    fn low_level_run_commands_deny() {
+        let payload = serde_json::json!({"event": "PreToolUse", "tool_name": "Bash"});
+        let result = super::run_commands(
+            EventKind::PreToolUse,
+            &["printf 'blocked by hook'; exit 2".to_string()],
+            &payload,
+        );
+        assert!(result.is_denied());
+        assert_eq!(result.messages(), &["blocked by hook".to_string()]);
     }
 }

@@ -143,20 +143,33 @@ fn compacted_summary_prefix_len(session: &Session) -> usize {
     )
 }
 
-fn summarize_messages(messages: &[ConversationMessage]) -> String {
-    let user_messages = messages
-        .iter()
-        .filter(|message| message.role == MessageRole::User)
-        .count();
-    let assistant_messages = messages
-        .iter()
-        .filter(|message| message.role == MessageRole::Assistant)
-        .count();
-    let tool_messages = messages
-        .iter()
-        .filter(|message| message.role == MessageRole::Tool)
-        .count();
+#[derive(Debug, Clone, Copy)]
+struct MessageStats {
+    total: usize,
+    user: usize,
+    assistant: usize,
+    tool: usize,
+}
 
+fn count_message_stats(messages: &[ConversationMessage]) -> MessageStats {
+    MessageStats {
+        total: messages.len(),
+        user: messages
+            .iter()
+            .filter(|message| message.role == MessageRole::User)
+            .count(),
+        assistant: messages
+            .iter()
+            .filter(|message| message.role == MessageRole::Assistant)
+            .count(),
+        tool: messages
+            .iter()
+            .filter(|message| message.role == MessageRole::Tool)
+            .count(),
+    }
+}
+
+fn format_tool_summary(messages: &[ConversationMessage]) -> String {
     let mut tool_names = messages
         .iter()
         .flat_map(|message| message.blocks.iter())
@@ -168,21 +181,28 @@ fn summarize_messages(messages: &[ConversationMessage]) -> String {
         .collect::<Vec<_>>();
     tool_names.sort_unstable();
     tool_names.dedup();
+    if tool_names.is_empty() {
+        String::new()
+    } else {
+        format!("- Tools mentioned: {}.", tool_names.join(", "))
+    }
+}
+
+fn summarize_messages(messages: &[ConversationMessage]) -> String {
+    let stats = count_message_stats(messages);
 
     let mut lines = vec![
         "<summary>".to_string(),
         "Conversation summary:".to_string(),
         format!(
             "- Scope: {} earlier messages compacted (user={}, assistant={}, tool={}).",
-            messages.len(),
-            user_messages,
-            assistant_messages,
-            tool_messages
+            stats.total, stats.user, stats.assistant, stats.tool
         ),
     ];
 
-    if !tool_names.is_empty() {
-        lines.push(format!("- Tools mentioned: {}.", tool_names.join(", ")));
+    let tool_line = format_tool_summary(messages);
+    if !tool_line.is_empty() {
+        lines.push(tool_line);
     }
 
     let recent_user_requests = collect_recent_role_summaries(messages, MessageRole::User, 3);

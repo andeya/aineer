@@ -82,9 +82,7 @@ impl ConfigLoader {
         let feature_config = RuntimeFeatureConfig {
             hooks: parse_optional_hooks_config(&merged_value)?,
             plugins: parse_optional_plugin_config(&merged_value)?,
-            mcp: McpConfigCollection {
-                servers: mcp_servers,
-            },
+            mcp: McpConfigCollection::new(mcp_servers),
             oauth: parse_optional_oauth_config(&merged_value, "merged settings.oauth")?,
             model: parse_optional_model(&merged_value),
             fallback_models: parse_optional_fallback_models(&merged_value),
