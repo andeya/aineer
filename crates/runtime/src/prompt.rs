@@ -1,3 +1,4 @@
+use std::collections::hash_map::DefaultHasher;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
@@ -170,7 +171,7 @@ impl SystemPromptBuilder {
         self.build().join("\n\n")
     }
 
-    fn environment_section(&self) -> String {
+    pub(crate) fn environment_section(&self) -> String {
         let cwd = self.project_context.as_ref().map_or_else(
             || "unknown".to_string(),
             |context| context.cwd.display().to_string(),
@@ -191,6 +192,99 @@ impl SystemPromptBuilder {
             ),
         ]));
         lines.join("\n")
+    }
+}
+
+/// Segment-level cache for system prompts.
+///
+/// Static sections (intro, system, tasks, actions) are computed once and reused.
+/// Dynamic sections are rebuilt only when the input hash changes.
+#[derive(Debug)]
+pub struct PromptCache {
+    static_segments: Vec<String>,
+    cached_dynamic_hash: u64,
+    cached_full: Vec<String>,
+}
+
+impl PromptCache {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            static_segments: Vec::new(),
+            cached_dynamic_hash: 0,
+            cached_full: Vec::new(),
+        }
+    }
+
+    /// Build prompt sections, reusing cached static segments.
+    /// Only regenerates when dynamic inputs change.
+    pub fn build(&mut self, builder: &SystemPromptBuilder) -> Vec<String> {
+        if self.static_segments.is_empty() {
+            self.static_segments = Self::compute_static(builder.output_style_name.is_some());
+            if let (Some(name), Some(prompt)) =
+                (&builder.output_style_name, &builder.output_style_prompt)
+            {
+                self.static_segments
+                    .insert(1, format!("# Output Style: {name}\n{prompt}"));
+            }
+        }
+
+        let dynamic_hash = self.hash_dynamic(builder);
+        if dynamic_hash == self.cached_dynamic_hash && !self.cached_full.is_empty() {
+            return self.cached_full.clone();
+        }
+
+        let mut sections = self.static_segments.clone();
+        sections.push(SYSTEM_PROMPT_DYNAMIC_BOUNDARY.to_string());
+        sections.push(builder.environment_section());
+        if let Some(project_context) = &builder.project_context {
+            sections.push(render_project_context(project_context));
+            if !project_context.instruction_files.is_empty() {
+                sections.push(render_instruction_files(&project_context.instruction_files));
+            }
+        }
+        if let Some(config) = &builder.config {
+            sections.push(render_config_section(config));
+        }
+        sections.extend(builder.append_sections.iter().cloned());
+
+        self.cached_dynamic_hash = dynamic_hash;
+        self.cached_full = sections.clone();
+        sections
+    }
+
+    fn compute_static(has_output_style: bool) -> Vec<String> {
+        vec![
+            get_simple_intro_section(has_output_style),
+            get_simple_system_section(),
+            get_simple_doing_tasks_section(),
+            get_actions_section(),
+        ]
+    }
+
+    fn hash_dynamic(&self, builder: &SystemPromptBuilder) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        if let Some(ctx) = &builder.project_context {
+            ctx.current_date.hash(&mut hasher);
+            ctx.cwd.hash(&mut hasher);
+            ctx.git_status.hash(&mut hasher);
+            ctx.git_diff.hash(&mut hasher);
+            ctx.instruction_files.len().hash(&mut hasher);
+            for file in &ctx.instruction_files {
+                file.path.hash(&mut hasher);
+                file.content.hash(&mut hasher);
+            }
+        }
+        builder.os_name.hash(&mut hasher);
+        builder.os_version.hash(&mut hasher);
+        builder.append_sections.hash(&mut hasher);
+        hasher.finish()
+    }
+}
+
+impl Default for PromptCache {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -553,7 +647,8 @@ mod tests {
     use super::{
         collapse_blank_lines, display_context_path, normalize_instruction_content,
         render_instruction_content, render_instruction_files, truncate_instruction_content,
-        ContextFile, ProjectContext, SystemPromptBuilder, SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
+        ContextFile, ProjectContext, PromptCache, SystemPromptBuilder,
+        SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
     };
     use crate::config::ConfigLoader;
     use std::fs;
@@ -840,5 +935,60 @@ mod tests {
         assert!(rendered.contains("# Codineer instructions"));
         assert!(rendered.contains("scope: /tmp/project"));
         assert!(rendered.contains("Project rules"));
+    }
+
+    #[test]
+    fn prompt_cache_returns_same_result_as_builder() {
+        let builder = SystemPromptBuilder::new()
+            .with_os("linux", "6.8")
+            .with_project_context(ProjectContext {
+                cwd: PathBuf::from("/tmp/test"),
+                current_date: "2026-04-01".to_string(),
+                git_status: None,
+                git_diff: None,
+                instruction_files: Vec::new(),
+            });
+        let expected = builder.build();
+        let mut cache = PromptCache::new();
+        let cached = cache.build(&builder);
+        assert_eq!(cached, expected);
+    }
+
+    #[test]
+    fn prompt_cache_reuses_on_identical_input() {
+        let builder = SystemPromptBuilder::new().with_os("linux", "6.8");
+        let mut cache = PromptCache::new();
+        let first = cache.build(&builder);
+        let second = cache.build(&builder);
+        assert_eq!(first, second);
+        // static_segments are populated
+        assert!(!cache.static_segments.is_empty());
+    }
+
+    #[test]
+    fn prompt_cache_invalidates_on_change() {
+        let builder1 = SystemPromptBuilder::new()
+            .with_os("linux", "6.8")
+            .with_project_context(ProjectContext {
+                cwd: PathBuf::from("/tmp/test"),
+                current_date: "2026-04-01".to_string(),
+                git_status: None,
+                git_diff: None,
+                instruction_files: Vec::new(),
+            });
+        let mut cache = PromptCache::new();
+        let v1 = cache.build(&builder1);
+
+        let builder2 = SystemPromptBuilder::new()
+            .with_os("macos", "14.0")
+            .with_project_context(ProjectContext {
+                cwd: PathBuf::from("/tmp/test2"),
+                current_date: "2026-04-02".to_string(),
+                git_status: Some("modified".to_string()),
+                git_diff: None,
+                instruction_files: Vec::new(),
+            });
+        let v2 = cache.build(&builder2);
+        assert_ne!(v1, v2);
     }
 }
