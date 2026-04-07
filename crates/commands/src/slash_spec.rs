@@ -356,6 +356,43 @@ pub enum SlashCommand {
 
 impl SlashCommand {
     #[must_use]
+    pub fn name(&self) -> String {
+        match self {
+            Self::Help => "help".to_string(),
+            Self::Status => "status".to_string(),
+            Self::Compact => "compact".to_string(),
+            Self::Branch { .. } => "branch".to_string(),
+            Self::Bughunter { .. } => "bughunter".to_string(),
+            Self::Worktree { .. } => "worktree".to_string(),
+            Self::Commit => "commit".to_string(),
+            Self::CommitPushPr { .. } => "commit-push-pr".to_string(),
+            Self::Pr { .. } => "pr".to_string(),
+            Self::Issue { .. } => "issue".to_string(),
+            Self::Ultraplan { .. } => "ultraplan".to_string(),
+            Self::Teleport { .. } => "teleport".to_string(),
+            Self::DebugToolCall => "debug-tool-call".to_string(),
+            Self::Model { .. } => "model".to_string(),
+            Self::Permissions { .. } => "permissions".to_string(),
+            Self::Clear { .. } => "clear".to_string(),
+            Self::Cost => "cost".to_string(),
+            Self::Resume { .. } => "resume".to_string(),
+            Self::Config { .. } => "config".to_string(),
+            Self::Memory => "memory".to_string(),
+            Self::Init => "init".to_string(),
+            Self::Diff => "diff".to_string(),
+            Self::Version => "version".to_string(),
+            Self::Export { .. } => "export".to_string(),
+            Self::Session { .. } => "session".to_string(),
+            Self::Plugins { .. } => "plugins".to_string(),
+            Self::Models { .. } => "models".to_string(),
+            Self::Providers => "providers".to_string(),
+            Self::Agents { .. } => "agents".to_string(),
+            Self::Skills { .. } => "skills".to_string(),
+            Self::Unknown(name) => name.clone(),
+        }
+    }
+
+    #[must_use]
     pub fn parse(input: &str) -> Option<Self> {
         let trimmed = input.trim();
         if !trimmed.starts_with('/') {

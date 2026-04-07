@@ -5,7 +5,7 @@ use crate::discovery::{
 use crate::slash_spec::SlashCommand;
 use crate::{
     handle_branch_slash_command, handle_commit_slash_command, handle_plugins_slash_command,
-    handle_slash_command, handle_worktree_slash_command, render_plugins_report,
+    handle_slash_command_simple, handle_worktree_slash_command, render_plugins_report,
     render_slash_command_help, resume_supported_slash_commands, slash_command_specs,
     suggest_slash_commands, PluginEffect,
 };
@@ -385,7 +385,7 @@ fn compacts_sessions_via_slash_command() {
         ],
     };
 
-    let result = handle_slash_command(
+    let result = handle_slash_command_simple(
         "/compact",
         &session,
         CompactionConfig {
@@ -402,7 +402,7 @@ fn compacts_sessions_via_slash_command() {
 #[test]
 fn help_command_is_non_mutating() {
     let session = Session::new();
-    let result = handle_slash_command("/help", &session, CompactionConfig::default())
+    let result = handle_slash_command_simple("/help", &session, CompactionConfig::default())
         .expect("help command should be handled");
     assert_eq!(result.session, session);
     assert!(result.message.contains("Slash commands"));
@@ -411,54 +411,54 @@ fn help_command_is_non_mutating() {
 #[test]
 fn ignores_unknown_or_runtime_bound_slash_commands() {
     let session = Session::new();
-    assert!(handle_slash_command("/unknown", &session, CompactionConfig::default()).is_none());
-    assert!(handle_slash_command("/status", &session, CompactionConfig::default()).is_none());
-    assert!(handle_slash_command("/branch list", &session, CompactionConfig::default()).is_none());
-    assert!(handle_slash_command("/bughunter", &session, CompactionConfig::default()).is_none());
+    assert!(handle_slash_command_simple("/unknown", &session, CompactionConfig::default()).is_none());
+    assert!(handle_slash_command_simple("/status", &session, CompactionConfig::default()).is_none());
+    assert!(handle_slash_command_simple("/branch list", &session, CompactionConfig::default()).is_none());
+    assert!(handle_slash_command_simple("/bughunter", &session, CompactionConfig::default()).is_none());
     assert!(
-        handle_slash_command("/worktree list", &session, CompactionConfig::default()).is_none()
+        handle_slash_command_simple("/worktree list", &session, CompactionConfig::default()).is_none()
     );
-    assert!(handle_slash_command("/commit", &session, CompactionConfig::default()).is_none());
-    assert!(handle_slash_command(
+    assert!(handle_slash_command_simple("/commit", &session, CompactionConfig::default()).is_none());
+    assert!(handle_slash_command_simple(
         "/commit-push-pr review notes",
         &session,
         CompactionConfig::default()
     )
     .is_none());
-    assert!(handle_slash_command("/pr", &session, CompactionConfig::default()).is_none());
-    assert!(handle_slash_command("/issue", &session, CompactionConfig::default()).is_none());
-    assert!(handle_slash_command("/ultraplan", &session, CompactionConfig::default()).is_none());
-    assert!(handle_slash_command("/teleport foo", &session, CompactionConfig::default()).is_none());
+    assert!(handle_slash_command_simple("/pr", &session, CompactionConfig::default()).is_none());
+    assert!(handle_slash_command_simple("/issue", &session, CompactionConfig::default()).is_none());
+    assert!(handle_slash_command_simple("/ultraplan", &session, CompactionConfig::default()).is_none());
+    assert!(handle_slash_command_simple("/teleport foo", &session, CompactionConfig::default()).is_none());
     assert!(
-        handle_slash_command("/debug-tool-call", &session, CompactionConfig::default()).is_none()
+        handle_slash_command_simple("/debug-tool-call", &session, CompactionConfig::default()).is_none()
     );
-    assert!(handle_slash_command("/model sonnet", &session, CompactionConfig::default()).is_none());
-    assert!(handle_slash_command(
+    assert!(handle_slash_command_simple("/model sonnet", &session, CompactionConfig::default()).is_none());
+    assert!(handle_slash_command_simple(
         "/permissions read-only",
         &session,
         CompactionConfig::default()
     )
     .is_none());
-    assert!(handle_slash_command("/clear", &session, CompactionConfig::default()).is_none());
+    assert!(handle_slash_command_simple("/clear", &session, CompactionConfig::default()).is_none());
     assert!(
-        handle_slash_command("/clear --confirm", &session, CompactionConfig::default()).is_none()
+        handle_slash_command_simple("/clear --confirm", &session, CompactionConfig::default()).is_none()
     );
-    assert!(handle_slash_command("/cost", &session, CompactionConfig::default()).is_none());
-    assert!(handle_slash_command(
+    assert!(handle_slash_command_simple("/cost", &session, CompactionConfig::default()).is_none());
+    assert!(handle_slash_command_simple(
         "/resume session.json",
         &session,
         CompactionConfig::default()
     )
     .is_none());
-    assert!(handle_slash_command("/config", &session, CompactionConfig::default()).is_none());
-    assert!(handle_slash_command("/config env", &session, CompactionConfig::default()).is_none());
-    assert!(handle_slash_command("/diff", &session, CompactionConfig::default()).is_none());
-    assert!(handle_slash_command("/version", &session, CompactionConfig::default()).is_none());
+    assert!(handle_slash_command_simple("/config", &session, CompactionConfig::default()).is_none());
+    assert!(handle_slash_command_simple("/config env", &session, CompactionConfig::default()).is_none());
+    assert!(handle_slash_command_simple("/diff", &session, CompactionConfig::default()).is_none());
+    assert!(handle_slash_command_simple("/version", &session, CompactionConfig::default()).is_none());
     assert!(
-        handle_slash_command("/export note.txt", &session, CompactionConfig::default()).is_none()
+        handle_slash_command_simple("/export note.txt", &session, CompactionConfig::default()).is_none()
     );
-    assert!(handle_slash_command("/session list", &session, CompactionConfig::default()).is_none());
-    assert!(handle_slash_command("/plugins list", &session, CompactionConfig::default()).is_none());
+    assert!(handle_slash_command_simple("/session list", &session, CompactionConfig::default()).is_none());
+    assert!(handle_slash_command_simple("/plugins list", &session, CompactionConfig::default()).is_none());
 }
 
 #[test]

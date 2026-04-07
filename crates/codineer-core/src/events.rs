@@ -35,6 +35,8 @@ pub enum EventKind {
     StreamingFallback,
     MicrocompactApplied,
     ToolResultPersisted,
+    SlashCommandStart,
+    SlashCommandComplete,
 }
 
 /// Rich event payload with borrowed data for zero-copy emission.
@@ -129,6 +131,13 @@ pub enum RuntimeEvent<'a> {
         tool_use_id: &'a str,
         original_size: usize,
     },
+    SlashCommandStart {
+        command: &'a str,
+    },
+    SlashCommandComplete {
+        command: &'a str,
+        success: bool,
+    },
 }
 
 impl RuntimeEvent<'_> {
@@ -159,6 +168,8 @@ impl RuntimeEvent<'_> {
             Self::StreamingFallback => EventKind::StreamingFallback,
             Self::MicrocompactApplied { .. } => EventKind::MicrocompactApplied,
             Self::ToolResultPersisted { .. } => EventKind::ToolResultPersisted,
+            Self::SlashCommandStart { .. } => EventKind::SlashCommandStart,
+            Self::SlashCommandComplete { .. } => EventKind::SlashCommandComplete,
         }
     }
 }
@@ -201,11 +212,12 @@ mod tests {
             "PreCompact", "PostCompact", "SubagentStart", "SubagentStop",
             "RecoveryAttempt", "Stop", "MaxTurnsReached", "TokenBudgetContinue",
             "StreamingFallback", "MicrocompactApplied", "ToolResultPersisted",
+            "SlashCommandStart", "SlashCommandComplete",
         ];
         for kind_str in &kinds {
             let parsed: Result<EventKind, _> = kind_str.parse();
             assert!(parsed.is_ok(), "Failed to parse: {kind_str}");
         }
-        assert_eq!(kinds.len(), 23);
+        assert_eq!(kinds.len(), 25);
     }
 }

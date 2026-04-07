@@ -273,6 +273,7 @@ dependencies = [
 name = "codineer-commands"
 version = "0.6.9"
 dependencies = [
+ "codineer-core",
  "codineer-plugins",
  "codineer-runtime",
  "serde_json",

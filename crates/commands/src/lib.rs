@@ -20,6 +20,8 @@ pub use slash_help::{
 };
 pub use slash_spec::{slash_command_specs, SlashCommand, SlashCommandCategory, SlashCommandSpec};
 
+use codineer_core::events::RuntimeEvent;
+use codineer_core::observer::RuntimeObserver;
 use runtime::{compact_session, CompactionConfig, Session};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,13 +42,42 @@ pub struct PluginsCommandResult {
     pub effect: PluginEffect,
 }
 
-#[must_use]
+/// Handle a slash command, emitting lifecycle events through the observer.
 pub fn handle_slash_command(
     input: &str,
     session: &Session,
     compaction: CompactionConfig,
+    observer: &mut impl RuntimeObserver,
 ) -> Option<SlashCommandResult> {
-    match SlashCommand::parse(input)? {
+    let parsed = SlashCommand::parse(input)?;
+    let cmd_name = parsed.name();
+    let _ = observer.on_event(&RuntimeEvent::SlashCommandStart { command: &cmd_name });
+
+    let result = dispatch_slash_command(parsed, session, compaction);
+    let success = result.is_some();
+    let _ = observer.on_event(&RuntimeEvent::SlashCommandComplete {
+        command: &cmd_name,
+        success,
+    });
+    result
+}
+
+/// Backward-compatible entry point (no observer).
+#[must_use]
+pub fn handle_slash_command_simple(
+    input: &str,
+    session: &Session,
+    compaction: CompactionConfig,
+) -> Option<SlashCommandResult> {
+    handle_slash_command(input, session, compaction, &mut ())
+}
+
+fn dispatch_slash_command(
+    command: SlashCommand,
+    session: &Session,
+    compaction: CompactionConfig,
+) -> Option<SlashCommandResult> {
+    match command {
         SlashCommand::Compact => {
             let result = compact_session(session, compaction);
             let message = if result.removed_message_count == 0 {

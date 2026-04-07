@@ -12,6 +12,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+codineer-core.workspace = true
 plugins.workspace = true
 runtime.workspace = true
 serde_json.workspace = true
