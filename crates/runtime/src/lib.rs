@@ -19,6 +19,7 @@ mod session;
 mod recovery;
 mod token_budget;
 mod tool;
+mod tool_orchestration;
 mod tool_result;
 mod usage;
 
