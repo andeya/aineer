@@ -333,6 +333,42 @@ impl RuntimeConfig {
             })
             .unwrap_or_default()
     }
+
+    /// Resolve an environment variable by name.
+    ///
+    /// Lookup order:
+    /// 1. System environment variable (`std::env::var`)
+    /// 2. The `"env"` section in merged settings.json
+    ///
+    /// Returns `None` if the key is absent or empty in both sources.
+    #[must_use]
+    pub fn resolve_env(&self, key: &str) -> Option<String> {
+        if let Ok(val) = std::env::var(key) {
+            if !val.is_empty() {
+                return Some(val);
+            }
+        }
+        self.merged
+            .get("env")
+            .and_then(JsonValue::as_object)
+            .and_then(|obj| obj.get(key))
+            .and_then(JsonValue::as_str)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    }
+
+    /// Batch-apply the `"env"` section to the process environment.
+    ///
+    /// Only sets variables not already present so explicit shell exports take
+    /// precedence. Call once at startup to make `std::env::var` work for
+    /// downstream code that is not config-aware.
+    pub fn apply_env(&self) {
+        for (key, value) in self.env_section() {
+            if std::env::var_os(&key).is_none() {
+                std::env::set_var(&key, &value);
+            }
+        }
+    }
 }
 
 impl RuntimeFeatureConfig {
