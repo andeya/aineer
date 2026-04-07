@@ -2,10 +2,10 @@ use std::collections::BTreeMap;
 
 use serde_json::Value as JsonValue;
 
-use crate::config::{McpTransport, RuntimeConfig, ScopedMcpServerConfig};
-use crate::mcp::mcp_tool_name;
-use crate::mcp_client::{McpClientBootstrap, McpClientTransport};
-use crate::mcp_remote::McpRemoteClient;
+use crate::client::{McpClientBootstrap, McpClientTransport};
+use crate::config::{McpTransport, ScopedMcpServerConfig};
+use crate::naming::mcp_tool_name;
+use crate::remote::McpRemoteClient;
 
 use super::process::{default_initialize_params, spawn_mcp_stdio_process, McpStdioProcess};
 use super::types::{
@@ -51,11 +51,6 @@ pub struct McpServerManager {
 }
 
 impl McpServerManager {
-    #[must_use]
-    pub fn from_runtime_config(config: &RuntimeConfig) -> Self {
-        Self::from_servers(config.mcp().servers())
-    }
-
     #[must_use]
     pub fn from_servers(servers: &BTreeMap<String, ScopedMcpServerConfig>) -> Self {
         let mut managed_servers = BTreeMap::new();
@@ -203,6 +198,144 @@ impl McpServerManager {
                 }
             };
         Ok(response)
+    }
+
+    pub async fn list_resources(
+        &mut self,
+        server_name: &str,
+    ) -> Result<Vec<super::types::McpResource>, McpServerManagerError> {
+        self.ensure_server_ready(server_name).await?;
+        let request_id = self.take_request_id();
+        let server = self.server_mut(server_name)?;
+        let process =
+            server
+                .process
+                .as_mut()
+                .ok_or_else(|| McpServerManagerError::InvalidResponse {
+                    server_name: server_name.to_string(),
+                    method: "resources/list",
+                    details: "server process missing".to_string(),
+                })?;
+        let params = Some(super::types::McpListResourcesParams { cursor: None });
+        let response: JsonRpcResponse<super::types::McpListResourcesResult> = match process {
+            McpServerProcess::Stdio(p) => p.request(request_id, "resources/list", params).await?,
+            McpServerProcess::Remote(c) => c.request(request_id, "resources/list", params).await?,
+        };
+        if let Some(error) = response.error {
+            return Err(McpServerManagerError::JsonRpc {
+                server_name: server_name.to_string(),
+                method: "resources/list",
+                error,
+            });
+        }
+        Ok(response.result.map(|r| r.resources).unwrap_or_default())
+    }
+
+    pub async fn read_resource(
+        &mut self,
+        server_name: &str,
+        uri: &str,
+    ) -> Result<Vec<super::types::McpResourceContents>, McpServerManagerError> {
+        self.ensure_server_ready(server_name).await?;
+        let request_id = self.take_request_id();
+        let server = self.server_mut(server_name)?;
+        let process =
+            server
+                .process
+                .as_mut()
+                .ok_or_else(|| McpServerManagerError::InvalidResponse {
+                    server_name: server_name.to_string(),
+                    method: "resources/read",
+                    details: "server process missing".to_string(),
+                })?;
+        let params = Some(super::types::McpReadResourceParams {
+            uri: uri.to_string(),
+        });
+        let response: JsonRpcResponse<super::types::McpReadResourceResult> = match process {
+            McpServerProcess::Stdio(p) => p.request(request_id, "resources/read", params).await?,
+            McpServerProcess::Remote(c) => c.request(request_id, "resources/read", params).await?,
+        };
+        if let Some(error) = response.error {
+            return Err(McpServerManagerError::JsonRpc {
+                server_name: server_name.to_string(),
+                method: "resources/read",
+                error,
+            });
+        }
+        Ok(response.result.map(|r| r.contents).unwrap_or_default())
+    }
+
+    pub async fn list_prompts(
+        &mut self,
+        server_name: &str,
+    ) -> Result<Vec<super::types::McpPrompt>, McpServerManagerError> {
+        self.ensure_server_ready(server_name).await?;
+        let request_id = self.take_request_id();
+        let server = self.server_mut(server_name)?;
+        let process =
+            server
+                .process
+                .as_mut()
+                .ok_or_else(|| McpServerManagerError::InvalidResponse {
+                    server_name: server_name.to_string(),
+                    method: "prompts/list",
+                    details: "server process missing".to_string(),
+                })?;
+        let params = Some(super::types::McpListPromptsParams { cursor: None });
+        let response: JsonRpcResponse<super::types::McpListPromptsResult> = match process {
+            McpServerProcess::Stdio(p) => p.request(request_id, "prompts/list", params).await?,
+            McpServerProcess::Remote(c) => c.request(request_id, "prompts/list", params).await?,
+        };
+        if let Some(error) = response.error {
+            return Err(McpServerManagerError::JsonRpc {
+                server_name: server_name.to_string(),
+                method: "prompts/list",
+                error,
+            });
+        }
+        Ok(response.result.map(|r| r.prompts).unwrap_or_default())
+    }
+
+    pub async fn get_prompt(
+        &mut self,
+        server_name: &str,
+        name: &str,
+        arguments: Option<std::collections::BTreeMap<String, String>>,
+    ) -> Result<super::types::McpGetPromptResult, McpServerManagerError> {
+        self.ensure_server_ready(server_name).await?;
+        let request_id = self.take_request_id();
+        let server = self.server_mut(server_name)?;
+        let process =
+            server
+                .process
+                .as_mut()
+                .ok_or_else(|| McpServerManagerError::InvalidResponse {
+                    server_name: server_name.to_string(),
+                    method: "prompts/get",
+                    details: "server process missing".to_string(),
+                })?;
+        let params = Some(super::types::McpGetPromptParams {
+            name: name.to_string(),
+            arguments,
+        });
+        let response: JsonRpcResponse<super::types::McpGetPromptResult> = match process {
+            McpServerProcess::Stdio(p) => p.request(request_id, "prompts/get", params).await?,
+            McpServerProcess::Remote(c) => c.request(request_id, "prompts/get", params).await?,
+        };
+        if let Some(error) = response.error {
+            return Err(McpServerManagerError::JsonRpc {
+                server_name: server_name.to_string(),
+                method: "prompts/get",
+                error,
+            });
+        }
+        response
+            .result
+            .ok_or_else(|| McpServerManagerError::InvalidResponse {
+                server_name: server_name.to_string(),
+                method: "prompts/get",
+                details: "missing result payload".to_string(),
+            })
     }
 
     pub async fn shutdown(&mut self) -> Result<(), McpServerManagerError> {

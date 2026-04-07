@@ -196,6 +196,71 @@ pub struct McpReadResourceResult {
     pub contents: Vec<McpResourceContents>,
 }
 
+// ── Prompts ─────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct McpListPromptsParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct McpPromptArgument {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub required: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct McpPrompt {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub arguments: Vec<McpPromptArgument>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct McpListPromptsResult {
+    pub prompts: Vec<McpPrompt>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct McpGetPromptParams {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub arguments: Option<BTreeMap<String, String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct McpPromptMessage {
+    pub role: String,
+    pub content: McpPromptContent,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct McpPromptContent {
+    #[serde(rename = "type")]
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct McpGetPromptResult {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub messages: Vec<McpPromptMessage>,
+}
+
+// ── Managed tool wrapper ────────────────────────────────────────────
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ManagedMcpTool {
     pub server_name: String,
@@ -211,12 +276,43 @@ pub struct UnsupportedMcpServer {
     pub reason: String,
 }
 
+/// Structured error type for MCP transport operations.
+#[derive(Debug, thiserror::Error)]
+pub enum McpTransportError {
+    #[error("connection failed: {0}")]
+    Connection(#[source] std::io::Error),
+
+    #[error("request timed out after {timeout_ms}ms")]
+    Timeout { timeout_ms: u64 },
+
+    #[error("JSON-RPC protocol error: {message}")]
+    Protocol { message: String },
+
+    #[error("response ID mismatch: expected {expected}, got {actual}")]
+    IdMismatch { expected: u64, actual: u64 },
+
+    #[error("server returned error: code={code}, message={message}")]
+    ServerError { code: i64, message: String },
+
+    #[error("WebSocket error: {0}")]
+    WebSocket(String),
+
+    #[error("HTTP error: status {status}")]
+    Http { status: u16 },
+
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+
+    #[error("JSON serialization error: {0}")]
+    Json(#[from] serde_json::Error),
+}
+
 #[derive(Debug)]
 pub enum McpServerManagerError {
-    Io(io::Error),
+    Transport(McpTransportError),
     SpawnFailed {
         server_name: String,
-        source: io::Error,
+        source: McpTransportError,
     },
     JsonRpc {
         server_name: String,
@@ -239,7 +335,7 @@ pub enum McpServerManagerError {
 impl std::fmt::Display for McpServerManagerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Io(error) => write!(f, "{error}"),
+            Self::Transport(error) => write!(f, "{error}"),
             Self::SpawnFailed {
                 server_name,
                 source,
@@ -275,7 +371,7 @@ impl std::fmt::Display for McpServerManagerError {
 impl std::error::Error for McpServerManagerError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Io(error) | Self::SpawnFailed { source: error, .. } => Some(error),
+            Self::Transport(error) | Self::SpawnFailed { source: error, .. } => Some(error),
             Self::JsonRpc { .. }
             | Self::InvalidResponse { .. }
             | Self::UnknownTool { .. }
@@ -284,9 +380,15 @@ impl std::error::Error for McpServerManagerError {
     }
 }
 
+impl From<McpTransportError> for McpServerManagerError {
+    fn from(value: McpTransportError) -> Self {
+        Self::Transport(value)
+    }
+}
+
 impl From<io::Error> for McpServerManagerError {
     fn from(value: io::Error) -> Self {
-        Self::Io(value)
+        Self::Transport(value.into())
     }
 }
 
@@ -296,12 +398,18 @@ mod tests {
 
     #[test]
     fn error_display_covers_all_variants() {
-        let io_err = McpServerManagerError::Io(io::Error::new(io::ErrorKind::NotFound, "gone"));
+        let io_err = McpServerManagerError::Transport(McpTransportError::Io(io::Error::new(
+            io::ErrorKind::NotFound,
+            "gone",
+        )));
         assert!(io_err.to_string().contains("gone"));
 
         let spawn_err = McpServerManagerError::SpawnFailed {
             server_name: "test-srv".into(),
-            source: io::Error::new(io::ErrorKind::PermissionDenied, "denied"),
+            source: McpTransportError::Io(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "denied",
+            )),
         };
         assert!(spawn_err.to_string().contains("test-srv"));
         assert!(spawn_err.to_string().contains("denied"));
@@ -339,12 +447,12 @@ mod tests {
 
     #[test]
     fn error_source_returns_io_for_io_and_spawn_variants() {
-        let io_err = McpServerManagerError::Io(io::Error::other("x"));
+        let io_err = McpServerManagerError::Transport(McpTransportError::Io(io::Error::other("x")));
         assert!(std::error::Error::source(&io_err).is_some());
 
         let spawn_err = McpServerManagerError::SpawnFailed {
             server_name: "s".into(),
-            source: io::Error::other("y"),
+            source: McpTransportError::Io(io::Error::other("y")),
         };
         assert!(std::error::Error::source(&spawn_err).is_some());
 

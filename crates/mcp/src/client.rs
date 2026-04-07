@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::config::{McpOAuthConfig, McpServerConfig, ScopedMcpServerConfig};
-use crate::mcp::{mcp_server_signature, mcp_tool_prefix, normalize_name_for_mcp};
+use crate::naming::{mcp_server_signature, mcp_tool_prefix, normalize_name_for_mcp};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum McpClientTransport {
@@ -105,6 +105,15 @@ impl McpClientTransport {
     }
 }
 
+/// Result of an OAuth browser authorization flow.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OAuthTokenResult {
+    pub access_token: String,
+    pub token_type: String,
+    pub expires_in: Option<u64>,
+    pub refresh_token: Option<String>,
+}
+
 impl McpClientAuth {
     #[must_use]
     pub fn from_oauth(oauth: Option<McpOAuthConfig>) -> Self {
@@ -115,6 +124,66 @@ impl McpClientAuth {
     pub const fn requires_user_auth(&self) -> bool {
         matches!(self, Self::OAuth(_))
     }
+
+    /// The callback port for the OAuth browser flow, defaulting to 7856.
+    #[must_use]
+    pub fn callback_port(&self) -> u16 {
+        match self {
+            Self::OAuth(oauth) => oauth.callback_port.unwrap_or(7856),
+            Self::None => 7856,
+        }
+    }
+
+    /// Authorization server metadata URL, if configured.
+    #[must_use]
+    pub fn auth_metadata_url(&self) -> Option<&str> {
+        match self {
+            Self::OAuth(oauth) => oauth.auth_server_metadata_url.as_deref(),
+            Self::None => None,
+        }
+    }
+
+    /// Build the OAuth authorization URL that the user should open in their browser.
+    ///
+    /// Returns `(authorize_url, state, code_verifier)` for PKCE flow.
+    #[must_use]
+    pub fn build_authorize_url(&self, redirect_uri: &str) -> Option<OAuthAuthorizeParams> {
+        let Self::OAuth(oauth) = self else {
+            return None;
+        };
+        let client_id = oauth.client_id.as_deref().unwrap_or("codineer-mcp");
+        let state = format!("{:016x}", rand_u64());
+        let code_verifier = format!("{:032x}{:032x}", rand_u64(), rand_u64());
+        let authorize_url = format!(
+            "{}?client_id={}&redirect_uri={}&response_type=code&state={}&code_challenge={}&code_challenge_method=plain",
+            oauth.auth_server_metadata_url.as_deref().unwrap_or(""),
+            client_id,
+            redirect_uri,
+            state,
+            code_verifier,
+        );
+        Some(OAuthAuthorizeParams {
+            authorize_url,
+            state,
+            code_verifier,
+            client_id: client_id.to_string(),
+        })
+    }
+}
+
+/// Parameters for an OAuth PKCE authorization request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OAuthAuthorizeParams {
+    pub authorize_url: String,
+    pub state: String,
+    pub code_verifier: String,
+    pub client_id: String,
+}
+
+fn rand_u64() -> u64 {
+    use std::collections::hash_map::RandomState;
+    use std::hash::{BuildHasher, Hasher};
+    RandomState::new().build_hasher().finish()
 }
 
 #[cfg(test)]

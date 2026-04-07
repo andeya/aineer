@@ -7,12 +7,11 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
-use crate::mcp_client::{
-    McpClientAuth, McpClientBootstrap, McpClientTransport, McpRemoteTransport,
-};
-use crate::mcp_stdio::types::{
+use crate::client::{McpClientAuth, McpClientBootstrap, McpClientTransport, McpRemoteTransport};
+use crate::stdio::types::{
     JsonRpcId, JsonRpcRequest, JsonRpcResponse, McpInitializeParams, McpInitializeResult,
     McpListToolsParams, McpListToolsResult, McpToolCallParams, McpToolCallResult,
+    McpTransportError,
 };
 
 #[derive(Debug)]
@@ -37,23 +36,22 @@ pub struct McpRemoteClient {
 }
 
 impl McpRemoteClient {
-    pub async fn connect(bootstrap: &McpClientBootstrap) -> io::Result<Self> {
+    pub async fn connect(bootstrap: &McpClientBootstrap) -> Result<Self, McpTransportError> {
         match &bootstrap.transport {
             McpClientTransport::Sse(remote) | McpClientTransport::Http(remote) => {
                 Self::connect_http(remote).await
             }
             McpClientTransport::WebSocket(remote) => Self::connect_ws(remote).await,
-            other => Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
+            other => Err(McpTransportError::Protocol {
+                message: format!(
                     "MCP bootstrap transport for {} is not remote: {other:?}",
                     bootstrap.server_name
                 ),
-            )),
+            }),
         }
     }
 
-    async fn connect_http(remote: &McpRemoteTransport) -> io::Result<Self> {
+    async fn connect_http(remote: &McpRemoteTransport) -> Result<Self, McpTransportError> {
         let mut headers = build_headers(&remote.headers);
         if let McpClientAuth::OAuth(ref oauth) = remote.auth {
             if let Some(ref client_id) = oauth.client_id {
@@ -79,7 +77,7 @@ impl McpRemoteClient {
         })
     }
 
-    async fn connect_ws(remote: &McpRemoteTransport) -> io::Result<Self> {
+    async fn connect_ws(remote: &McpRemoteTransport) -> Result<Self, McpTransportError> {
         let mut request = tokio_tungstenite::tungstenite::http::Request::builder()
             .uri(&remote.url)
             .header("Sec-WebSocket-Protocol", "mcp");
@@ -88,25 +86,30 @@ impl McpRemoteClient {
             request = request.header(key.as_str(), value.as_str());
         }
 
-        let request = request
-            .body(())
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+        let request = request.body(()).map_err(|e| McpTransportError::Protocol {
+            message: e.to_string(),
+        })?;
 
         let (ws, _response) = tokio_tungstenite::connect_async(request)
             .await
-            .map_err(|e| io::Error::new(io::ErrorKind::ConnectionRefused, e))?;
+            .map_err(|e| {
+                McpTransportError::Connection(io::Error::new(
+                    io::ErrorKind::ConnectionRefused,
+                    e.to_string(),
+                ))
+            })?;
 
         Ok(Self {
             transport: RemoteTransport::WebSocket { ws: Box::new(ws) },
         })
     }
 
-    async fn request<TParams: Serialize, TResult: DeserializeOwned>(
+    pub async fn request<TParams: Serialize, TResult: DeserializeOwned>(
         &mut self,
         id: JsonRpcId,
         method: impl Into<String>,
         params: Option<TParams>,
-    ) -> io::Result<JsonRpcResponse<TResult>> {
+    ) -> Result<JsonRpcResponse<TResult>, McpTransportError> {
         let method = method.into();
         let request = JsonRpcRequest::new(id.clone(), method.clone(), params);
 
@@ -116,8 +119,7 @@ impl McpRemoteClient {
                 url,
                 headers,
             } => {
-                let body = serde_json::to_vec(&request)
-                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+                let body = serde_json::to_vec(&request)?;
 
                 let response = client
                     .post(url.as_str())
@@ -127,13 +129,17 @@ impl McpRemoteClient {
                     .body(body)
                     .send()
                     .await
-                    .map_err(|e| io::Error::new(io::ErrorKind::ConnectionRefused, e))?;
+                    .map_err(|e| {
+                        McpTransportError::Connection(io::Error::new(
+                            io::ErrorKind::ConnectionRefused,
+                            e.to_string(),
+                        ))
+                    })?;
 
                 if !response.status().is_success() {
-                    return Err(io::Error::other(format!(
-                        "MCP HTTP request {method} failed with status {}",
-                        response.status()
-                    )));
+                    return Err(McpTransportError::Http {
+                        status: response.status().as_u16(),
+                    });
                 }
 
                 let content_type = response
@@ -144,49 +150,41 @@ impl McpRemoteClient {
                     .to_string();
 
                 if content_type.contains("text/event-stream") {
-                    let text = response
-                        .text()
-                        .await
-                        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+                    let text = response.text().await.map_err(|e| {
+                        McpTransportError::Io(io::Error::new(io::ErrorKind::InvalidData, e))
+                    })?;
                     parse_sse_jsonrpc(&text, &id)
                 } else {
-                    let bytes = response
-                        .bytes()
-                        .await
-                        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-                    serde_json::from_slice(&bytes)
-                        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+                    let bytes = response.bytes().await.map_err(|e| {
+                        McpTransportError::Io(io::Error::new(io::ErrorKind::InvalidData, e))
+                    })?;
+                    Ok(serde_json::from_slice(&bytes)?)
                 }
             }
             RemoteTransport::WebSocket { ws } => {
-                let body = serde_json::to_string(&request)
-                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+                let body = serde_json::to_string(&request)?;
                 ws.send(WsMessage::Text(body.into()))
                     .await
-                    .map_err(|e| io::Error::new(io::ErrorKind::BrokenPipe, e))?;
+                    .map_err(|e| McpTransportError::WebSocket(e.to_string()))?;
 
                 let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(120);
                 loop {
                     let msg = tokio::time::timeout_at(deadline, ws.next())
                         .await
-                        .map_err(|_| {
-                            io::Error::new(
-                                io::ErrorKind::TimedOut,
-                                "WebSocket RPC response timed out after 120s",
-                            )
+                        .map_err(|_| McpTransportError::Timeout {
+                            timeout_ms: 120_000,
                         })?
                         .ok_or_else(|| {
-                            io::Error::new(
+                            McpTransportError::Io(io::Error::new(
                                 io::ErrorKind::UnexpectedEof,
                                 "WebSocket stream closed while waiting for response",
-                            )
+                            ))
                         })?
-                        .map_err(|e| io::Error::new(io::ErrorKind::BrokenPipe, e))?;
+                        .map_err(|e| McpTransportError::WebSocket(e.to_string()))?;
 
                     match msg {
                         WsMessage::Text(text) => {
-                            let response: JsonRpcResponse<TResult> = serde_json::from_str(&text)
-                                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+                            let response: JsonRpcResponse<TResult> = serde_json::from_str(&text)?;
                             if response.id == id {
                                 return Ok(response);
                             }
@@ -195,9 +193,8 @@ impl McpRemoteClient {
                             let _ = ws.send(WsMessage::Pong(data)).await;
                         }
                         WsMessage::Close(_) => {
-                            return Err(io::Error::new(
-                                io::ErrorKind::ConnectionAborted,
-                                "WebSocket connection closed by server",
+                            return Err(McpTransportError::WebSocket(
+                                "WebSocket connection closed by server".into(),
                             ));
                         }
                         _ => {}
@@ -211,7 +208,7 @@ impl McpRemoteClient {
         &mut self,
         id: JsonRpcId,
         params: McpInitializeParams,
-    ) -> io::Result<JsonRpcResponse<McpInitializeResult>> {
+    ) -> Result<JsonRpcResponse<McpInitializeResult>, McpTransportError> {
         self.request(id, "initialize", Some(params)).await
     }
 
@@ -219,7 +216,7 @@ impl McpRemoteClient {
         &mut self,
         id: JsonRpcId,
         params: Option<McpListToolsParams>,
-    ) -> io::Result<JsonRpcResponse<McpListToolsResult>> {
+    ) -> Result<JsonRpcResponse<McpListToolsResult>, McpTransportError> {
         self.request(id, "tools/list", params).await
     }
 
@@ -227,11 +224,11 @@ impl McpRemoteClient {
         &mut self,
         id: JsonRpcId,
         params: McpToolCallParams,
-    ) -> io::Result<JsonRpcResponse<McpToolCallResult>> {
+    ) -> Result<JsonRpcResponse<McpToolCallResult>, McpTransportError> {
         self.request(id, "tools/call", Some(params)).await
     }
 
-    pub async fn shutdown(&mut self) -> io::Result<()> {
+    pub async fn shutdown(&mut self) -> Result<(), McpTransportError> {
         match &mut self.transport {
             RemoteTransport::Http { .. } => Ok(()),
             RemoteTransport::WebSocket { ws } => {
@@ -258,7 +255,7 @@ fn build_headers(headers: &BTreeMap<String, String>) -> HeaderMap {
 fn parse_sse_jsonrpc<T: DeserializeOwned>(
     sse_text: &str,
     expected_id: &JsonRpcId,
-) -> io::Result<JsonRpcResponse<T>> {
+) -> Result<JsonRpcResponse<T>, McpTransportError> {
     for line in sse_text.lines() {
         let data = match line.strip_prefix("data: ") {
             Some(d) if !d.is_empty() => d.trim(),
@@ -270,10 +267,9 @@ fn parse_sse_jsonrpc<T: DeserializeOwned>(
             }
         }
     }
-    Err(io::Error::new(
-        io::ErrorKind::InvalidData,
-        "no matching JSON-RPC response found in SSE stream",
-    ))
+    Err(McpTransportError::Protocol {
+        message: "no matching JSON-RPC response found in SSE stream".into(),
+    })
 }
 
 #[cfg(test)]
@@ -305,7 +301,7 @@ mod tests {
     #[test]
     fn parse_sse_rejects_when_no_match() {
         let sse_text = "data: {\"jsonrpc\":\"2.0\",\"id\":99,\"result\":null}\n\n";
-        let result: io::Result<JsonRpcResponse<JsonValue>> =
+        let result: Result<JsonRpcResponse<JsonValue>, McpTransportError> =
             parse_sse_jsonrpc(sse_text, &JsonRpcId::Number(1));
         assert!(result.is_err());
     }

@@ -1,4 +1,4 @@
-use crate::config::{McpServerConfig, ScopedMcpServerConfig};
+use crate::config::{McpOAuthConfig, McpServerConfig, ScopedMcpServerConfig};
 
 const CLAUDEAI_SERVER_PREFIX: &str = "claude.ai ";
 const MCP_PROXY_PATH_MARKERS: [&str; 2] = ["/v2/session_ingress/shttp/mcp/", "/v2/ccr-sessions/"];
@@ -132,7 +132,7 @@ fn render_env_signature(map: &std::collections::BTreeMap<String, String>) -> Str
         .join(";")
 }
 
-fn render_oauth_signature(oauth: Option<&crate::config::McpOAuthConfig>) -> String {
+fn render_oauth_signature(oauth: Option<&McpOAuthConfig>) -> String {
     oauth.map_or_else(String::new, |oauth| {
         format!(
             "{}|{}|{}|{}",
@@ -206,8 +206,8 @@ mod tests {
     use std::collections::BTreeMap;
 
     use crate::config::{
-        ConfigSource, McpRemoteServerConfig, McpServerConfig, McpStdioServerConfig,
-        McpWebSocketServerConfig, ScopedMcpServerConfig,
+        ConfigSource, McpManagedProxyServerConfig, McpRemoteServerConfig, McpSdkServerConfig,
+        McpServerConfig, McpStdioServerConfig, McpWebSocketServerConfig, ScopedMcpServerConfig,
     };
 
     use super::{
@@ -324,8 +324,6 @@ mod tests {
 
     #[test]
     fn signature_returns_none_for_sdk() {
-        use crate::config::McpSdkServerConfig;
-
         let sdk = McpServerConfig::Sdk(McpSdkServerConfig {
             name: "built-in".into(),
         });
@@ -334,8 +332,6 @@ mod tests {
 
     #[test]
     fn signature_for_managed_proxy() {
-        use crate::config::McpManagedProxyServerConfig;
-
         let proxy = McpServerConfig::ManagedProxy(McpManagedProxyServerConfig {
             url: "https://proxy.example".into(),
             id: "p1".into(),
@@ -362,8 +358,6 @@ mod tests {
 
     #[test]
     fn scoped_hash_for_managed_proxy() {
-        use crate::config::McpManagedProxyServerConfig;
-
         let config = ScopedMcpServerConfig {
             scope: ConfigSource::Project,
             config: McpServerConfig::ManagedProxy(McpManagedProxyServerConfig {
@@ -377,8 +371,6 @@ mod tests {
 
     #[test]
     fn scoped_hash_for_sdk() {
-        use crate::config::McpSdkServerConfig;
-
         let config = ScopedMcpServerConfig {
             scope: ConfigSource::User,
             config: McpServerConfig::Sdk(McpSdkServerConfig {

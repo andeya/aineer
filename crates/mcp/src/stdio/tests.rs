@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::ErrorKind;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -9,12 +8,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde_json::json;
 use tokio::runtime::Builder;
 
+use crate::client::McpClientBootstrap;
 use crate::config::{
     ConfigSource, McpRemoteServerConfig, McpSdkServerConfig, McpServerConfig, McpStdioServerConfig,
     McpTransport, McpWebSocketServerConfig, ScopedMcpServerConfig,
 };
-use crate::mcp::mcp_tool_name;
-use crate::mcp_client::McpClientBootstrap;
+use crate::naming::mcp_tool_name;
 
 use super::manager::McpServerManager;
 use super::process::{spawn_mcp_stdio_process, McpStdioProcess};
@@ -22,6 +21,7 @@ use super::types::{
     JsonRpcId, JsonRpcRequest, JsonRpcResponse, McpInitializeClientInfo, McpInitializeParams,
     McpInitializeResult, McpInitializeServerInfo, McpListToolsResult, McpReadResourceParams,
     McpReadResourceResult, McpResourceContents, McpServerManagerError, McpTool, McpToolCallParams,
+    McpTransportError,
 };
 
 fn temp_dir() -> PathBuf {
@@ -338,8 +338,8 @@ fn has_python() -> bool {
     python_command().is_some()
 }
 
-fn script_transport(script_path: &Path) -> crate::mcp_client::McpStdioTransport {
-    crate::mcp_client::McpStdioTransport {
+fn script_transport(script_path: &Path) -> crate::client::McpStdioTransport {
+    crate::client::McpStdioTransport {
         command: python_command().expect("python guard should be checked before calling"),
         args: vec![script_path.to_string_lossy().into_owned()],
         env: BTreeMap::new(),
@@ -434,13 +434,16 @@ fn spawns_stdio_process_and_round_trips_io() {
 fn rejects_non_stdio_bootstrap() {
     let config = ScopedMcpServerConfig {
         scope: ConfigSource::Local,
-        config: McpServerConfig::Sdk(crate::config::McpSdkServerConfig {
+        config: McpServerConfig::Sdk(McpSdkServerConfig {
             name: "sdk-server".to_string(),
         }),
     };
     let bootstrap = McpClientBootstrap::from_scoped_config("sdk server", &config);
     let error = spawn_mcp_stdio_process(&bootstrap).expect_err("non-stdio should fail");
-    assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    assert!(matches!(
+        &error,
+        McpTransportError::Protocol { message } if message.contains("not stdio")
+    ));
 }
 
 #[test]
@@ -541,7 +544,7 @@ fn direct_spawn_uses_transport_env() {
         .expect("runtime");
     runtime.block_on(async {
         let script_path = write_echo_script();
-        let transport = crate::mcp_client::McpStdioTransport {
+        let transport = crate::client::McpStdioTransport {
             command: "/bin/sh".to_string(),
             args: vec![script_path.to_string_lossy().into_owned()],
             env: BTreeMap::from([("MCP_TEST_TOKEN".to_string(), "direct-secret".to_string())]),
