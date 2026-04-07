@@ -124,7 +124,14 @@ fn agent_rejects_blank_required_fields() {
 
 #[test]
 fn notebook_edit_replaces_inserts_and_deletes_cells() {
-    let path = temp_path("notebook.ipynb");
+    let _guard = env_lock()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let nb_root = temp_path("nb-suite");
+    fs::create_dir_all(&nb_root).expect("create notebook test root");
+    std::env::set_var("CODINEER_WORKSPACE_ROOT", &nb_root);
+
+    let path = nb_root.join("notebook.ipynb");
     std::fs::write(
         &path,
         r#"{
@@ -200,11 +207,19 @@ fn notebook_edit_replaces_inserts_and_deletes_cells() {
     assert_eq!(cells[1]["cell_type"], "code");
     assert_eq!(cells[1]["source"][0], "print(3)\n");
     let _ = std::fs::remove_file(path);
+    std::env::remove_var("CODINEER_WORKSPACE_ROOT");
 }
 
 #[test]
 fn notebook_edit_rejects_invalid_inputs() {
-    let text_path = temp_path("notebook.txt");
+    let _guard = env_lock()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let nb_root = temp_path("nb-reject-suite");
+    fs::create_dir_all(&nb_root).expect("create notebook test root");
+    std::env::set_var("CODINEER_WORKSPACE_ROOT", &nb_root);
+
+    let text_path = nb_root.join("notebook.txt");
     fs::write(&text_path, "not a notebook").expect("write text file");
     let wrong_extension = execute_tool(
         "NotebookEdit",
@@ -217,7 +232,7 @@ fn notebook_edit_rejects_invalid_inputs() {
     assert!(wrong_extension.contains("Jupyter notebook"));
     let _ = fs::remove_file(&text_path);
 
-    let empty_notebook = temp_path("empty.ipynb");
+    let empty_notebook = nb_root.join("empty.ipynb");
     fs::write(
         &empty_notebook,
         r#"{"cells":[],"metadata":{"kernelspec":{"language":"python"}},"nbformat":4,"nbformat_minor":5}"#,
@@ -244,11 +259,15 @@ fn notebook_edit_rejects_invalid_inputs() {
     .expect_err("delete on empty notebook should fail");
     assert!(missing_cell.contains("Notebook has no cells to edit"));
     let _ = fs::remove_file(empty_notebook);
+    std::env::remove_var("CODINEER_WORKSPACE_ROOT");
 }
 
 #[test]
 #[cfg(unix)]
 fn bash_tool_reports_success_exit_failure_timeout_and_background() {
+    let _guard = env_lock()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let no_sandbox = true;
     let success = execute_tool(
         "bash",
