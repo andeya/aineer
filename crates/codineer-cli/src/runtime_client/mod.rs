@@ -108,6 +108,7 @@ pub(crate) fn build_runtime(params: RuntimeParams) -> CliResult<RuntimeBuildResu
             mcp_manager: Arc::clone(&mcp_manager),
             tools_disabled_by_provider: false,
             fallback_models,
+            cached_tools: None,
         },
         CliToolExecutor::new(
             allowed_tools.clone(),
@@ -140,6 +141,10 @@ pub(crate) struct DefaultRuntimeClient {
     mcp_manager: SharedMcpManager,
     tools_disabled_by_provider: bool,
     fallback_models: Vec<(String, ProviderClient)>,
+    /// Session-scoped tool schema cache. Locks the tool definitions at first
+    /// build so mid-session MCP reconnects or config changes don't alter the
+    /// byte-level serialization and bust the API prompt cache.
+    cached_tools: Option<Vec<api::ToolDefinition>>,
 }
 
 impl DefaultRuntimeClient {
@@ -147,18 +152,21 @@ impl DefaultRuntimeClient {
         self.enable_tools && !self.tools_disabled_by_provider
     }
 
-    fn build_message_request(&self, request: &ApiRequest) -> MessageRequest {
+    fn build_message_request(&mut self, request: &ApiRequest) -> MessageRequest {
         let use_tools = self.effective_tools_enabled();
-        let mut tools: Option<Vec<_>> = use_tools.then(|| {
-            let mut specs = filter_tool_specs(&self.tool_registry, self.allowed_tools.as_ref());
-            specs.extend(discover_mcp_tools(&self.runtime, &self.mcp_manager));
-            specs
-        });
-        if let Some(ref mut list) = tools {
-            if let Some(last) = list.last_mut() {
-                last.cache_control = Some(api::CacheControl::ephemeral());
-            }
-        }
+        let tools = if use_tools {
+            let cached = self.cached_tools.get_or_insert_with(|| {
+                let mut specs = filter_tool_specs(&self.tool_registry, self.allowed_tools.as_ref());
+                specs.extend(discover_mcp_tools(&self.runtime, &self.mcp_manager));
+                if let Some(last) = specs.last_mut() {
+                    last.cache_control = Some(api::CacheControl::ephemeral());
+                }
+                specs
+            });
+            Some(cached.clone())
+        } else {
+            None
+        };
         MessageRequest {
             model: self.model.clone(),
             max_tokens: max_tokens_for_model(&self.model),
