@@ -5,6 +5,7 @@
 //! ensures the compiler enforces handling of every case.
 
 /// Why the loop should continue for another iteration.
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub enum Transition {
     /// Normal tool-use → next turn.
@@ -32,6 +33,7 @@ impl std::fmt::Display for Transition {
 }
 
 /// Why the loop terminated.
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub enum StopReason {
     /// Model returned end_turn / stop_sequence with no pending tool use.

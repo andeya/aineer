@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use api::ToolDefinition;
 use plugins::PluginTool;
@@ -8,10 +8,21 @@ use serde_json::Value;
 use crate::execute_tool;
 use crate::specs::mvp_tool_specs;
 
+/// Whether a tool is always included in the model prompt or loaded after [`ToolSearch`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolTier {
+    /// Always included in prompt (bash, read_file, write_file, edit_file, glob_search, grep_search, [`ToolSearch`], etc.).
+    Core,
+    /// Included only after [`ToolSearch`] discovers and activates the tool name for the session.
+    Extended,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolManifestEntry {
     pub name: String,
     pub source: ToolSource,
+    /// Catalog tier when this entry is surfaced in the tool manifest.
+    pub tier: ToolTier,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,6 +54,7 @@ pub struct ToolSpec {
     pub description: &'static str,
     pub input_schema: Value,
     pub required_permission: PermissionMode,
+    pub tier: ToolTier,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -135,29 +147,70 @@ impl GlobalToolRegistry {
 
     #[must_use]
     pub fn definitions(&self, allowed_tools: Option<&BTreeSet<String>>) -> Vec<ToolDefinition> {
-        let builtin = mvp_tool_specs()
-            .into_iter()
-            .filter(|spec| allowed_tools.is_none_or(|allowed| allowed.contains(spec.name)))
-            .map(|spec| ToolDefinition {
-                name: spec.name.to_string(),
-                description: Some(spec.description.to_string()),
-                input_schema: spec.input_schema,
-                cache_control: None,
-            });
-        let plugin = self
-            .plugin_tools
+        self.definitions_for_lazy_prompt(allowed_tools, None)
+    }
+
+    /// Built-in and plugin tool definitions for the API, with optional lazy-load filtering.
+    ///
+    /// When `activated_extended` is `None`, every allowed tool is included (legacy “send all”
+    /// behavior). When `Some(set)`, only [`ToolTier::Core`] tools plus entries whose names appear
+    /// in the set are included. Plugin tools are always [`ToolTier::Extended`].
+    #[must_use]
+    pub fn definitions_for_lazy_prompt(
+        &self,
+        allowed_tools: Option<&BTreeSet<String>>,
+        activated_extended: Option<&HashSet<String>>,
+    ) -> Vec<ToolDefinition> {
+        let lazy = activated_extended.is_some();
+        let builtin = mvp_tool_specs().into_iter().filter(|spec| {
+            if !allowed_tools.is_none_or(|allowed| allowed.contains(spec.name)) {
+                return false;
+            }
+            if !lazy {
+                return true;
+            }
+            match spec.tier {
+                ToolTier::Core => true,
+                ToolTier::Extended => activated_extended.is_some_and(|a| a.contains(spec.name)),
+            }
+        });
+        let builtin = builtin.map(|spec| ToolDefinition {
+            name: spec.name.to_string(),
+            description: Some(spec.description.to_string()),
+            input_schema: spec.input_schema,
+            cache_control: None,
+        });
+        let plugin = self.plugin_tools.iter().filter(|tool| {
+            let name = tool.definition().name.as_str();
+            if !allowed_tools.is_none_or(|allowed| allowed.contains(name)) {
+                return false;
+            }
+            if !lazy {
+                return true;
+            }
+            activated_extended.is_some_and(|a| a.contains(name))
+        });
+        let plugin = plugin.map(|tool| ToolDefinition {
+            name: tool.definition().name.clone(),
+            description: tool.definition().description.clone(),
+            input_schema: tool.definition().input_schema.clone(),
+            cache_control: None,
+        });
+        builtin.chain(plugin).collect()
+    }
+
+    /// [`ToolDefinition`] values for plugin tools (for search and display).
+    #[must_use]
+    pub fn plugin_tool_definitions(&self) -> Vec<ToolDefinition> {
+        self.plugin_tools
             .iter()
-            .filter(|tool| {
-                allowed_tools
-                    .is_none_or(|allowed| allowed.contains(tool.definition().name.as_str()))
-            })
             .map(|tool| ToolDefinition {
                 name: tool.definition().name.clone(),
                 description: tool.definition().description.clone(),
                 input_schema: tool.definition().input_schema.clone(),
                 cache_control: None,
-            });
-        builtin.chain(plugin).collect()
+            })
+            .collect()
     }
 
     #[must_use]
@@ -185,15 +238,17 @@ impl GlobalToolRegistry {
         builtin.chain(plugin).collect()
     }
 
-    pub fn execute(&self, name: &str, input: &Value) -> Result<String, String> {
+    pub fn execute(&self, name: &str, input: Value) -> Result<String, String> {
         if mvp_tool_specs().iter().any(|spec| spec.name == name) {
-            return execute_tool(name, input);
+            return execute_tool(name, input)
+                .map(|o| o.content)
+                .map_err(|e| e.to_string());
         }
         self.plugin_tools
             .iter()
             .find(|tool| tool.definition().name == name)
             .ok_or_else(|| format!("unsupported tool: {name}"))?
-            .execute(input)
+            .execute(&input)
             .map_err(|error| error.to_string())
     }
 
@@ -217,6 +272,7 @@ impl GlobalToolRegistry {
                 | "MCPSearch"
                 | "CronList"
                 | "Lsp"
+                | "ToolSearch"
         )
     }
 
@@ -232,7 +288,7 @@ impl GlobalToolRegistry {
                     scope.spawn(move || {
                         let value: Value =
                             serde_json::from_str(input_str).map_err(|e| e.to_string())?;
-                        self.execute(name, &value)
+                        self.execute(name, value)
                     })
                 })
                 .collect();
@@ -253,5 +309,39 @@ fn permission_mode_from_plugin(value: &str) -> PermissionMode {
         "danger-full-access" => PermissionMode::DangerFullAccess,
         "workspace-write" => PermissionMode::WorkspaceWrite,
         _ => PermissionMode::ReadOnly,
+    }
+}
+
+#[cfg(test)]
+mod lazy_prompt_tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn definitions_for_lazy_prompt_empty_activation_is_core_plus_tool_search_only() {
+        let reg = GlobalToolRegistry::builtin();
+        let activated = HashSet::new();
+        let defs = reg.definitions_for_lazy_prompt(None, Some(&activated));
+        let names: Vec<_> = defs.iter().map(|d| d.name.as_str()).collect();
+        assert!(names.contains(&"bash"));
+        assert!(names.contains(&"read_file"));
+        assert!(names.contains(&"ToolSearch"));
+        assert!(
+            !names.contains(&"WebFetch") && !names.contains(&"Agent"),
+            "extended-tier tools should be omitted until activated: {names:?}"
+        );
+    }
+
+    #[test]
+    fn definitions_for_lazy_prompt_includes_activated_extended() {
+        let reg = GlobalToolRegistry::builtin();
+        let mut activated = HashSet::new();
+        activated.insert("WebFetch".to_string());
+        activated.insert("Skill".to_string());
+        let defs = reg.definitions_for_lazy_prompt(None, Some(&activated));
+        let names: Vec<_> = defs.iter().map(|d| d.name.as_str()).collect();
+        assert!(names.contains(&"WebFetch"));
+        assert!(names.contains(&"Skill"));
+        assert!(!names.contains(&"Agent"));
     }
 }

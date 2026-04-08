@@ -595,7 +595,7 @@ fn filtered_tool_specs_include_plugin_tools() {
 
 #[test]
 fn permission_policy_uses_plugin_tool_permissions() {
-    let policy = permission_policy(PermissionMode::ReadOnly, &registry_with_plugin_tool());
+    let policy = permission_policy(PermissionMode::ReadOnly, &registry_with_plugin_tool(), &[]);
     let required = policy.required_mode_for("plugin_echo");
     assert_eq!(required, PermissionMode::WorkspaceWrite);
 }
@@ -682,6 +682,7 @@ fn resume_supported_command_list_matches_expected_surface() {
             "agents",
             "skills",
             "doctor",
+            "update",
         ]
     );
 }
@@ -1368,27 +1369,27 @@ fn logout_help_flag_returns_subcommand_help() {
 
 #[test]
 fn subcommand_names_includes_all_commands() {
-    use crate::cli::subcommand_names;
-    let names = subcommand_names();
-    assert!(names.contains(&"login".to_string()));
-    assert!(names.contains(&"logout".to_string()));
-    assert!(names.contains(&"status".to_string()));
-    assert!(names.contains(&"models".to_string()));
-    assert!(names.contains(&"config".to_string()));
-    assert!(names.contains(&"init".to_string()));
-    assert!(names.contains(&"help".to_string()));
-    assert!(names.contains(&"agents".to_string()));
-    assert!(names.contains(&"skills".to_string()));
+    use crate::cli::subcommand_names_static;
+    let names = subcommand_names_static();
+    assert!(names.contains(&"login"));
+    assert!(names.contains(&"logout"));
+    assert!(names.contains(&"status"));
+    assert!(names.contains(&"models"));
+    assert!(names.contains(&"config"));
+    assert!(names.contains(&"init"));
+    assert!(names.contains(&"help"));
+    assert!(names.contains(&"agents"));
+    assert!(names.contains(&"skills"));
 }
 
 #[test]
 fn suggest_subcommand_finds_typos() {
     use crate::help::suggest_subcommand;
-    assert_eq!(suggest_subcommand("logi"), Some("login".to_string()));
-    assert_eq!(suggest_subcommand("logut"), Some("logout".to_string()));
-    assert_eq!(suggest_subcommand("statu"), Some("status".to_string()));
-    assert_eq!(suggest_subcommand("modles"), Some("models".to_string()));
-    assert_eq!(suggest_subcommand("confg"), Some("config".to_string()));
+    assert_eq!(suggest_subcommand("logi"), Some("login"));
+    assert_eq!(suggest_subcommand("logut"), Some("logout"));
+    assert_eq!(suggest_subcommand("statu"), Some("status"));
+    assert_eq!(suggest_subcommand("modles"), Some("models"));
+    assert_eq!(suggest_subcommand("confg"), Some("config"));
 }
 
 #[test]
@@ -1401,8 +1402,8 @@ fn suggest_subcommand_returns_none_for_distant_input() {
 #[test]
 fn suggest_subcommand_exact_match() {
     use crate::help::suggest_subcommand;
-    assert_eq!(suggest_subcommand("login"), Some("login".to_string()));
-    assert_eq!(suggest_subcommand("models"), Some("models".to_string()));
+    assert_eq!(suggest_subcommand("login"), Some("login"));
+    assert_eq!(suggest_subcommand("models"), Some("models"));
 }
 
 #[test]

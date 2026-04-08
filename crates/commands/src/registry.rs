@@ -4,6 +4,7 @@ pub struct CommandManifestEntry {
     pub source: CommandSource,
 }
 
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandSource {
     Builtin,

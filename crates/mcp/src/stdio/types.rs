@@ -6,6 +6,7 @@ use serde_json::Value as JsonValue;
 
 use crate::config::McpTransport;
 
+#[non_exhaustive]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum JsonRpcId {
@@ -277,6 +278,7 @@ pub struct UnsupportedMcpServer {
 }
 
 /// Structured error type for MCP transport operations.
+#[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
 pub enum McpTransportError {
     #[error("connection failed: {0}")]
@@ -307,6 +309,7 @@ pub enum McpTransportError {
     Json(#[from] serde_json::Error),
 }
 
+#[non_exhaustive]
 #[derive(Debug)]
 pub enum McpServerManagerError {
     Transport(McpTransportError),

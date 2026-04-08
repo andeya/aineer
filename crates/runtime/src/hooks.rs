@@ -159,6 +159,16 @@ fn build_hook_payload(event: &RuntimeEvent<'_>) -> Value {
             "task_id": task_id,
             "success": success,
         }),
+        RuntimeEvent::ToolProgress {
+            tool_use_id,
+            tool_name,
+            progress,
+        } => json!({
+            "event": "ToolProgress",
+            "tool_use_id": tool_use_id,
+            "tool_name": tool_name,
+            "progress": progress,
+        }),
         _ => json!({ "event": event.kind().as_ref() }),
     }
 }

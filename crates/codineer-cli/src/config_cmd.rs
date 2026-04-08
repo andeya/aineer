@@ -195,6 +195,7 @@ fn json_value_to_serde(v: &JsonValue) -> serde_json::Value {
             serde_json::Value::Array(arr.iter().map(json_value_to_serde).collect())
         }
         JsonValue::Object(map) => serde_json::Value::Object(json_value_map_to_serde(map)),
+        _ => serde_json::Value::Null,
     }
 }
 

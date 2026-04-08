@@ -1,11 +1,16 @@
 use std::fmt::Write as FmtWrite;
 use std::io::{self, Write};
 
+#[cfg(test)]
 use crossterm::cursor::{MoveToColumn, RestorePosition, SavePosition};
-use crossterm::style::{Color, Print, ResetColor, SetForegroundColor, Stylize};
+#[cfg(test)]
+use crossterm::queue;
+use crossterm::style::{Color, Stylize};
+#[cfg(test)]
+use crossterm::style::{Print, ResetColor, SetForegroundColor};
+#[cfg(test)]
 use crossterm::terminal::{Clear, ClearType};
-use crossterm::{execute, queue};
-use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{Theme as SyntectTheme, ThemeSet};
 use syntect::parsing::SyntaxSet;
@@ -39,29 +44,6 @@ fn styled_underlined(text: &str, color: Color) -> String {
     }
 }
 
-/// Trait for terminal color themes.
-///
-/// Implement this trait to create custom themes for the terminal renderer.
-#[allow(dead_code)]
-pub trait Theme: std::fmt::Debug {
-    fn heading(&self) -> Color;
-    fn emphasis(&self) -> Color;
-    fn strong(&self) -> Color;
-    fn inline_code(&self) -> Color;
-    fn link(&self) -> Color;
-    fn quote(&self) -> Color;
-    fn table_border(&self) -> Color;
-    fn code_block_border(&self) -> Color;
-    fn spinner_active(&self) -> Color;
-    fn spinner_done(&self) -> Color;
-    fn spinner_failed(&self) -> Color;
-
-    fn name(&self) -> &'static str;
-    fn syntect_theme(&self) -> &'static str {
-        "base16-ocean.dark"
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ColorTheme {
     heading: Color,
@@ -78,56 +60,8 @@ pub struct ColorTheme {
     name: &'static str,
 }
 
-impl Theme for ColorTheme {
-    fn heading(&self) -> Color {
-        self.heading
-    }
-    fn emphasis(&self) -> Color {
-        self.emphasis
-    }
-    fn strong(&self) -> Color {
-        self.strong
-    }
-    fn inline_code(&self) -> Color {
-        self.inline_code
-    }
-    fn link(&self) -> Color {
-        self.link
-    }
-    fn quote(&self) -> Color {
-        self.quote
-    }
-    fn table_border(&self) -> Color {
-        self.table_border
-    }
-    fn code_block_border(&self) -> Color {
-        self.code_block_border
-    }
-    fn spinner_active(&self) -> Color {
-        self.spinner_active
-    }
-    fn spinner_done(&self) -> Color {
-        self.spinner_done
-    }
-    fn spinner_failed(&self) -> Color {
-        self.spinner_failed
-    }
-    fn name(&self) -> &'static str {
-        self.name
-    }
-}
-
 impl Default for ColorTheme {
     fn default() -> Self {
-        Self::dark()
-    }
-}
-
-#[allow(dead_code)]
-impl ColorTheme {
-    /// Default dark theme (Ocean Dark).
-    #[must_use]
-    pub fn dark() -> Self {
         Self {
             heading: Color::Cyan,
             emphasis: Color::Magenta,
@@ -143,260 +77,15 @@ impl ColorTheme {
             name: "dark",
         }
     }
-
-    /// Light theme for light terminal backgrounds.
-    #[must_use]
-    pub fn light() -> Self {
-        Self {
-            heading: Color::DarkBlue,
-            emphasis: Color::DarkMagenta,
-            strong: Color::DarkRed,
-            inline_code: Color::DarkGreen,
-            link: Color::DarkBlue,
-            quote: Color::Grey,
-            table_border: Color::DarkCyan,
-            code_block_border: Color::Grey,
-            spinner_active: Color::DarkBlue,
-            spinner_done: Color::DarkGreen,
-            spinner_failed: Color::DarkRed,
-            name: "light",
-        }
-    }
-
-    /// Solarized-inspired theme.
-    #[must_use]
-    pub fn solarized() -> Self {
-        Self {
-            heading: Color::Rgb {
-                r: 38,
-                g: 139,
-                b: 210,
-            },
-            emphasis: Color::Rgb {
-                r: 211,
-                g: 54,
-                b: 130,
-            },
-            strong: Color::Rgb {
-                r: 203,
-                g: 75,
-                b: 22,
-            },
-            inline_code: Color::Rgb {
-                r: 133,
-                g: 153,
-                b: 0,
-            },
-            link: Color::Rgb {
-                r: 42,
-                g: 161,
-                b: 152,
-            },
-            quote: Color::Rgb {
-                r: 147,
-                g: 161,
-                b: 161,
-            },
-            table_border: Color::Rgb {
-                r: 88,
-                g: 110,
-                b: 117,
-            },
-            code_block_border: Color::Rgb {
-                r: 88,
-                g: 110,
-                b: 117,
-            },
-            spinner_active: Color::Rgb {
-                r: 38,
-                g: 139,
-                b: 210,
-            },
-            spinner_done: Color::Rgb {
-                r: 133,
-                g: 153,
-                b: 0,
-            },
-            spinner_failed: Color::Rgb {
-                r: 220,
-                g: 50,
-                b: 47,
-            },
-            name: "solarized",
-        }
-    }
-
-    /// Monochrome/plain theme (no color role differentiation).
-    #[must_use]
-    pub fn mono() -> Self {
-        Self {
-            heading: Color::White,
-            emphasis: Color::White,
-            strong: Color::White,
-            inline_code: Color::White,
-            link: Color::White,
-            quote: Color::DarkGrey,
-            table_border: Color::DarkGrey,
-            code_block_border: Color::DarkGrey,
-            spinner_active: Color::White,
-            spinner_done: Color::White,
-            spinner_failed: Color::White,
-            name: "mono",
-        }
-    }
-
-    /// Nord-inspired theme.
-    #[must_use]
-    pub fn nord() -> Self {
-        Self {
-            heading: Color::Rgb {
-                r: 136,
-                g: 192,
-                b: 208,
-            },
-            emphasis: Color::Rgb {
-                r: 180,
-                g: 142,
-                b: 173,
-            },
-            strong: Color::Rgb {
-                r: 235,
-                g: 203,
-                b: 139,
-            },
-            inline_code: Color::Rgb {
-                r: 163,
-                g: 190,
-                b: 140,
-            },
-            link: Color::Rgb {
-                r: 129,
-                g: 161,
-                b: 193,
-            },
-            quote: Color::Rgb {
-                r: 76,
-                g: 86,
-                b: 106,
-            },
-            table_border: Color::Rgb {
-                r: 67,
-                g: 76,
-                b: 94,
-            },
-            code_block_border: Color::Rgb {
-                r: 67,
-                g: 76,
-                b: 94,
-            },
-            spinner_active: Color::Rgb {
-                r: 136,
-                g: 192,
-                b: 208,
-            },
-            spinner_done: Color::Rgb {
-                r: 163,
-                g: 190,
-                b: 140,
-            },
-            spinner_failed: Color::Rgb {
-                r: 191,
-                g: 97,
-                b: 106,
-            },
-            name: "nord",
-        }
-    }
-
-    /// Dracula-inspired theme.
-    #[must_use]
-    pub fn dracula() -> Self {
-        Self {
-            heading: Color::Rgb {
-                r: 139,
-                g: 233,
-                b: 253,
-            },
-            emphasis: Color::Rgb {
-                r: 255,
-                g: 121,
-                b: 198,
-            },
-            strong: Color::Rgb {
-                r: 241,
-                g: 250,
-                b: 140,
-            },
-            inline_code: Color::Rgb {
-                r: 80,
-                g: 250,
-                b: 123,
-            },
-            link: Color::Rgb {
-                r: 189,
-                g: 147,
-                b: 249,
-            },
-            quote: Color::Rgb {
-                r: 98,
-                g: 114,
-                b: 164,
-            },
-            table_border: Color::Rgb {
-                r: 68,
-                g: 71,
-                b: 90,
-            },
-            code_block_border: Color::Rgb {
-                r: 68,
-                g: 71,
-                b: 90,
-            },
-            spinner_active: Color::Rgb {
-                r: 139,
-                g: 233,
-                b: 253,
-            },
-            spinner_done: Color::Rgb {
-                r: 80,
-                g: 250,
-                b: 123,
-            },
-            spinner_failed: Color::Rgb {
-                r: 255,
-                g: 85,
-                b: 85,
-            },
-            name: "dracula",
-        }
-    }
-
-    /// Get a named theme.
-    #[must_use]
-    pub fn by_name(name: &str) -> Option<Self> {
-        match name {
-            "dark" | "default" => Some(Self::dark()),
-            "light" => Some(Self::light()),
-            "solarized" => Some(Self::solarized()),
-            "mono" | "monochrome" => Some(Self::mono()),
-            "nord" => Some(Self::nord()),
-            "dracula" => Some(Self::dracula()),
-            _ => None,
-        }
-    }
-
-    /// List all available theme names.
-    pub fn available_themes() -> &'static [&'static str] {
-        &["dark", "light", "solarized", "mono", "nord", "dracula"]
-    }
 }
 
+#[cfg(test)]
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Spinner {
     frame_index: usize,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 impl Spinner {
     const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -432,63 +121,6 @@ impl Spinner {
                 Clear(ClearType::CurrentLine),
                 Print(format!("{frame} {label}")),
                 RestorePosition
-            )?;
-        }
-        out.flush()
-    }
-
-    // Not used by the REPL: clearing the current stdout line would erase streamed assistant text.
-    #[allow(dead_code)]
-    pub fn finish(
-        &mut self,
-        label: &str,
-        theme: &ColorTheme,
-        out: &mut impl Write,
-    ) -> io::Result<()> {
-        self.frame_index = 0;
-        if color_enabled() {
-            execute!(
-                out,
-                MoveToColumn(0),
-                Clear(ClearType::CurrentLine),
-                SetForegroundColor(theme.spinner_done),
-                Print(format!("✔ {label}\n")),
-                ResetColor
-            )?;
-        } else {
-            execute!(
-                out,
-                MoveToColumn(0),
-                Clear(ClearType::CurrentLine),
-                Print(format!("✔ {label}\n"))
-            )?;
-        }
-        out.flush()
-    }
-
-    #[allow(dead_code)]
-    pub fn fail(
-        &mut self,
-        label: &str,
-        theme: &ColorTheme,
-        out: &mut impl Write,
-    ) -> io::Result<()> {
-        self.frame_index = 0;
-        if color_enabled() {
-            execute!(
-                out,
-                MoveToColumn(0),
-                Clear(ClearType::CurrentLine),
-                SetForegroundColor(theme.spinner_failed),
-                Print(format!("✘ {label}\n")),
-                ResetColor
-            )?;
-        } else {
-            execute!(
-                out,
-                MoveToColumn(0),
-                Clear(ClearType::CurrentLine),
-                Print(format!("✘ {label}\n"))
             )?;
         }
         out.flush()
@@ -626,8 +258,8 @@ impl TerminalRenderer {
         Self::default()
     }
 
+    #[cfg(test)]
     #[must_use]
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn color_theme(&self) -> &ColorTheme {
         &self.color_theme
     }
@@ -654,7 +286,238 @@ impl TerminalRenderer {
         output.trim_end().to_string()
     }
 
-    #[allow(clippy::too_many_lines)]
+    fn render_cmark_heading_start(
+        state: &mut RenderState,
+        level: HeadingLevel,
+        output: &mut String,
+    ) {
+        Self::start_heading(state, level as u8, output);
+    }
+
+    fn render_cmark_paragraph_end(output: &mut String) {
+        output.push_str("\n\n");
+    }
+
+    fn render_cmark_block_quote_start(&self, state: &mut RenderState, output: &mut String) {
+        self.start_quote(state, output);
+    }
+
+    fn render_cmark_block_quote_end(state: &mut RenderState, output: &mut String) {
+        state.quote = state.quote.saturating_sub(1);
+        output.push('\n');
+    }
+
+    fn render_cmark_heading_end(state: &mut RenderState, output: &mut String) {
+        state.heading_level = None;
+        Self::render_cmark_paragraph_end(output);
+    }
+
+    fn render_cmark_line_break(state: &mut RenderState, output: &mut String) {
+        state.append_raw(output, "\n");
+    }
+
+    fn render_cmark_list_start(state: &mut RenderState, first_item: Option<u64>) {
+        let kind = match first_item {
+            Some(index) => ListKind::Ordered { next_index: index },
+            None => ListKind::Unordered,
+        };
+        state.list_stack.push(kind);
+    }
+
+    fn render_cmark_list_end(state: &mut RenderState, output: &mut String) {
+        state.list_stack.pop();
+        output.push('\n');
+    }
+
+    fn render_cmark_item_start(state: &mut RenderState, output: &mut String) {
+        Self::start_item(state, output);
+    }
+
+    fn render_cmark_code_block_start(
+        &self,
+        kind: CodeBlockKind<'_>,
+        output: &mut String,
+        code_buffer: &mut String,
+        code_language: &mut String,
+        in_code_block: &mut bool,
+    ) {
+        *in_code_block = true;
+        *code_language = match kind {
+            CodeBlockKind::Indented => String::from("text"),
+            CodeBlockKind::Fenced(lang) => lang.to_string(),
+        };
+        code_buffer.clear();
+        self.start_code_block(code_language, output);
+    }
+
+    fn render_cmark_code_block_end(
+        &self,
+        output: &mut String,
+        code_buffer: &mut String,
+        code_language: &mut String,
+        in_code_block: &mut bool,
+    ) {
+        self.finish_code_block(code_buffer, code_language, output);
+        *in_code_block = false;
+        code_language.clear();
+        code_buffer.clear();
+    }
+
+    fn render_cmark_emphasis_start(state: &mut RenderState) {
+        state.emphasis += 1;
+    }
+
+    fn render_cmark_emphasis_end(state: &mut RenderState) {
+        state.emphasis = state.emphasis.saturating_sub(1);
+    }
+
+    fn render_cmark_strong_start(state: &mut RenderState) {
+        state.strong += 1;
+    }
+
+    fn render_cmark_strong_end(state: &mut RenderState) {
+        state.strong = state.strong.saturating_sub(1);
+    }
+
+    fn render_cmark_inline_code(
+        &self,
+        code: &impl AsRef<str>,
+        state: &mut RenderState,
+        output: &mut String,
+    ) {
+        let rendered = styled(
+            &format!("`{}`", code.as_ref()),
+            self.color_theme.inline_code,
+        );
+        state.append_raw(output, &rendered);
+    }
+
+    fn render_cmark_rule(output: &mut String) {
+        output.push_str("---\n");
+    }
+
+    fn render_cmark_text(
+        &self,
+        text: &impl AsRef<str>,
+        state: &mut RenderState,
+        output: &mut String,
+        code_buffer: &mut String,
+        in_code_block: bool,
+    ) {
+        self.push_text(text.as_ref(), state, output, code_buffer, in_code_block);
+    }
+
+    fn render_cmark_html(html: &impl AsRef<str>, state: &mut RenderState, output: &mut String) {
+        let sanitized: String = html
+            .as_ref()
+            .chars()
+            .filter(|c| !c.is_control() || *c == '\n')
+            .collect();
+        state.append_raw(output, &sanitized);
+    }
+
+    fn render_cmark_footnote_ref(
+        reference: &impl AsRef<str>,
+        state: &mut RenderState,
+        output: &mut String,
+    ) {
+        state.append_raw(output, &format!("[{}]", reference.as_ref()));
+    }
+
+    fn render_cmark_task_marker(done: bool, state: &mut RenderState, output: &mut String) {
+        state.append_raw(output, if done { "[x] " } else { "[ ] " });
+    }
+
+    fn render_cmark_math(math: &impl AsRef<str>, state: &mut RenderState, output: &mut String) {
+        state.append_raw(output, math.as_ref());
+    }
+
+    fn render_cmark_link_start(dest_url: &impl ToString, state: &mut RenderState) {
+        state.link_stack.push(LinkState {
+            destination: dest_url.to_string(),
+            text: String::new(),
+        });
+    }
+
+    fn render_cmark_link_end(&self, state: &mut RenderState, output: &mut String) {
+        if let Some(link) = state.link_stack.pop() {
+            let label = if link.text.is_empty() {
+                link.destination.clone()
+            } else {
+                link.text
+            };
+            let rendered = styled_underlined(
+                &format!("[{label}]({})", link.destination),
+                self.color_theme.link,
+            );
+            state.append_raw(output, &rendered);
+        }
+    }
+
+    fn render_cmark_image_start(
+        &self,
+        dest_url: &impl AsRef<str>,
+        state: &mut RenderState,
+        output: &mut String,
+    ) {
+        let rendered = styled(
+            &format!("[image:{}]", dest_url.as_ref()),
+            self.color_theme.link,
+        );
+        state.append_raw(output, &rendered);
+    }
+
+    fn render_cmark_table_start(state: &mut RenderState) {
+        state.table = Some(TableState::default());
+    }
+
+    fn render_cmark_table_end(&self, state: &mut RenderState, output: &mut String) {
+        if let Some(table) = state.table.take() {
+            output.push_str(&self.render_table(&table));
+            Self::render_cmark_paragraph_end(output);
+        }
+    }
+
+    fn render_cmark_table_head_start(state: &mut RenderState) {
+        if let Some(table) = state.table.as_mut() {
+            table.in_head = true;
+        }
+    }
+
+    fn render_cmark_table_head_end(state: &mut RenderState) {
+        if let Some(table) = state.table.as_mut() {
+            table.finish_row();
+            table.in_head = false;
+        }
+    }
+
+    fn render_cmark_table_row_start(state: &mut RenderState) {
+        if let Some(table) = state.table.as_mut() {
+            table.current_row.clear();
+            table.current_cell.clear();
+        }
+    }
+
+    fn render_cmark_table_row_end(state: &mut RenderState) {
+        if let Some(table) = state.table.as_mut() {
+            table.finish_row();
+        }
+    }
+
+    fn render_cmark_table_cell_start(state: &mut RenderState) {
+        if let Some(table) = state.table.as_mut() {
+            table.current_cell.clear();
+        }
+    }
+
+    fn render_cmark_table_cell_end(state: &mut RenderState) {
+        if let Some(table) = state.table.as_mut() {
+            table.push_cell();
+        }
+    }
+
+    fn render_cmark_ignored() {}
+
     fn render_event(
         &self,
         event: Event<'_>,
@@ -666,141 +529,68 @@ impl TerminalRenderer {
     ) {
         match event {
             Event::Start(Tag::Heading { level, .. }) => {
-                Self::start_heading(state, level as u8, output);
+                Self::render_cmark_heading_start(state, level, output);
             }
-            Event::End(TagEnd::Paragraph) => output.push_str("\n\n"),
-            Event::Start(Tag::BlockQuote(..)) => self.start_quote(state, output),
+            Event::End(TagEnd::Paragraph) => Self::render_cmark_paragraph_end(output),
+            Event::Start(Tag::BlockQuote(..)) => self.render_cmark_block_quote_start(state, output),
             Event::End(TagEnd::BlockQuote(..)) => {
-                state.quote = state.quote.saturating_sub(1);
-                output.push('\n');
+                Self::render_cmark_block_quote_end(state, output);
             }
-            Event::End(TagEnd::Heading(..)) => {
-                state.heading_level = None;
-                output.push_str("\n\n");
-            }
+            Event::End(TagEnd::Heading(..)) => Self::render_cmark_heading_end(state, output),
             Event::End(TagEnd::Item) | Event::SoftBreak | Event::HardBreak => {
-                state.append_raw(output, "\n");
+                Self::render_cmark_line_break(state, output);
             }
-            Event::Start(Tag::List(first_item)) => {
-                let kind = match first_item {
-                    Some(index) => ListKind::Ordered { next_index: index },
-                    None => ListKind::Unordered,
-                };
-                state.list_stack.push(kind);
-            }
-            Event::End(TagEnd::List(..)) => {
-                state.list_stack.pop();
-                output.push('\n');
-            }
-            Event::Start(Tag::Item) => Self::start_item(state, output),
-            Event::Start(Tag::CodeBlock(kind)) => {
-                *in_code_block = true;
-                *code_language = match kind {
-                    CodeBlockKind::Indented => String::from("text"),
-                    CodeBlockKind::Fenced(lang) => lang.to_string(),
-                };
-                code_buffer.clear();
-                self.start_code_block(code_language, output);
-            }
+            Event::Start(Tag::List(first_item)) => Self::render_cmark_list_start(state, first_item),
+            Event::End(TagEnd::List(..)) => Self::render_cmark_list_end(state, output),
+            Event::Start(Tag::Item) => Self::render_cmark_item_start(state, output),
+            Event::Start(Tag::CodeBlock(kind)) => self.render_cmark_code_block_start(
+                kind,
+                output,
+                code_buffer,
+                code_language,
+                in_code_block,
+            ),
             Event::End(TagEnd::CodeBlock) => {
-                self.finish_code_block(code_buffer, code_language, output);
-                *in_code_block = false;
-                code_language.clear();
-                code_buffer.clear();
+                self.render_cmark_code_block_end(output, code_buffer, code_language, in_code_block)
             }
-            Event::Start(Tag::Emphasis) => state.emphasis += 1,
-            Event::End(TagEnd::Emphasis) => state.emphasis = state.emphasis.saturating_sub(1),
-            Event::Start(Tag::Strong) => state.strong += 1,
-            Event::End(TagEnd::Strong) => state.strong = state.strong.saturating_sub(1),
-            Event::Code(code) => {
-                let rendered = styled(&format!("`{code}`"), self.color_theme.inline_code);
-                state.append_raw(output, &rendered);
-            }
-            Event::Rule => output.push_str("---\n"),
+            Event::Start(Tag::Emphasis) => Self::render_cmark_emphasis_start(state),
+            Event::End(TagEnd::Emphasis) => Self::render_cmark_emphasis_end(state),
+            Event::Start(Tag::Strong) => Self::render_cmark_strong_start(state),
+            Event::End(TagEnd::Strong) => Self::render_cmark_strong_end(state),
+            Event::Code(code) => self.render_cmark_inline_code(&code, state, output),
+            Event::Rule => Self::render_cmark_rule(output),
             Event::Text(text) => {
-                self.push_text(text.as_ref(), state, output, code_buffer, *in_code_block);
+                self.render_cmark_text(&text, state, output, code_buffer, *in_code_block);
             }
             Event::Html(html) | Event::InlineHtml(html) => {
-                let sanitized: String = html
-                    .chars()
-                    .filter(|c| !c.is_control() || *c == '\n')
-                    .collect();
-                state.append_raw(output, &sanitized);
+                Self::render_cmark_html(&html, state, output);
             }
             Event::FootnoteReference(reference) => {
-                state.append_raw(output, &format!("[{reference}]"));
+                Self::render_cmark_footnote_ref(&reference, state, output);
             }
-            Event::TaskListMarker(done) => {
-                state.append_raw(output, if done { "[x] " } else { "[ ] " });
-            }
+            Event::TaskListMarker(done) => Self::render_cmark_task_marker(done, state, output),
             Event::InlineMath(math) | Event::DisplayMath(math) => {
-                state.append_raw(output, &math);
+                Self::render_cmark_math(&math, state, output);
             }
             Event::Start(Tag::Link { dest_url, .. }) => {
-                state.link_stack.push(LinkState {
-                    destination: dest_url.to_string(),
-                    text: String::new(),
-                });
+                Self::render_cmark_link_start(&dest_url, state);
             }
-            Event::End(TagEnd::Link) => {
-                if let Some(link) = state.link_stack.pop() {
-                    let label = if link.text.is_empty() {
-                        link.destination.clone()
-                    } else {
-                        link.text
-                    };
-                    let rendered = styled_underlined(
-                        &format!("[{label}]({})", link.destination),
-                        self.color_theme.link,
-                    );
-                    state.append_raw(output, &rendered);
-                }
-            }
+            Event::End(TagEnd::Link) => self.render_cmark_link_end(state, output),
             Event::Start(Tag::Image { dest_url, .. }) => {
-                let rendered = styled(&format!("[image:{dest_url}]"), self.color_theme.link);
-                state.append_raw(output, &rendered);
+                self.render_cmark_image_start(&dest_url, state, output);
             }
-            Event::Start(Tag::Table(..)) => state.table = Some(TableState::default()),
-            Event::End(TagEnd::Table) => {
-                if let Some(table) = state.table.take() {
-                    output.push_str(&self.render_table(&table));
-                    output.push_str("\n\n");
-                }
-            }
-            Event::Start(Tag::TableHead) => {
-                if let Some(table) = state.table.as_mut() {
-                    table.in_head = true;
-                }
-            }
-            Event::End(TagEnd::TableHead) => {
-                if let Some(table) = state.table.as_mut() {
-                    table.finish_row();
-                    table.in_head = false;
-                }
-            }
-            Event::Start(Tag::TableRow) => {
-                if let Some(table) = state.table.as_mut() {
-                    table.current_row.clear();
-                    table.current_cell.clear();
-                }
-            }
-            Event::End(TagEnd::TableRow) => {
-                if let Some(table) = state.table.as_mut() {
-                    table.finish_row();
-                }
-            }
-            Event::Start(Tag::TableCell) => {
-                if let Some(table) = state.table.as_mut() {
-                    table.current_cell.clear();
-                }
-            }
-            Event::End(TagEnd::TableCell) => {
-                if let Some(table) = state.table.as_mut() {
-                    table.push_cell();
-                }
-            }
+            Event::Start(Tag::Table(..)) => Self::render_cmark_table_start(state),
+            Event::End(TagEnd::Table) => self.render_cmark_table_end(state, output),
+            Event::Start(Tag::TableHead) => Self::render_cmark_table_head_start(state),
+            Event::End(TagEnd::TableHead) => Self::render_cmark_table_head_end(state),
+            Event::Start(Tag::TableRow) => Self::render_cmark_table_row_start(state),
+            Event::End(TagEnd::TableRow) => Self::render_cmark_table_row_end(state),
+            Event::Start(Tag::TableCell) => Self::render_cmark_table_cell_start(state),
+            Event::End(TagEnd::TableCell) => Self::render_cmark_table_cell_end(state),
             Event::Start(Tag::Paragraph | Tag::MetadataBlock(..) | _)
-            | Event::End(TagEnd::Image | TagEnd::MetadataBlock(..) | _) => {}
+            | Event::End(TagEnd::Image | TagEnd::MetadataBlock(..) | _) => {
+                Self::render_cmark_ignored();
+            }
         }
     }
 

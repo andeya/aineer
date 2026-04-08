@@ -1,9 +1,11 @@
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 
+use api::ToolDefinition;
 use runtime::{ToolError, ToolExecutor};
 use tools::GlobalToolRegistry;
 
-use crate::cli::{AllowedToolSet, SharedMcpManager};
+use crate::cli::{discover_mcp_tools, AllowedToolSet, SharedMcpManager};
 use crate::render::TerminalRenderer;
 
 pub(crate) struct CliToolExecutor {
@@ -13,6 +15,8 @@ pub(crate) struct CliToolExecutor {
     tool_registry: GlobalToolRegistry,
     mcp_manager: SharedMcpManager,
     async_runtime: Arc<tokio::runtime::Runtime>,
+    cached_mcp_tools: Arc<Mutex<Option<Vec<ToolDefinition>>>>,
+    activated_tools: Arc<Mutex<HashSet<String>>>,
 }
 
 impl CliToolExecutor {
@@ -22,6 +26,8 @@ impl CliToolExecutor {
         tool_registry: GlobalToolRegistry,
         mcp_manager: SharedMcpManager,
         async_runtime: Arc<tokio::runtime::Runtime>,
+        cached_mcp_tools: Arc<Mutex<Option<Vec<ToolDefinition>>>>,
+        activated_tools: Arc<Mutex<HashSet<String>>>,
     ) -> Self {
         Self {
             renderer: TerminalRenderer::new(),
@@ -30,6 +36,8 @@ impl CliToolExecutor {
             tool_registry,
             mcp_manager,
             async_runtime,
+            cached_mcp_tools,
+            activated_tools,
         }
     }
 
@@ -53,7 +61,28 @@ impl CliToolExecutor {
                     .collect::<Vec<_>>()
             })
             .filter(|v| !v.is_empty());
-        let output = tools::execute_tool_search_with_context(search_input, pending);
+        let mut extra = self.tool_registry.plugin_tool_definitions();
+        let mcp = {
+            let mut guard = self
+                .cached_mcp_tools
+                .lock()
+                .map_err(|e| ToolError::new(format!("MCP tool cache lock poisoned: {e}")))?;
+            guard
+                .get_or_insert_with(|| discover_mcp_tools(&self.async_runtime, &self.mcp_manager))
+                .clone()
+        };
+        extra.extend(mcp);
+        let output = tools::execute_tool_search_with_context(
+            search_input,
+            pending,
+            &extra,
+            self.allowed_tools.as_ref(),
+        );
+        if let Ok(mut activated) = self.activated_tools.lock() {
+            for name in &output.matches {
+                activated.insert(name.clone());
+            }
+        }
         serde_json::to_string_pretty(&output)
             .map_err(|e| ToolError::new(format!("failed to serialize ToolSearch output: {e}")))
     }
@@ -157,7 +186,7 @@ impl ToolExecutor for CliToolExecutor {
 
         let value = serde_json::from_str(input)
             .map_err(|error| ToolError::new(format!("invalid tool input JSON: {error}")))?;
-        match self.tool_registry.execute(tool_name, &value) {
+        match self.tool_registry.execute(tool_name, value) {
             Ok(output) => {
                 self.render_tool_output(tool_name, &output, false);
                 Ok(output)

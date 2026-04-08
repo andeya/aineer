@@ -26,6 +26,7 @@
 # Logs
 *.log
 *.txt
+*.out
 
 # Keys / secrets
 *.pem

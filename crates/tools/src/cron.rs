@@ -8,6 +8,8 @@ use std::process::Command;
 
 use serde::Serialize;
 
+use crate::builtin::BuiltinTool;
+use crate::tool_output::{ToolError, ToolOutput};
 use crate::types::{CronCreateInput, CronDeleteInput, CronListInput};
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -52,7 +54,7 @@ fn write_crontab(content: &str) -> Result<(), String> {
     child
         .stdin
         .take()
-        .unwrap()
+        .ok_or_else(|| "crontab stdin unavailable".to_string())?
         .write_all(content.as_bytes())
         .map_err(|e| format!("write to crontab stdin: {e}"))?;
     let status = child.wait().map_err(|e| format!("crontab wait: {e}"))?;
@@ -180,6 +182,53 @@ pub(crate) fn execute_cron_list(input: CronListInput) -> Result<String, String> 
     let json =
         serde_json::to_string_pretty(&entries).map_err(|e| format!("serialization error: {e}"))?;
     Ok(json)
+}
+
+// ---------------------------------------------------------------------------
+// BuiltinTool adapters
+// ---------------------------------------------------------------------------
+
+pub(crate) struct CronCreateTool;
+
+impl BuiltinTool for CronCreateTool {
+    const NAME: &'static str = "CronCreate";
+    type Input = CronCreateInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        execute_cron_create(input)
+            .map(ToolOutput::ok)
+            .map_err(ToolError::execution)
+    }
+}
+
+pub(crate) struct CronDeleteTool;
+
+impl BuiltinTool for CronDeleteTool {
+    const NAME: &'static str = "CronDelete";
+    type Input = CronDeleteInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        execute_cron_delete(input)
+            .map(ToolOutput::ok)
+            .map_err(ToolError::execution)
+    }
+}
+
+pub(crate) struct CronListTool;
+
+impl BuiltinTool for CronListTool {
+    const NAME: &'static str = "CronList";
+    type Input = CronListInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        execute_cron_list(input)
+            .map(ToolOutput::ok)
+            .map_err(ToolError::execution)
+    }
+
+    fn is_concurrency_safe(_input: &Self::Input) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]

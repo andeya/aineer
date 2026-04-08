@@ -1,5 +1,4 @@
 mod auth;
-#[allow(dead_code)]
 mod auto_update;
 mod banner;
 mod bootstrap;
@@ -201,6 +200,7 @@ fn run() -> CliResult<()> {
         CliAction::ConfigGet { key } => run_config_get(key.as_deref())?,
         CliAction::ConfigList => run_config_list()?,
         CliAction::Init => run_init()?,
+        CliAction::Update => auto_update::run_update_command(),
         CliAction::Repl {
             model,
             allowed_tools,

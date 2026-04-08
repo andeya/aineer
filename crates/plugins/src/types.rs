@@ -9,6 +9,7 @@ use serde_json::Value;
 use crate::constants::{BUILTIN_MARKETPLACE, BUNDLED_MARKETPLACE, EXTERNAL_MARKETPLACE};
 use crate::error::PluginError;
 
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PluginKind {
@@ -117,6 +118,7 @@ pub struct PluginManifest {
     pub commands: Vec<PluginCommandManifest>,
 }
 
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PluginPermission {
@@ -163,6 +165,7 @@ pub struct PluginToolManifest {
     pub required_permission: PluginToolPermission,
 }
 
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PluginToolPermission {
@@ -205,6 +208,24 @@ pub struct PluginCommandManifest {
     pub name: String,
     pub description: String,
     pub command: String,
+}
+
+/// Slash command discovered from `commands/*.md` (Claude Code-style layout).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginCommand {
+    pub name: String,
+    pub description: String,
+    pub content: String,
+    pub source_path: PathBuf,
+}
+
+/// Agent definition discovered from `agents/*.md` (Claude Code-style layout).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginAgent {
+    pub name: String,
+    pub description: String,
+    pub system_prompt: String,
+    pub source_path: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -307,6 +328,7 @@ impl PluginTool {
     }
 }
 
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PluginInstallSource {
@@ -369,6 +391,7 @@ pub trait Plugin {
     fn shutdown(&self) -> Result<(), PluginError>;
 }
 
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
 pub enum PluginDefinition {
     Builtin(BuiltinPlugin),
@@ -617,6 +640,8 @@ pub struct PluginManagerConfig {
     pub config_home: PathBuf,
     pub enabled_plugins: BTreeMap<String, bool>,
     pub external_dirs: Vec<PathBuf>,
+    /// Ephemeral plugin search roots (session-only; not persisted).
+    pub session_plugin_dirs: Vec<PathBuf>,
     pub install_root: Option<PathBuf>,
     pub registry_path: Option<PathBuf>,
     pub bundled_root: Option<PathBuf>,
@@ -629,6 +654,7 @@ impl PluginManagerConfig {
             config_home: config_home.into(),
             enabled_plugins: BTreeMap::new(),
             external_dirs: Vec::new(),
+            session_plugin_dirs: Vec::new(),
             install_root: None,
             registry_path: None,
             bundled_root: None,

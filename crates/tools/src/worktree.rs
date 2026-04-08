@@ -10,6 +10,8 @@ use std::sync::{Mutex, OnceLock};
 
 use git2::{Repository, WorktreeAddOptions};
 
+use crate::builtin::BuiltinTool;
+use crate::tool_output::{ToolError, ToolOutput};
 use crate::types::{EnterWorktreeInput, ExitWorktreeInput};
 
 // ── Active worktree state ─────────────────────────────────────────────────────
@@ -152,6 +154,36 @@ pub(crate) fn execute_exit_worktree(input: ExitWorktreeInput) -> Result<String, 
         path_str,
         active.original_cwd.display()
     ))
+}
+
+// ---------------------------------------------------------------------------
+// BuiltinTool adapters
+// ---------------------------------------------------------------------------
+
+pub(crate) struct EnterWorktreeTool;
+
+impl BuiltinTool for EnterWorktreeTool {
+    const NAME: &'static str = "EnterWorktree";
+    type Input = EnterWorktreeInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        execute_enter_worktree(input)
+            .map(ToolOutput::ok)
+            .map_err(ToolError::execution)
+    }
+}
+
+pub(crate) struct ExitWorktreeTool;
+
+impl BuiltinTool for ExitWorktreeTool {
+    const NAME: &'static str = "ExitWorktree";
+    type Input = ExitWorktreeInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        execute_exit_worktree(input)
+            .map(ToolOutput::ok)
+            .map_err(ToolError::execution)
+    }
 }
 
 #[cfg(test)]

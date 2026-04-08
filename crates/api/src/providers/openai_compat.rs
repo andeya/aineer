@@ -4,6 +4,7 @@ mod openai_compat_sse;
 mod openai_compat_stream;
 
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 use serde::{Deserialize, Deserializer};
 use serde_json::{json, Value};
@@ -12,11 +13,13 @@ use super::{
     backoff_for_attempt, is_retryable_status, parse_custom_provider_prefix, read_env_non_empty,
     request_id_from_headers, RetryPolicy,
 };
+use crate::cache_strategy::{GeminiCacheStrategy, NoCacheStrategy, ProviderCacheStrategy};
 use crate::error::ApiError;
 use crate::types::{
     InputContentBlock, InputMessage, MessageRequest, MessageResponse, OutputContentBlock,
     ToolChoice, ToolDefinition, ToolResultContentBlock, Usage,
 };
+use codineer_core::GeminiCacheConfig;
 
 use openai_compat_sse::{first_non_empty_field, OpenAiSseParser};
 use openai_compat_stream::StreamState;
@@ -75,6 +78,7 @@ pub struct OpenAiCompatClient {
     endpoint_query: Option<String>,
     retry: RetryPolicy,
     custom_headers: std::collections::BTreeMap<String, String>,
+    cache_strategy: Arc<dyn ProviderCacheStrategy>,
 }
 
 impl std::fmt::Debug for OpenAiCompatClient {
@@ -82,6 +86,7 @@ impl std::fmt::Debug for OpenAiCompatClient {
         f.debug_struct("OpenAiCompatClient")
             .field("base_url", &self.base_url)
             .field("endpoint_query", &self.endpoint_query)
+            .field("cache_strategy", &self.cache_strategy)
             .field("api_key", &"***")
             .finish()
     }
@@ -97,6 +102,7 @@ impl OpenAiCompatClient {
             endpoint_query: None,
             retry: RetryPolicy::default(),
             custom_headers: std::collections::BTreeMap::new(),
+            cache_strategy: Arc::new(NoCacheStrategy),
         }
     }
 
@@ -109,7 +115,30 @@ impl OpenAiCompatClient {
             endpoint_query: None,
             retry: RetryPolicy::default(),
             custom_headers: std::collections::BTreeMap::new(),
+            cache_strategy: Arc::new(NoCacheStrategy),
         }
+    }
+
+    #[must_use]
+    pub fn with_cache_strategy(mut self, strategy: Arc<dyn ProviderCacheStrategy>) -> Self {
+        self.cache_strategy = strategy;
+        self
+    }
+
+    #[must_use]
+    pub fn with_gemini_cache_config(mut self, config: GeminiCacheConfig) -> Self {
+        let http = self.http.clone();
+        let api_key = self.api_key.clone();
+        let base_url = self.base_url.clone();
+        let custom_headers = self.custom_headers.clone();
+        self.cache_strategy = Arc::new(GeminiCacheStrategy::new(
+            config,
+            http,
+            api_key,
+            base_url,
+            custom_headers,
+        ));
+        self
     }
 
     #[must_use]
@@ -155,9 +184,11 @@ impl OpenAiCompatClient {
         &self,
         request: &MessageRequest,
     ) -> Result<MessageResponse, ApiError> {
+        self.cache_strategy.ensure_cached(request).await;
+        let request = self.cache_strategy.apply_cache(request);
         let request = MessageRequest {
             stream: false,
-            ..request.clone()
+            ..request
         };
         let response = self.send_with_retry(&request).await?;
         let request_id = request_id_from_headers(response.headers());
@@ -173,6 +204,8 @@ impl OpenAiCompatClient {
         &self,
         request: &MessageRequest,
     ) -> Result<MessageStream, ApiError> {
+        self.cache_strategy.ensure_cached(request).await;
+        let request = self.cache_strategy.apply_cache(request);
         let response = self
             .send_with_retry(&request.clone().with_streaming())
             .await?;
@@ -338,16 +371,18 @@ fn upstream_openai_model(model: &str) -> String {
 
 fn build_chat_completion_request(request: &MessageRequest) -> Value {
     let mut messages = Vec::new();
-    if let Some(blocks) = request.system.as_ref().filter(|b| !b.is_empty()) {
-        let content = blocks
-            .iter()
-            .map(|b| b.text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n\n");
-        messages.push(json!({
-            "role": "system",
-            "content": content,
-        }));
+    if request.gemini_cached_content.is_none() {
+        if let Some(blocks) = request.system.as_ref().filter(|b| !b.is_empty()) {
+            let content = blocks
+                .iter()
+                .map(|b| b.text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            messages.push(json!({
+                "role": "system",
+                "content": content,
+            }));
+        }
     }
     for message in &request.messages {
         messages.extend(translate_message(message));
@@ -367,12 +402,18 @@ fn build_chat_completion_request(request: &MessageRequest) -> Value {
         payload["stream_options"] = json!({ "include_usage": true });
     }
 
-    if let Some(tools) = &request.tools {
-        payload["tools"] =
-            Value::Array(tools.iter().map(openai_tool_definition).collect::<Vec<_>>());
+    if request.gemini_cached_content.is_none() {
+        if let Some(tools) = &request.tools {
+            payload["tools"] =
+                Value::Array(tools.iter().map(openai_tool_definition).collect::<Vec<_>>());
+        }
+        if let Some(tool_choice) = &request.tool_choice {
+            payload["tool_choice"] = openai_tool_choice(tool_choice);
+        }
     }
-    if let Some(tool_choice) = &request.tool_choice {
-        payload["tool_choice"] = openai_tool_choice(tool_choice);
+
+    if let Some(ref name) = request.gemini_cached_content {
+        payload["cachedContent"] = json!(name);
     }
 
     payload

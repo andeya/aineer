@@ -377,6 +377,11 @@ mod tests {
         assert_eq!(config, roundtripped);
     }
 
-    #[allow(dead_code)]
-    fn _assert_text_edit_reexported(_: LspTextEdit) {}
+    #[test]
+    fn lsp_text_edit_reexport_is_constructible() {
+        let _: LspTextEdit = LspTextEdit {
+            range: Range::default(),
+            new_text: String::new(),
+        };
+    }
 }

@@ -16,6 +16,7 @@ pub struct TelemetryEvent {
 }
 
 /// Supported telemetry property value types.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
 pub enum TelemetryValue {
     String(String),

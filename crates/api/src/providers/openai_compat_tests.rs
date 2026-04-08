@@ -3,6 +3,7 @@ use super::{
     build_chat_completion_request, chat_completions_endpoint, normalize_finish_reason,
     openai_tool_choice, parse_tool_arguments, OpenAiCompatClient, OpenAiCompatConfig,
 };
+use crate::cache_strategy::is_gemini_model;
 use crate::error::ApiError;
 use crate::types::{
     InputContentBlock, InputMessage, MessageRequest, SystemBlock, ToolChoice, ToolDefinition,
@@ -43,6 +44,7 @@ fn request_translation_uses_openai_compatible_shape() {
         tool_choice: Some(ToolChoice::Auto),
         stream: false,
         thinking: None,
+        gemini_cached_content: None,
     });
 
     assert_eq!(payload["messages"][0]["role"], json!("system"));
@@ -69,6 +71,7 @@ fn chat_completion_strips_custom_provider_prefix_for_upstream_model() {
         tool_choice: None,
         stream: false,
         thinking: None,
+        gemini_cached_content: None,
     });
     assert_eq!(payload["model"], json!("qwen-plus-2025-07-28"));
 }
@@ -84,6 +87,7 @@ fn chat_completion_clamps_max_tokens_to_openai_compat_cap() {
         tool_choice: None,
         stream: false,
         thinking: None,
+        gemini_cached_content: None,
     });
     assert_eq!(payload["max_tokens"], json!(32_768));
 }
@@ -99,6 +103,7 @@ fn chat_completion_clamps_max_tokens_minimum_to_one() {
         tool_choice: None,
         stream: false,
         thinking: None,
+        gemini_cached_content: None,
     });
     assert_eq!(payload["max_tokens"], json!(1));
 }
@@ -154,8 +159,42 @@ fn chat_completion_preserves_openrouter_model_after_provider_prefix() {
         tool_choice: None,
         stream: false,
         thinking: None,
+        gemini_cached_content: None,
     });
     assert_eq!(payload["model"], json!("meta-llama/llama-3.1-8b:free"));
+}
+
+#[test]
+fn chat_completion_with_gemini_cached_content_omits_system_and_tools() {
+    let payload = build_chat_completion_request(&MessageRequest {
+        model: "gemini/gemini-2.0-flash".to_string(),
+        max_tokens: 64,
+        messages: vec![InputMessage::user_text("hi")],
+        system: Some(SystemBlock::from_plain("sys")),
+        tools: Some(vec![ToolDefinition {
+            name: "t".to_string(),
+            description: None,
+            input_schema: json!({}),
+            cache_control: None,
+        }]),
+        tool_choice: Some(ToolChoice::Auto),
+        stream: false,
+        thinking: None,
+        gemini_cached_content: Some("cachedContents/xyz".to_string()),
+    });
+    assert_eq!(payload["cachedContent"], json!("cachedContents/xyz"));
+    assert!(payload.get("tools").is_none());
+    assert!(payload.get("tool_choice").is_none());
+    assert_eq!(payload["messages"].as_array().unwrap().len(), 1);
+    assert_eq!(payload["messages"][0]["role"], json!("user"));
+}
+
+#[test]
+fn is_gemini_model_detects_prefixed_and_plain_ids() {
+    assert!(is_gemini_model("gemini-2.0-flash"));
+    assert!(is_gemini_model("models/gemini-1.5-pro"));
+    assert!(is_gemini_model("google/gemini-2.0-flash"));
+    assert!(!is_gemini_model("gpt-4o"));
 }
 
 #[test]

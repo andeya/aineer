@@ -51,8 +51,10 @@ impl LspManager {
     /// Build an `LspManager` from a JSON array of server config objects.
     /// Each element must be deserializable as [`LspServerConfig`].
     pub fn from_json_config(configs: &Value) -> Result<Self, LspError> {
-        let configs: Vec<LspServerConfig> = serde_json::from_value(configs.clone())
-            .map_err(|e| LspError::Protocol(format!("invalid LSP config JSON: {e}")))?;
+        let configs: Vec<LspServerConfig> =
+            serde_json::from_value(configs.clone()).map_err(|e| LspError::Protocol {
+                message: format!("invalid LSP config JSON: {e}"),
+            })?;
         Self::new(configs)
     }
 
@@ -292,11 +294,15 @@ impl LspManager {
         let extension = path
             .extension()
             .map(|ext| normalize_extension(ext.to_string_lossy().as_ref()))
-            .ok_or_else(|| LspError::UnsupportedDocument(path.to_path_buf()))?;
-        let server_name = self
-            .extension_map
-            .get(&extension)
-            .ok_or_else(|| LspError::UnsupportedDocument(path.to_path_buf()))?;
+            .ok_or_else(|| LspError::UnsupportedDocument {
+                path: path.to_path_buf(),
+            })?;
+        let server_name =
+            self.extension_map
+                .get(&extension)
+                .ok_or_else(|| LspError::UnsupportedDocument {
+                    path: path.to_path_buf(),
+                })?;
         let mut clients = self.clients.lock().await;
         if let Some(client) = clients.get(server_name) {
             return Ok(Arc::clone(client));
@@ -304,7 +310,9 @@ impl LspManager {
         let config = self
             .server_configs
             .get(server_name)
-            .ok_or_else(|| LspError::UnknownServer(server_name.clone()))?
+            .ok_or_else(|| LspError::UnknownServer {
+                name: server_name.clone(),
+            })?
             .clone();
         let client = Arc::new(LspClient::connect(config).await?);
         clients.insert(server_name.clone(), Arc::clone(&client));

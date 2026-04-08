@@ -342,6 +342,7 @@ pub(crate) fn render_config_report(section: Option<&str>) -> CliResult<String> {
             ConfigSource::User => "user",
             ConfigSource::Project => "project",
             ConfigSource::Local => "local",
+            _ => "unknown",
         };
         let status = if runtime_config
             .loaded_entries()
@@ -602,6 +603,7 @@ pub(crate) fn render_export_text(session: &Session) -> String {
             MessageRole::User => "user",
             MessageRole::Assistant => "assistant",
             MessageRole::Tool => "tool",
+            _ => "unknown",
         };
         lines.push(format!("## {}. {role}", index + 1));
         for block in &message.blocks {
@@ -623,6 +625,7 @@ pub(crate) fn render_export_text(session: &Session) -> String {
                         "[tool_result id={tool_use_id} name={tool_name} error={is_error}] {output}"
                     ));
                 }
+                _ => {}
             }
         }
         lines.push(String::new());

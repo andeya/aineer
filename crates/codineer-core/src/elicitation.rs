@@ -24,6 +24,7 @@ pub struct ElicitationRequest {
 }
 
 /// The kind of structured input to collect.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ElicitationKind {
     /// Yes/No confirmation.
@@ -46,6 +47,7 @@ pub struct ElicitationOption {
 }
 
 /// The user's response to an elicitation request.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ElicitationResponse {
     Confirmed(bool),

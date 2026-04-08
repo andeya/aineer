@@ -4,7 +4,7 @@ use crate::canonical_tool_token;
 use crate::execute_tool;
 use crate::registry::ToolSpec;
 use crate::specs::mvp_tool_specs;
-use crate::types::{AgentInput, AgentJob, AgentOutput, AgentRunStatus};
+use crate::types::{AgentInput, AgentJob, AgentOutput, AgentResult, AgentRunStatus};
 use api::{
     max_tokens_for_model, ContentBlockDelta, InputContentBlock, InputMessage, MessageRequest,
     MessageResponse, OutputContentBlock, ProviderClient, StreamEvent as ApiStreamEvent,
@@ -193,6 +193,7 @@ where
         started_at: Some(created_at),
         completed_at: None,
         error: None,
+        agent_result: None,
     };
     write_agent_manifest(&manifest)?;
 
@@ -205,7 +206,13 @@ where
     };
     if let Err(error) = spawn_fn(job) {
         let error = format!("failed to spawn sub-agent: {error}");
-        persist_agent_terminal_state(&manifest, AgentRunStatus::Failed, None, Some(error.clone()))?;
+        persist_agent_terminal_state(
+            &manifest,
+            AgentRunStatus::Failed,
+            None,
+            Some(error.clone()),
+            None,
+        )?;
         return Err(error);
     }
 
@@ -227,6 +234,7 @@ fn spawn_agent_job(job: AgentJob) -> Result<(), String> {
                         AgentRunStatus::Failed,
                         None,
                         Some(error),
+                        None,
                     );
                 }
                 Err(_) => {
@@ -235,6 +243,7 @@ fn spawn_agent_job(job: AgentJob) -> Result<(), String> {
                         AgentRunStatus::Failed,
                         None,
                         Some(String::from("sub-agent thread panicked")),
+                        None,
                     );
                 }
             }
@@ -248,12 +257,14 @@ fn run_agent_job(job: &AgentJob) -> Result<(), String> {
     let summary = runtime
         .run_turn(job.prompt.clone(), None)
         .map_err(|error| error.to_string())?;
-    let final_text = final_assistant_text(&summary);
+    let agent_result = build_agent_result(&summary, true);
+    let final_text = agent_result.summary.clone();
     persist_agent_terminal_state(
         &job.manifest,
         AgentRunStatus::Completed,
         Some(final_text.as_str()),
         None,
+        Some(agent_result),
     )
 }
 
@@ -325,16 +336,18 @@ pub(crate) fn persist_agent_terminal_state(
     status: AgentRunStatus,
     result: Option<&str>,
     error: Option<String>,
+    agent_result: Option<AgentResult>,
 ) -> Result<(), String> {
     let status_str = status.to_string();
     append_agent_output(
         &manifest.output_file,
-        &format_agent_terminal_output(&status_str, result, error.as_deref()),
+        &format_agent_terminal_output(&status_str, result, error.as_deref(), agent_result.as_ref()),
     )?;
     let mut next_manifest = manifest.clone();
     next_manifest.status = status;
     next_manifest.completed_at = Some(iso8601_now());
     next_manifest.error = error;
+    next_manifest.agent_result = agent_result;
     write_agent_manifest(&next_manifest)
 }
 
@@ -349,7 +362,12 @@ fn append_agent_output(path: &str, suffix: &str) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
-fn format_agent_terminal_output(status: &str, result: Option<&str>, error: Option<&str>) -> String {
+fn format_agent_terminal_output(
+    status: &str,
+    result: Option<&str>,
+    error: Option<&str>,
+    agent_result: Option<&AgentResult>,
+) -> String {
     let mut sections = vec![format!("\n## Result\n\n- status: {status}\n")];
     if let Some(result) = result.filter(|value| !value.trim().is_empty()) {
         sections.push(format!("\n### Final response\n\n{}\n", result.trim()));
@@ -357,7 +375,55 @@ fn format_agent_terminal_output(status: &str, result: Option<&str>, error: Optio
     if let Some(error) = error.filter(|value| !value.trim().is_empty()) {
         sections.push(format!("\n### Error\n\n{}\n", error.trim()));
     }
+    if let Some(structured) = agent_result {
+        if let Ok(json) = serde_json::to_string_pretty(structured) {
+            sections.push(format!(
+                "\n### Structured agent result\n\n```json\n{json}\n```\n"
+            ));
+        }
+    }
     sections.join("")
+}
+
+/// Builds a structured summary after a sub-agent turn, including paths touched by file tools.
+pub(crate) fn build_agent_result(summary: &runtime::TurnSummary, success: bool) -> AgentResult {
+    AgentResult {
+        summary: final_assistant_text(summary),
+        files_modified: collect_files_modified_from_turn(summary),
+        success,
+    }
+}
+
+fn collect_files_modified_from_turn(summary: &runtime::TurnSummary) -> Vec<String> {
+    use runtime::ContentBlock;
+
+    let mut paths = BTreeSet::new();
+    for message in &summary.assistant_messages {
+        for block in &message.blocks {
+            let ContentBlock::ToolUse { name, input, .. } = block else {
+                continue;
+            };
+            if let Some(path) = path_from_tool_use_input(name, input) {
+                paths.insert(path);
+            }
+        }
+    }
+    paths.into_iter().collect()
+}
+
+fn path_from_tool_use_input(tool_name: &str, input_json: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(input_json).ok()?;
+    match tool_name {
+        "write_file" | "edit_file" | "MultiEdit" => value
+            .get("path")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        "NotebookEdit" => value
+            .get("notebook_path")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        _ => None,
+    }
 }
 
 struct ProviderRuntimeClient {
@@ -405,6 +471,7 @@ impl ApiClient for ProviderRuntimeClient {
             tool_choice: (!self.allowed_tools.is_empty()).then_some(ToolChoice::Auto),
             stream: true,
             thinking: None,
+            gemini_cached_content: None,
         };
 
         self.runtime.block_on(async {
@@ -412,7 +479,7 @@ impl ApiClient for ProviderRuntimeClient {
                 .client
                 .stream_message(&message_request)
                 .await
-                .map_err(|error| RuntimeError::new(error.to_string()))?;
+                .map_err(api::ApiError::into_runtime_error)?;
             let mut events = Vec::new();
             let mut pending_tools: BTreeMap<u32, (String, String, String)> = BTreeMap::new();
             let mut saw_stop = false;
@@ -420,7 +487,7 @@ impl ApiClient for ProviderRuntimeClient {
             while let Some(event) = stream
                 .next_event()
                 .await
-                .map_err(|error| RuntimeError::new(error.to_string()))?
+                .map_err(api::ApiError::into_runtime_error)?
             {
                 match event {
                     ApiStreamEvent::MessageStart(start) => {
@@ -438,10 +505,8 @@ impl ApiClient for ProviderRuntimeClient {
                         );
                     }
                     ApiStreamEvent::ContentBlockDelta(delta) => match delta.delta {
-                        ContentBlockDelta::TextDelta { text } => {
-                            if !text.is_empty() {
-                                events.push(AssistantEvent::TextDelta(text));
-                            }
+                        ContentBlockDelta::TextDelta { text } if !text.is_empty() => {
+                            events.push(AssistantEvent::TextDelta(text));
                         }
                         ContentBlockDelta::InputJsonDelta { partial_json } => {
                             if let Some((_, _, input)) = pending_tools.get_mut(&delta.index) {
@@ -450,6 +515,7 @@ impl ApiClient for ProviderRuntimeClient {
                         }
                         ContentBlockDelta::ThinkingDelta { .. }
                         | ContentBlockDelta::SignatureDelta { .. } => {}
+                        _ => {}
                     },
                     ApiStreamEvent::ContentBlockStop(stop) => {
                         if let Some((id, name, input)) = pending_tools.remove(&stop.index) {
@@ -468,6 +534,7 @@ impl ApiClient for ProviderRuntimeClient {
                         saw_stop = true;
                         events.push(AssistantEvent::MessageStop);
                     }
+                    _ => {}
                 }
             }
 
@@ -495,7 +562,7 @@ impl ApiClient for ProviderRuntimeClient {
                     ..message_request.clone()
                 })
                 .await
-                .map_err(|error| RuntimeError::new(error.to_string()))?;
+                .map_err(api::ApiError::into_runtime_error)?;
             Ok(response_to_events(response))
         })
     }
@@ -520,7 +587,9 @@ impl ToolExecutor for SubagentToolExecutor {
         }
         let value = serde_json::from_str(input)
             .map_err(|error| ToolError::new(format!("invalid tool input JSON: {error}")))?;
-        execute_tool(tool_name, &value).map_err(ToolError::new)
+        execute_tool(tool_name, value)
+            .map(|o| o.content)
+            .map_err(|e| ToolError::new(e.to_string()))
     }
 }
 
@@ -538,6 +607,7 @@ fn convert_messages(messages: &[ConversationMessage]) -> Vec<InputMessage> {
             let role = match message.role {
                 MessageRole::System | MessageRole::User | MessageRole::Tool => "user",
                 MessageRole::Assistant => "assistant",
+                _ => "user",
             };
             let content = message
                 .blocks
@@ -573,6 +643,10 @@ fn convert_messages(messages: &[ConversationMessage]) -> Vec<InputMessage> {
                         is_error: *is_error,
                         cache_control: None,
                     },
+                    _ => InputContentBlock::Text {
+                        text: String::new(),
+                        cache_control: None,
+                    },
                 })
                 .collect::<Vec<_>>();
             (!content.is_empty()).then(|| InputMessage {
@@ -591,10 +665,8 @@ pub(crate) fn push_output_block(
     streaming_tool_input: bool,
 ) {
     match block {
-        OutputContentBlock::Text { text } => {
-            if !text.is_empty() {
-                events.push(AssistantEvent::TextDelta(text));
-            }
+        OutputContentBlock::Text { text } if !text.is_empty() => {
+            events.push(AssistantEvent::TextDelta(text));
         }
         OutputContentBlock::ToolUse { id, name, input } => {
             let initial_input = if streaming_tool_input
@@ -608,6 +680,7 @@ pub(crate) fn push_output_block(
             pending_tools.insert(block_index, (id, name, initial_input));
         }
         OutputContentBlock::Thinking { .. } | OutputContentBlock::RedactedThinking { .. } => {}
+        _ => {}
     }
 }
 
@@ -730,4 +803,90 @@ fn civil_from_days(days: i64) -> (i32, u32, u32) {
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = if m <= 2 { y + 1 } else { y };
     (y, m, d)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_agent_result;
+    use runtime::{ContentBlock, ConversationMessage, MessageRole, TokenUsage, TurnSummary};
+
+    #[test]
+    fn agent_result_includes_summary_and_file_paths() {
+        let summary = TurnSummary {
+            assistant_messages: vec![
+                ConversationMessage {
+                    role: MessageRole::Assistant,
+                    blocks: vec![ContentBlock::ToolUse {
+                        id: "tu_1".into(),
+                        name: "write_file".into(),
+                        input: r#"{"path":"src/out.txt","content":"x"}"#.into(),
+                    }],
+                    usage: None,
+                },
+                ConversationMessage {
+                    role: MessageRole::Assistant,
+                    blocks: vec![ContentBlock::Text {
+                        text: "Wrote the file.".into(),
+                    }],
+                    usage: None,
+                },
+            ],
+            tool_results: vec![],
+            iterations: 2,
+            usage: TokenUsage::default(),
+        };
+        let result = build_agent_result(&summary, true);
+        assert!(result.success);
+        assert_eq!(result.summary, "Wrote the file.");
+        assert_eq!(result.files_modified, vec!["src/out.txt"]);
+    }
+
+    #[test]
+    fn agent_result_notebook_and_multi_edit_paths() {
+        let summary = TurnSummary {
+            assistant_messages: vec![ConversationMessage {
+                role: MessageRole::Assistant,
+                blocks: vec![
+                    ContentBlock::ToolUse {
+                        id: "tu_1".into(),
+                        name: "MultiEdit".into(),
+                        input: r#"{"path":"a.rs","edits":[]}"#.into(),
+                    },
+                    ContentBlock::ToolUse {
+                        id: "tu_2".into(),
+                        name: "NotebookEdit".into(),
+                        input: r#"{"notebook_path":"n.ipynb","new_source":"x"}"#.into(),
+                    },
+                ],
+                usage: None,
+            }],
+            tool_results: vec![],
+            iterations: 1,
+            usage: TokenUsage::default(),
+        };
+        let result = build_agent_result(&summary, true);
+        assert_eq!(result.files_modified, vec!["a.rs", "n.ipynb"]);
+    }
+
+    #[test]
+    fn agent_result_propagates_success_flag() {
+        let summary = TurnSummary {
+            assistant_messages: vec![ConversationMessage {
+                role: MessageRole::Assistant,
+                blocks: vec![ContentBlock::Text {
+                    text: "Stopped early.".into(),
+                }],
+                usage: None,
+            }],
+            tool_results: vec![],
+            iterations: 1,
+            usage: TokenUsage::default(),
+        };
+        let ok = build_agent_result(&summary, true);
+        let failed = build_agent_result(&summary, false);
+        assert!(ok.success);
+        assert!(!failed.success);
+        assert_eq!(ok.summary, failed.summary);
+        assert_eq!(ok.files_modified, failed.files_modified);
+    }
 }

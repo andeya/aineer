@@ -75,8 +75,29 @@ impl PluginManager {
         self.sync_bundled_plugins()?;
         let mut plugins = builtin_plugins();
         plugins.extend(self.discover_installed_plugins()?);
-        plugins.extend(self.discover_external_directory_plugins(&plugins)?);
+        plugins.extend(self.discover_plugins_in_roots(&self.config.external_dirs, &plugins)?);
+        plugins.extend(self.discover_plugins_in_roots(&self.config.session_plugin_dirs, &plugins)?);
         Ok(plugins)
+    }
+
+    /// Adds a plugin search root that exists only for this process; it is not persisted to settings.
+    pub fn add_session_plugin_dir(&mut self, dir: PathBuf) {
+        self.config.session_plugin_dirs.push(dir);
+    }
+
+    /// Clone a plugin from `url`, install it under [`Self::install_root`], and return the loaded definition.
+    pub async fn install_from_git(&mut self, url: &str) -> Result<PluginDefinition, PluginError> {
+        validate_git_install_url(url)?;
+        let outcome = self.install(url)?;
+        let source = PluginInstallSource::GitUrl {
+            url: url.to_string(),
+        };
+        load_plugin_definition(
+            &outcome.install_path,
+            PluginKind::External,
+            describe_install_source(&source),
+            EXTERNAL_MARKETPLACE,
+        )
     }
 
     pub fn aggregated_hooks(&self) -> Result<PluginHooks, PluginError> {
@@ -266,13 +287,14 @@ impl PluginManager {
         Ok(plugins)
     }
 
-    fn discover_external_directory_plugins(
+    fn discover_plugins_in_roots(
         &self,
+        roots: &[PathBuf],
         existing_plugins: &[PluginDefinition],
     ) -> Result<Vec<PluginDefinition>, PluginError> {
         let mut plugins = Vec::new();
 
-        for directory in &self.config.external_dirs {
+        for directory in roots {
             for root in discover_plugin_dirs(directory)? {
                 let plugin = load_plugin_definition(
                     &root,
@@ -489,5 +511,15 @@ impl PluginManager {
                 }
             }
         })
+    }
+}
+
+fn validate_git_install_url(url: &str) -> Result<(), PluginError> {
+    match parse_install_source(url)? {
+        PluginInstallSource::GitUrl { .. } => Ok(()),
+        _ => Err(PluginError::InvalidManifest(
+            "install_from_git requires a git URL (https://, http://, git@, or path ending in .git)"
+                .into(),
+        )),
     }
 }

@@ -22,6 +22,7 @@ impl Default for RetryPolicy {
     }
 }
 
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProviderKind {
     CodineerApi,

@@ -12,6 +12,7 @@ use grep_searcher::{Searcher, SearcherBuilder, Sink, SinkContext, SinkMatch};
 use ignore::WalkBuilder;
 use serde::{Deserialize, Serialize};
 
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GrepOutputMode {

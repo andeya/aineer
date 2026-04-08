@@ -8,6 +8,7 @@ pub mod credentials;
 mod file_ops;
 mod hooks;
 mod json;
+pub mod model_context;
 mod oauth;
 mod permissions;
 mod prompt;
@@ -28,20 +29,22 @@ pub use codineer_core::prompt_types::{
     BlockKind, CacheControl, CacheScope, CacheType, SystemBlock, ThinkingConfig, ThinkingMode,
 };
 pub use compact::{
-    compact_session, estimate_session_tokens, format_compact_summary,
-    get_compact_continuation_message, should_compact, CompactionConfig, CompactionResult,
+    apply_model_compact_summary, build_model_compact_request, compact_session,
+    estimate_session_tokens, estimate_tokens, format_compact_summary,
+    get_compact_continuation_message, should_compact, should_compact_for_model, CompactionConfig,
+    CompactionResult, ModelCompactionConfig, ModelCompactionResult, COMPACT_SUMMARY_SYSTEM_PROMPT,
 };
 pub use config::{
     default_config_home, ConfigEntry, ConfigError, ConfigLoader, ConfigSource, CredentialConfig,
-    CustomProviderConfig, McpConfigCollection, McpManagedProxyServerConfig, McpOAuthConfig,
-    McpRemoteServerConfig, McpSdkServerConfig, McpServerConfig, McpStdioServerConfig, McpTransport,
-    McpWebSocketServerConfig, OAuthConfig, ResolvedPermissionMode, RuntimeConfig,
-    RuntimeFeatureConfig, RuntimeHookConfig, RuntimePluginConfig, ScopedMcpServerConfig,
-    CODINEER_SETTINGS_SCHEMA_NAME,
+    CustomProviderConfig, GeminiCacheConfig, McpConfigCollection, McpManagedProxyServerConfig,
+    McpOAuthConfig, McpRemoteServerConfig, McpSdkServerConfig, McpServerConfig,
+    McpStdioServerConfig, McpTransport, McpWebSocketServerConfig, OAuthConfig,
+    ResolvedPermissionMode, RuntimeConfig, RuntimeFeatureConfig, RuntimeHookConfig,
+    RuntimePluginConfig, ScopedMcpServerConfig, CODINEER_SETTINGS_SCHEMA_NAME,
 };
 pub use conversation::{
-    ApiClient, ApiRequest, AssistantEvent, ConversationRuntime, RuntimeError, StaticToolExecutor,
-    ToolError, ToolErrorCode, ToolExecutor, TurnSummary,
+    assistant_text_from_stream_events, ApiClient, ApiRequest, AssistantEvent, ConversationRuntime,
+    RuntimeError, StaticToolExecutor, ToolError, ToolErrorCode, ToolExecutor, TurnSummary,
 };
 pub use file_ops::{
     edit_file, glob_search, grep_search, read_file, workspace_safe_path, write_file,
@@ -60,14 +63,15 @@ pub use mcp::{
     McpRemoteClient, McpServerManager, McpServerManagerError, McpStdioProcess, McpTool,
     McpToolCallContent, McpToolCallResult, UnsupportedMcpServer,
 };
+pub use model_context::{context_window_for_model, ModelContextWindow};
 pub use oauth::{
     clear_oauth_credentials, generate_state, load_oauth_credentials, loopback_redirect_uri,
     save_oauth_credentials, OAuthAuthorizationRequest, OAuthCallbackParams, OAuthRefreshRequest,
     OAuthTokenExchangeRequest, OAuthTokenSet, PkceCodePair,
 };
 pub use permissions::{
-    PermissionMode, PermissionOutcome, PermissionPolicy, PermissionPromptDecision,
-    PermissionPrompter, PermissionRequest,
+    glob_matches, PermissionMode, PermissionOutcome, PermissionPolicy, PermissionPromptDecision,
+    PermissionPrompter, PermissionRequest, PermissionRule, RuleDecision,
 };
 pub use prompt::{
     load_system_prompt, load_system_prompt_with_lsp, ContextFile, InstructionLoader,
@@ -82,7 +86,9 @@ pub use credentials::{
     ClaudeCodeResolver, CodineerOAuthResolver, CredentialChain, CredentialError,
     CredentialResolver, CredentialStatus, EnvVarResolver, ResolvedCredential,
 };
-pub use session::{ContentBlock, ConversationMessage, MessageRole, Session, SessionError};
+pub use session::{
+    CacheLock, ContentBlock, ConversationMessage, MessageRole, Session, SessionError,
+};
 pub use usage::{format_usd, pricing_for_model, TokenUsage, UsageCostEstimate, UsageTracker};
 
 /// Cross-platform home directory: tries `HOME` first (Unix + WSL), falls back to `USERPROFILE` (Windows).

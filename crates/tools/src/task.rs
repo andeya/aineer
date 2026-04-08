@@ -10,6 +10,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
+use crate::builtin::BuiltinTool;
+use crate::tool_output::{ToolError, ToolOutput};
 use crate::types::{
     TaskCreateInput, TaskGetInput, TaskListInput, TaskStatus, TaskStopInput, TaskUpdateInput,
 };
@@ -316,7 +318,10 @@ pub(crate) fn execute_task_update(input: TaskUpdateInput) -> Result<String, Stri
 
     write_tasks(&tasks)?;
 
-    let task = tasks.iter().find(|t| t.id == input.task_id).unwrap();
+    let task = tasks
+        .iter()
+        .find(|t| t.id == input.task_id)
+        .ok_or_else(|| format!("task not found after write: {}", input.task_id))?;
     serde_json::to_string_pretty(&serde_json::json!({
         "id": task.id,
         "title": task.title,
@@ -361,6 +366,83 @@ pub(crate) fn execute_task_stop(input: TaskStopInput) -> Result<String, String> 
         "message": "Task stopped",
     }))
     .map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// BuiltinTool adapters
+// ---------------------------------------------------------------------------
+
+pub(crate) struct TaskCreateTool;
+
+impl BuiltinTool for TaskCreateTool {
+    const NAME: &'static str = "TaskCreate";
+    type Input = TaskCreateInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        execute_task_create(input)
+            .map(ToolOutput::ok)
+            .map_err(ToolError::execution)
+    }
+}
+
+pub(crate) struct TaskGetTool;
+
+impl BuiltinTool for TaskGetTool {
+    const NAME: &'static str = "TaskGet";
+    type Input = TaskGetInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        execute_task_get(input)
+            .map(ToolOutput::ok)
+            .map_err(ToolError::execution)
+    }
+
+    fn is_concurrency_safe(_input: &Self::Input) -> bool {
+        true
+    }
+}
+
+pub(crate) struct TaskListTool;
+
+impl BuiltinTool for TaskListTool {
+    const NAME: &'static str = "TaskList";
+    type Input = TaskListInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        execute_task_list(input)
+            .map(ToolOutput::ok)
+            .map_err(ToolError::execution)
+    }
+
+    fn is_concurrency_safe(_input: &Self::Input) -> bool {
+        true
+    }
+}
+
+pub(crate) struct TaskUpdateTool;
+
+impl BuiltinTool for TaskUpdateTool {
+    const NAME: &'static str = "TaskUpdate";
+    type Input = TaskUpdateInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        execute_task_update(input)
+            .map(ToolOutput::ok)
+            .map_err(ToolError::execution)
+    }
+}
+
+pub(crate) struct TaskStopTool;
+
+impl BuiltinTool for TaskStopTool {
+    const NAME: &'static str = "TaskStop";
+    type Input = TaskStopInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        execute_task_stop(input)
+            .map(ToolOutput::ok)
+            .map_err(ToolError::execution)
+    }
 }
 
 #[cfg(test)]
@@ -457,12 +539,13 @@ mod tests {
 
         let err = crate::execute_tool(
             "TaskUpdate",
-            &serde_json::json!({
+            serde_json::json!({
                 "task_id": task_id,
                 "status": "bogus",
             }),
         )
-        .unwrap_err();
+        .unwrap_err()
+        .to_string();
         assert!(
             err.contains("unknown variant")
                 || err.contains("invalid value")

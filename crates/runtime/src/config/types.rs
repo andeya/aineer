@@ -1,8 +1,10 @@
 use std::collections::BTreeMap;
-use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
 
+pub use codineer_core::GeminiCacheConfig;
+
 use crate::json::JsonValue;
+use crate::permissions::PermissionRule;
 use crate::sandbox::SandboxConfig;
 
 pub use codineer_core::config::ConfigSource;
@@ -14,6 +16,7 @@ pub use mcp::{
 
 pub const CODINEER_SETTINGS_SCHEMA_NAME: &str = "SettingsSchema";
 
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResolvedPermissionMode {
     ReadOnly,
@@ -74,9 +77,11 @@ pub struct RuntimeFeatureConfig {
     pub(crate) fallback_models: Vec<String>,
     pub(crate) model_aliases: BTreeMap<String, String>,
     pub(crate) permission_mode: Option<ResolvedPermissionMode>,
+    pub(crate) permission_rules: Vec<PermissionRule>,
     pub(crate) sandbox: SandboxConfig,
     pub(crate) providers: BTreeMap<String, CustomProviderConfig>,
     pub(crate) credentials: CredentialConfig,
+    pub(crate) gemini_cache: GeminiCacheConfig,
 }
 
 /// Configuration for a custom OpenAI-compatible provider.
@@ -98,54 +103,14 @@ pub struct RuntimeHookConfig {
     pub(crate) commands: BTreeMap<String, Vec<String>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OAuthConfig {
-    pub client_id: String,
-    pub authorize_url: String,
-    pub token_url: String,
-    pub callback_port: Option<u16>,
-    pub manual_redirect_url: Option<String>,
-    pub scopes: Vec<String>,
-}
+pub use codineer_core::OAuthConfig;
 
-impl Default for OAuthConfig {
-    fn default() -> Self {
-        Self {
-            client_id: String::from("df03b862-78fe-4a2b-bb24-426ac30897b7"),
-            authorize_url: String::from("https://platform.codineer.dev/oauth/authorize"),
-            token_url: String::from("https://platform.codineer.dev/v1/oauth/token"),
-            callback_port: None,
-            manual_redirect_url: None,
-            scopes: vec![
-                String::from("user:profile"),
-                String::from("user:inference"),
-                String::from("user:sessions:codineer"),
-            ],
-        }
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
-    Io(std::io::Error),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error("{0}")]
     Parse(String),
-}
-
-impl Display for ConfigError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Io(error) => write!(f, "{error}"),
-            Self::Parse(error) => write!(f, "{error}"),
-        }
-    }
-}
-
-impl std::error::Error for ConfigError {}
-
-impl From<std::io::Error> for ConfigError {
-    fn from(value: std::io::Error) -> Self {
-        Self::Io(value)
-    }
 }
 
 impl RuntimeConfig {
@@ -233,6 +198,11 @@ impl RuntimeConfig {
     }
 
     #[must_use]
+    pub fn permission_rules(&self) -> &[PermissionRule] {
+        &self.feature_config.permission_rules
+    }
+
+    #[must_use]
     pub fn sandbox(&self) -> &SandboxConfig {
         &self.feature_config.sandbox
     }
@@ -245,6 +215,11 @@ impl RuntimeConfig {
     #[must_use]
     pub fn credentials(&self) -> &CredentialConfig {
         &self.feature_config.credentials
+    }
+
+    #[must_use]
+    pub fn gemini_cache(&self) -> &GeminiCacheConfig {
+        &self.feature_config.gemini_cache
     }
 
     /// Return the `"env"` section from merged config as key-value pairs.
@@ -343,6 +318,11 @@ impl RuntimeFeatureConfig {
     }
 
     #[must_use]
+    pub fn permission_rules(&self) -> &[PermissionRule] {
+        &self.permission_rules
+    }
+
+    #[must_use]
     pub fn sandbox(&self) -> &SandboxConfig {
         &self.sandbox
     }
@@ -355,6 +335,11 @@ impl RuntimeFeatureConfig {
     #[must_use]
     pub fn credentials(&self) -> &CredentialConfig {
         &self.credentials
+    }
+
+    #[must_use]
+    pub fn gemini_cache(&self) -> &GeminiCacheConfig {
+        &self.gemini_cache
     }
 
     /// Set the custom providers map (useful in tests and programmatic construction).

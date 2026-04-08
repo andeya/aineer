@@ -7,9 +7,12 @@
 use std::collections::VecDeque;
 
 use crate::conversation::ToolExecutor;
-use crate::tool_orchestration::{ToolCall, ToolSlot};
+use crate::tool_orchestration::{
+    execute_batch_with_options, ExecuteBatchOptions, ToolBatch, ToolCall, ToolSlot,
+};
 
 /// Status of a queued tool call.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToolStatus {
     /// Waiting for execution.
@@ -30,7 +33,8 @@ struct QueuedTool {
 /// Manages concurrent tool execution during streaming.
 ///
 /// Tool calls are enqueued as they arrive from the model stream.
-/// `drain_ready` executes all ready tools and returns completed results.
+/// `drain_ready` executes ready tools in batches (parallel when allowed)
+/// and returns completed results.
 #[derive(Debug)]
 pub struct StreamingToolExecutor {
     queue: VecDeque<QueuedTool>,
@@ -62,66 +66,50 @@ impl StreamingToolExecutor {
 
     /// Execute all pending tools and return completed results.
     ///
-    /// Sequential tools are executed in order. Concurrent-safe tools
-    /// are batched together for parallel execution when supported.
+    /// Consecutive concurrency-safe tools are batched for parallel execution
+    /// when supported by the executor; otherwise tools run sequentially.
     pub fn drain_ready<T: ToolExecutor>(&mut self, executor: &mut T) -> Vec<CompletedToolCall> {
+        self.drain_ready_with_options(executor, ExecuteBatchOptions::default())
+    }
+
+    /// Like [`Self::drain_ready`] with optional per-tool progress callbacks.
+    pub fn drain_ready_with_options<T: ToolExecutor>(
+        &mut self,
+        executor: &mut T,
+        mut opts: ExecuteBatchOptions<'_>,
+    ) -> Vec<CompletedToolCall> {
         let mut results = Vec::new();
 
-        while let Some(queued) = self.queue.front_mut() {
-            if !matches!(queued.status, ToolStatus::Pending) {
-                let completed = self.queue.pop_front().unwrap();
-                if let ToolStatus::Completed { output, is_error } = completed.status {
-                    results.push(CompletedToolCall {
-                        id: completed.call.id,
-                        name: completed.call.name,
-                        output,
-                        is_error,
-                    });
-                }
-                continue;
-            }
-
-            match &queued.call.slot {
-                ToolSlot::Denied { reason } => {
-                    queued.status = ToolStatus::Completed {
-                        output: reason.clone(),
-                        is_error: true,
-                    };
-                }
-                ToolSlot::Sequential | ToolSlot::Concurrent => {
-                    let result = executor.execute(&queued.call.name, &queued.call.input);
-                    match result {
-                        Ok(output) => {
-                            queued.status = ToolStatus::Completed {
-                                output,
-                                is_error: false,
-                            };
-                        }
-                        Err(err) => {
-                            queued.status = ToolStatus::Completed {
-                                output: err.message().to_string(),
-                                is_error: true,
-                            };
-                        }
-                    }
-                }
-            }
-        }
-
-        // Drain remaining completed
-        while let Some(queued) = self.queue.front() {
-            if let ToolStatus::Completed { .. } = &queued.status {
-                let completed = self.queue.pop_front().unwrap();
-                if let ToolStatus::Completed { output, is_error } = completed.status {
-                    results.push(CompletedToolCall {
-                        id: completed.call.id,
-                        name: completed.call.name,
-                        output,
-                        is_error,
-                    });
-                }
-            } else {
+        while !self.queue.is_empty() {
+            let Some((take_n, batch)) = collect_next_batch(&self.queue, executor) else {
                 break;
+            };
+
+            let mut calls = Vec::with_capacity(take_n);
+            for _ in 0..take_n {
+                let q = self.queue.pop_front().expect("batch size matches queue");
+                calls.push(q.call);
+            }
+            debug_assert_eq!(calls.len(), batch.calls.len());
+
+            let batch = ToolBatch {
+                calls,
+                concurrent: batch.concurrent,
+            };
+
+            let exec_results = execute_batch_with_options(&batch, executor, &mut opts);
+
+            for (call, tr) in batch.calls.iter().zip(exec_results) {
+                let (output, is_error) = match tr.result {
+                    Ok(o) => (o, false),
+                    Err(e) => (e.to_string(), true),
+                };
+                results.push(CompletedToolCall {
+                    id: call.id.clone(),
+                    name: call.name.clone(),
+                    output,
+                    is_error,
+                });
             }
         }
 
@@ -140,6 +128,60 @@ impl StreamingToolExecutor {
     #[must_use]
     pub fn total(&self) -> usize {
         self.queue.len()
+    }
+}
+
+fn collect_next_batch<T: ToolExecutor>(
+    queue: &VecDeque<QueuedTool>,
+    executor: &T,
+) -> Option<(usize, ToolBatch)> {
+    let first = queue.front()?;
+    if !matches!(first.status, ToolStatus::Pending) {
+        return None;
+    }
+    match &first.call.slot {
+        ToolSlot::Denied { .. } => Some((
+            1,
+            ToolBatch {
+                calls: vec![first.call.clone()],
+                concurrent: false,
+            },
+        )),
+        ToolSlot::Sequential => Some((
+            1,
+            ToolBatch {
+                calls: vec![first.call.clone()],
+                concurrent: false,
+            },
+        )),
+        ToolSlot::Concurrent => {
+            if !executor.is_concurrency_safe(&first.call.name) {
+                return Some((
+                    1,
+                    ToolBatch {
+                        calls: vec![first.call.clone()],
+                        concurrent: false,
+                    },
+                ));
+            }
+            let mut calls = vec![first.call.clone()];
+            let mut count = 1usize;
+            while count < queue.len() {
+                let q = queue.get(count)?;
+                if !matches!(q.status, ToolStatus::Pending) {
+                    break;
+                }
+                match &q.call.slot {
+                    ToolSlot::Concurrent if executor.is_concurrency_safe(&q.call.name) => {
+                        calls.push(q.call.clone());
+                        count += 1;
+                    }
+                    _ => break,
+                }
+            }
+            let concurrent = calls.len() > 1;
+            Some((count, ToolBatch { calls, concurrent }))
+        }
     }
 }
 
@@ -162,6 +204,7 @@ pub struct CompletedToolCall {
 mod tests {
     use super::*;
     use crate::conversation::ToolError;
+    use codineer_core::events::{EventKind, RuntimeEvent};
 
     struct EchoExecutor;
 
@@ -238,5 +281,97 @@ mod tests {
         let mut executor = EchoExecutor;
         ste.drain_ready(&mut executor);
         assert!(ste.all_completed());
+    }
+
+    struct ProgressEchoExecutor;
+
+    impl ToolExecutor for ProgressEchoExecutor {
+        fn execute(&mut self, tool_name: &str, input: &str) -> Result<String, ToolError> {
+            self.execute_with_progress(tool_name, input, None)
+        }
+
+        fn execute_with_progress(
+            &mut self,
+            tool_name: &str,
+            input: &str,
+            on_progress: Option<&mut dyn FnMut(&str)>,
+        ) -> Result<String, ToolError> {
+            if let Some(cb) = on_progress {
+                cb("working");
+            }
+            Ok(format!("{tool_name}: {input}"))
+        }
+    }
+
+    #[test]
+    fn drain_ready_emits_tool_progress_via_options() {
+        let mut ste = StreamingToolExecutor::new();
+        ste.enqueue(make_call("bash"));
+        let mut executor = ProgressEchoExecutor;
+        let mut kinds = Vec::new();
+        let opts = ExecuteBatchOptions {
+            on_tool_progress: Some(&mut |id, name, msg| {
+                let ev = RuntimeEvent::ToolProgress {
+                    tool_use_id: id,
+                    tool_name: name,
+                    progress: msg,
+                };
+                kinds.push(ev.kind());
+            }),
+        };
+        let results = ste.drain_ready_with_options(&mut executor, opts);
+        assert_eq!(results.len(), 1);
+        assert_eq!(kinds, vec![EventKind::ToolProgress]);
+    }
+
+    struct ConcurrentSafeBashReadExecutor;
+
+    impl ToolExecutor for ConcurrentSafeBashReadExecutor {
+        fn is_concurrency_safe(&self, tool_name: &str) -> bool {
+            matches!(tool_name, "bash" | "read_file")
+        }
+
+        fn execute_batch(&self, _calls: &[(&str, &str)]) -> Option<Vec<Result<String, ToolError>>> {
+            None
+        }
+
+        fn execute_batch_with_abort(
+            &self,
+            _calls: &[(&str, &str)],
+            _abort_flag: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+        ) -> Option<Vec<Result<String, ToolError>>> {
+            None
+        }
+
+        fn execute(&mut self, tool_name: &str, _input: &str) -> Result<String, ToolError> {
+            if tool_name == "bash" {
+                Err(ToolError::new("bash failed"))
+            } else {
+                Ok("ok".into())
+            }
+        }
+    }
+
+    #[test]
+    fn sibling_abort_in_streaming_batch() {
+        let mut ste = StreamingToolExecutor::new();
+        ste.enqueue(ToolCall {
+            id: "id-bash".into(),
+            name: "bash".into(),
+            input: "{}".into(),
+            slot: ToolSlot::Concurrent,
+        });
+        ste.enqueue(ToolCall {
+            id: "id-rf".into(),
+            name: "read_file".into(),
+            input: "{}".into(),
+            slot: ToolSlot::Concurrent,
+        });
+        let mut executor = ConcurrentSafeBashReadExecutor;
+        let results = ste.drain_ready(&mut executor);
+        assert_eq!(results.len(), 2);
+        assert!(results[0].is_error);
+        assert!(results[1].is_error);
+        assert!(results[1].output.contains("aborted"));
     }
 }

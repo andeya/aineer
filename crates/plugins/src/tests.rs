@@ -916,6 +916,81 @@ fn list_installed_plugins_scans_install_root_without_registry_entries() {
     let _ = fs::remove_dir_all(bundled_root);
 }
 
+#[test]
+fn directory_layout_scans_command_markdown_files() {
+    let root = temp_dir("cmd-md");
+    write_file(
+        root.join("commands").join("deploy.md").as_path(),
+        "---\ndescription: Ship it\n---\nRun deploy steps.\n",
+    );
+    write_file(
+        root.join("commands").join("noop.md").as_path(),
+        "# Title only\nbody\n",
+    );
+
+    let cmds = scan_command_files(&root);
+    assert_eq!(cmds.len(), 2);
+    let deploy = cmds.iter().find(|c| c.name == "deploy").expect("deploy");
+    assert_eq!(deploy.description, "Ship it");
+    assert!(deploy.content.contains("Run deploy"));
+
+    let noop = cmds.iter().find(|c| c.name == "noop").expect("noop");
+    assert_eq!(noop.description, "Title only");
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn directory_layout_scans_agent_markdown_files() {
+    let root = temp_dir("agent-md");
+    write_file(
+        root.join("agents").join("reviewer.md").as_path(),
+        "---\ndescription: Code reviewer\n---\nYou are a careful reviewer.\n",
+    );
+
+    let agents = scan_agent_files(&root);
+    assert_eq!(agents.len(), 1);
+    assert_eq!(agents[0].name, "reviewer");
+    assert_eq!(agents[0].description, "Code reviewer");
+    assert_eq!(
+        agents[0].system_prompt.trim(),
+        "You are a careful reviewer."
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn session_plugin_dir_is_discovered_and_not_installed() {
+    let config_home = temp_dir("session-plugin-home");
+    let session_root = temp_dir("session-plugin-root");
+    let plugin_root = session_root.join("session-demo");
+    write_file(
+        plugin_root.join(MANIFEST_FILE_NAME).as_path(),
+        r#"{
+  "name": "session-demo",
+  "version": "1.0.0",
+  "description": "Session-only plugin"
+}"#,
+    );
+
+    let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+    manager.add_session_plugin_dir(session_root.clone());
+
+    let plugins = manager.discover_plugins().expect("discover");
+    assert!(plugins
+        .iter()
+        .any(|p| p.metadata().id == "session-demo@external"));
+
+    let installed = manager.list_installed_plugins().expect("installed");
+    assert!(!installed
+        .iter()
+        .any(|p| p.metadata.id == "session-demo@external"));
+
+    let _ = fs::remove_dir_all(config_home);
+    let _ = fs::remove_dir_all(session_root);
+}
+
 // ── Hook integration tests (migrated from hooks.rs) ──────────────────
 
 #[cfg(unix)]

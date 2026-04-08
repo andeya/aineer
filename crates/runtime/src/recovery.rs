@@ -6,7 +6,129 @@
 
 use codineer_core::loop_state::Transition;
 
+/// Token figures extracted from provider context-overflow error text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextOverflowInfo {
+    pub prompt_tokens: Option<usize>,
+    pub max_tokens: Option<usize>,
+    pub overflow_tokens: Option<usize>,
+}
+
+/// Parse token counts from common API error messages like:
+/// - "prompt is too long: 150000 tokens > 128000 maximum"
+/// - "This request would exceed the token limit of 128000. Current usage: 150000 tokens"
+pub fn parse_context_overflow(message: &str) -> Option<ContextOverflowInfo> {
+    let mut info = ContextOverflowInfo {
+        prompt_tokens: None,
+        max_tokens: None,
+        overflow_tokens: None,
+    };
+
+    if let Some(idx) = message.find("tokens >") {
+        let left = message[..idx].trim_end();
+        let right = message[idx + "tokens >".len()..].trim_start();
+        info.prompt_tokens = last_number_in(left).or(info.prompt_tokens);
+        info.max_tokens = first_number_in(right).or(info.max_tokens);
+    }
+
+    let lower = message.to_lowercase();
+    if lower.contains("token limit") {
+        if let Some(rest) = find_case_insensitive_tail(message, "token limit of") {
+            info.max_tokens = first_number_in(rest).or(info.max_tokens);
+        }
+    }
+    if lower.contains("current usage") {
+        if let Some(rest) = find_case_insensitive_tail(message, "current usage:") {
+            info.prompt_tokens = first_number_in(rest).or(info.prompt_tokens);
+        }
+    }
+
+    match (info.prompt_tokens, info.max_tokens) {
+        (Some(p), Some(m)) if p > m => {
+            info.overflow_tokens = Some(p - m);
+        }
+        _ => {}
+    }
+
+    if info.prompt_tokens.is_none() && info.max_tokens.is_none() && info.overflow_tokens.is_none() {
+        return None;
+    }
+    Some(info)
+}
+
+fn find_case_insensitive_tail<'a>(haystack: &'a str, needle: &str) -> Option<&'a str> {
+    let hay = haystack.to_lowercase();
+    let idx = hay.find(&needle.to_lowercase())?;
+    Some(haystack[idx + needle.len()..].trim_start())
+}
+
+fn first_number_in(s: &str) -> Option<usize> {
+    let mut started = false;
+    let mut start_idx = 0;
+    for (i, c) in s.char_indices() {
+        if c.is_ascii_digit() {
+            if !started {
+                started = true;
+                start_idx = i;
+            }
+        } else if started {
+            return s[start_idx..i].parse().ok();
+        }
+    }
+    if started {
+        return s[start_idx..].parse().ok();
+    }
+    None
+}
+
+fn last_number_in(s: &str) -> Option<usize> {
+    let mut end: Option<usize> = None;
+    let mut start: Option<usize> = None;
+    for (i, c) in s.char_indices().rev() {
+        if c.is_ascii_digit() {
+            if end.is_none() {
+                end = Some(i + c.len_utf8());
+            }
+            start = Some(i);
+        } else if start.is_some() {
+            break;
+        }
+    }
+    let (sidx, eidx) = (start?, end?);
+    s[sidx..eidx].parse().ok()
+}
+
+/// Choose how many trailing messages to preserve for reactive compaction from overflow text.
+#[must_use]
+pub fn preserve_recent_for_reactive_compact(message: Option<&str>, total_messages: usize) -> usize {
+    const FALLBACK: usize = 2;
+    let msg = match message {
+        Some(m) if !m.is_empty() => m,
+        _ => return FALLBACK.min(total_messages.max(1)),
+    };
+    let Some(info) = parse_context_overflow(msg) else {
+        return FALLBACK.min(total_messages.max(1));
+    };
+    let overflow = info
+        .overflow_tokens
+        .or_else(|| match (info.prompt_tokens, info.max_tokens) {
+            (Some(p), Some(m)) if p > m => Some(p - m),
+            _ => None,
+        });
+    let mut preserve = match overflow {
+        None => FALLBACK,
+        Some(o) if o < 2_000 => 8,
+        Some(o) if o < 10_000 => 6,
+        Some(o) if o < 30_000 => 4,
+        Some(o) if o < 80_000 => 3,
+        Some(_) => 2,
+    };
+    preserve = preserve.max(FALLBACK);
+    preserve.min(total_messages.max(1))
+}
+
 /// Classification of an API error for recovery routing.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApiErrorKind {
     /// Context is too large for the model's window.
@@ -24,6 +146,7 @@ pub enum ApiErrorKind {
 }
 
 /// Recovery strategy selected based on error classification.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RecoveryStrategy {
     /// Retry immediately (e.g., transient network error).
@@ -377,5 +500,38 @@ mod tests {
         assert!(engine.retries_exhausted());
         engine.reset();
         assert!(!engine.retries_exhausted());
+    }
+
+    #[test]
+    fn parse_context_overflow_tokens_gt_pattern() {
+        let msg = "prompt is too long: 150000 tokens > 128000 maximum";
+        let info = parse_context_overflow(msg).expect("parsed");
+        assert_eq!(info.prompt_tokens, Some(150_000));
+        assert_eq!(info.max_tokens, Some(128_000));
+        assert_eq!(info.overflow_tokens, Some(22_000));
+    }
+
+    #[test]
+    fn parse_context_overflow_limit_and_usage_pattern() {
+        let msg =
+            "This request would exceed the token limit of 128000. Current usage: 150000 tokens";
+        let info = parse_context_overflow(msg).expect("parsed");
+        assert_eq!(info.max_tokens, Some(128_000));
+        assert_eq!(info.prompt_tokens, Some(150_000));
+        assert_eq!(info.overflow_tokens, Some(22_000));
+    }
+
+    #[test]
+    fn parse_context_overflow_returns_none_when_unrecognized() {
+        assert!(parse_context_overflow("something went wrong").is_none());
+    }
+
+    #[test]
+    fn preserve_recent_scales_with_overflow_magnitude() {
+        let small = "prompt is too long: 128100 tokens > 128000 maximum";
+        assert_eq!(preserve_recent_for_reactive_compact(Some(small), 20), 8);
+
+        let huge = "prompt is too long: 250000 tokens > 128000 maximum";
+        assert_eq!(preserve_recent_for_reactive_compact(Some(huge), 20), 2);
     }
 }

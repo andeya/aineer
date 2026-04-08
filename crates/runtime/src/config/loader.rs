@@ -4,6 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::json::JsonValue;
+use crate::permissions::{PermissionRule, RuleDecision};
 use crate::sandbox::{FilesystemIsolationMode, SandboxConfig};
 
 use super::types::*;
@@ -88,9 +89,11 @@ impl ConfigLoader {
             fallback_models: parse_optional_fallback_models(&merged_value),
             model_aliases: parse_optional_model_aliases(&merged_value),
             permission_mode: parse_optional_permission_mode(&merged_value)?,
+            permission_rules: parse_optional_permission_rules(&merged_value)?,
             sandbox: parse_optional_sandbox_config(&merged_value)?,
             providers: parse_optional_providers_config(&merged_value)?,
             credentials: parse_optional_credentials_config(&merged_value)?,
+            gemini_cache: parse_optional_gemini_cache_config(&merged_value)?,
         };
 
         Ok(RuntimeConfig::new(merged, loaded_entries, feature_config))
@@ -287,6 +290,70 @@ fn parse_optional_permission_mode(
     parse_permission_mode_label(mode, "merged settings.permissions.defaultMode").map(Some)
 }
 
+fn parse_optional_permission_rules(root: &JsonValue) -> Result<Vec<PermissionRule>, ConfigError> {
+    let Some(object) = root.as_object() else {
+        return Ok(Vec::new());
+    };
+    let Some(permissions) = object.get("permissions").and_then(JsonValue::as_object) else {
+        return Ok(Vec::new());
+    };
+    let Some(rules_value) = permissions.get("rules") else {
+        return Ok(Vec::new());
+    };
+    let rules = rules_value.as_array().ok_or_else(|| {
+        ConfigError::Parse("merged settings.permissions.rules: expected array".to_string())
+    })?;
+    let mut out = Vec::with_capacity(rules.len());
+    for (i, item) in rules.iter().enumerate() {
+        let obj = item.as_object().ok_or_else(|| {
+            ConfigError::Parse(format!(
+                "merged settings.permissions.rules[{i}]: expected object"
+            ))
+        })?;
+        let tool_pattern = obj
+            .get("toolPattern")
+            .or_else(|| obj.get("tool_pattern"))
+            .and_then(JsonValue::as_str)
+            .ok_or_else(|| {
+                ConfigError::Parse(format!(
+                    "merged settings.permissions.rules[{i}]: missing toolPattern"
+                ))
+            })?
+            .to_string();
+        let input_pattern = obj
+            .get("inputPattern")
+            .or_else(|| obj.get("input_pattern"))
+            .and_then(JsonValue::as_str)
+            .map(str::to_string);
+        let decision_str = obj
+            .get("decision")
+            .and_then(JsonValue::as_str)
+            .ok_or_else(|| {
+                ConfigError::Parse(format!(
+                    "merged settings.permissions.rules[{i}]: missing decision"
+                ))
+            })?;
+        let decision = parse_rule_decision(decision_str, i)?;
+        out.push(PermissionRule {
+            tool_pattern,
+            input_pattern,
+            decision,
+        });
+    }
+    Ok(out)
+}
+
+fn parse_rule_decision(s: &str, index: usize) -> Result<RuleDecision, ConfigError> {
+    match s {
+        "always_allow" | "alwaysAllow" => Ok(RuleDecision::AlwaysAllow),
+        "always_deny" | "alwaysDeny" => Ok(RuleDecision::AlwaysDeny),
+        "always_ask" | "alwaysAsk" => Ok(RuleDecision::AlwaysAsk),
+        other => Err(ConfigError::Parse(format!(
+            "merged settings.permissions.rules[{index}]: unsupported decision {other}"
+        ))),
+    }
+}
+
 fn parse_permission_mode_label(
     mode: &str,
     context: &str,
@@ -299,6 +366,26 @@ fn parse_permission_mode_label(
             "{context}: unsupported permission mode {other}"
         ))),
     }
+}
+
+fn parse_optional_gemini_cache_config(root: &JsonValue) -> Result<GeminiCacheConfig, ConfigError> {
+    let Some(object) = root.as_object() else {
+        return Ok(GeminiCacheConfig::default());
+    };
+    let Some(gc) = object
+        .get("geminiCache")
+        .or_else(|| object.get("gemini_cache"))
+    else {
+        return Ok(GeminiCacheConfig::default());
+    };
+    let obj = expect_object(gc, "merged settings.geminiCache")?;
+    let enabled = optional_bool(obj, "enabled", "merged settings.geminiCache")?.unwrap_or(false);
+    let ttl_seconds =
+        optional_u64(obj, "ttlSeconds", "merged settings.geminiCache")?.unwrap_or(3600);
+    Ok(GeminiCacheConfig {
+        enabled,
+        ttl_seconds,
+    })
 }
 
 fn parse_optional_sandbox_config(root: &JsonValue) -> Result<SandboxConfig, ConfigError> {
@@ -489,6 +576,27 @@ fn optional_u16(
                 )));
             };
             let number = u16::try_from(number).map_err(|_| {
+                ConfigError::Parse(format!("{context}: field {key} is out of range"))
+            })?;
+            Ok(Some(number))
+        }
+        None => Ok(None),
+    }
+}
+
+fn optional_u64(
+    object: &BTreeMap<String, JsonValue>,
+    key: &str,
+    context: &str,
+) -> Result<Option<u64>, ConfigError> {
+    match object.get(key) {
+        Some(value) => {
+            let Some(number) = value.as_i64() else {
+                return Err(ConfigError::Parse(format!(
+                    "{context}: field {key} must be an integer"
+                )));
+            };
+            let number = u64::try_from(number).map_err(|_| {
                 ConfigError::Parse(format!("{context}: field {key} is out of range"))
             })?;
             Ok(Some(number))

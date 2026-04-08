@@ -39,6 +39,7 @@ impl ScopedMcpServerConfig {
     }
 }
 
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum McpTransport {
     Stdio,
@@ -49,6 +50,7 @@ pub enum McpTransport {
     ManagedProxy,
 }
 
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum McpServerConfig {
     Stdio(McpStdioServerConfig),

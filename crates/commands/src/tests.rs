@@ -359,8 +359,9 @@ fn renders_help_from_shared_specs() {
     assert!(help.contains("/agents"));
     assert!(help.contains("/skills"));
     assert!(help.contains("/doctor"));
-    assert_eq!(slash_command_specs().len(), 31);
-    assert_eq!(resume_supported_slash_commands().len(), 16);
+    assert!(help.contains("/update"));
+    assert_eq!(slash_command_specs().len(), 32);
+    assert_eq!(resume_supported_slash_commands().len(), 17);
 }
 
 #[test]
@@ -373,7 +374,6 @@ fn suggests_close_slash_commands() {
 #[test]
 fn compacts_sessions_via_slash_command() {
     let session = Session {
-        version: 1,
         messages: vec![
             ConversationMessage::user_text("a ".repeat(200)),
             ConversationMessage::assistant(vec![ContentBlock::Text {
@@ -384,6 +384,7 @@ fn compacts_sessions_via_slash_command() {
                 text: "recent".to_string(),
             }]),
         ],
+        ..Session::new()
     };
 
     let result = handle_slash_command_simple(

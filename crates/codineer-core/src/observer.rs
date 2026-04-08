@@ -11,6 +11,7 @@
 use crate::events::RuntimeEvent;
 
 /// Control flow decision returned by an observer.
+#[non_exhaustive]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum Decision {
     /// Allow the runtime to proceed normally.
@@ -64,7 +65,7 @@ impl EventDirective {
 
 /// Trait for observing runtime lifecycle events.
 ///
-/// Implement this trait to hook into the runtime at any of the 35 event points.
+/// Implement this trait to hook into the runtime at any of the lifecycle event kinds.
 pub trait RuntimeObserver {
     fn on_event(&mut self, event: &RuntimeEvent<'_>) -> EventDirective;
 }

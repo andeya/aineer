@@ -3,6 +3,7 @@ use super::{
     CODINEER_SETTINGS_SCHEMA_NAME,
 };
 use crate::json::JsonValue;
+use crate::permissions::{PermissionRule, RuleDecision};
 use crate::sandbox::FilesystemIsolationMode;
 use std::fs;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -552,6 +553,42 @@ fn fallback_models_non_array_value_returns_empty() {
 
     let loaded = ConfigLoader::new(&cwd, &home).load().expect("load");
     assert!(loaded.fallback_models().is_empty());
+
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn loads_permission_rules_from_settings() {
+    let root = temp_dir();
+    let cwd = root.join("project");
+    let home = root.join("home").join(".codineer");
+    fs::create_dir_all(&home).expect("home dir");
+    fs::create_dir_all(&cwd).expect("project dir");
+    fs::write(
+        home.join("settings.json"),
+        r#"{"permissions":{"rules":[
+            {"toolPattern":"bash","decision":"always_deny"},
+            {"toolPattern":"write_file","inputPattern":"/tmp/*","decision":"always_allow"}
+        ]}}"#,
+    )
+    .expect("write settings");
+
+    let loaded = ConfigLoader::new(&cwd, &home).load().expect("load");
+    assert_eq!(
+        loaded.permission_rules(),
+        &[
+            PermissionRule {
+                tool_pattern: "bash".to_string(),
+                input_pattern: None,
+                decision: RuleDecision::AlwaysDeny,
+            },
+            PermissionRule {
+                tool_pattern: "write_file".to_string(),
+                input_pattern: Some("/tmp/*".to_string()),
+                decision: RuleDecision::AlwaysAllow,
+            },
+        ]
+    );
 
     fs::remove_dir_all(root).expect("cleanup");
 }

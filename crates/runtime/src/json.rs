@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter};
 
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JsonValue {
     Null,

@@ -340,7 +340,6 @@ mod tests {
     #[test]
     fn reconstructs_usage_from_session_messages() {
         let session = Session {
-            version: 1,
             messages: vec![ConversationMessage {
                 role: MessageRole::Assistant,
                 blocks: vec![ContentBlock::Text {
@@ -353,6 +352,7 @@ mod tests {
                     cache_read_input_tokens: 0,
                 }),
             }],
+            ..Session::new()
         };
 
         let tracker = UsageTracker::from_session(&session);

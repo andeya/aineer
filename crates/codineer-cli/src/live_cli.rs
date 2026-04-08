@@ -57,6 +57,8 @@ pub(crate) struct LiveCli {
     permission_mode: PermissionMode,
     system_prompt: Vec<api::SystemBlock>,
     runtime: ConversationRuntime<DefaultRuntimeClient, CliToolExecutor, CliObserver>,
+    /// Same `Arc<Runtime>` as `DefaultRuntimeClient` / `CliToolExecutor` for this session.
+    tokio_runtime: Arc<tokio::runtime::Runtime>,
     session: SessionHandle,
     mcp_manager: SharedMcpManager,
     lsp_manager: Option<LspManager>,
@@ -107,6 +109,7 @@ impl LiveCli {
             permission_mode,
             system_prompt,
             runtime: build.runtime,
+            tokio_runtime: build.tokio_runtime,
             session,
             mcp_manager,
             lsp_manager,
@@ -192,7 +195,9 @@ impl LiveCli {
 
     fn run_prompt_json(&mut self, input: &str) -> CliResult<()> {
         let session = self.runtime.session().clone();
-        let mut runtime = build_runtime(self.runtime_params(session, false))?.runtime;
+        let build = build_runtime(self.runtime_params(session, false))?;
+        let mut runtime = build.runtime;
+        self.tokio_runtime = build.tokio_runtime;
         let mut permission_prompter = CliPermissionPrompter::new(self.permission_mode);
         let summary = runtime.run_turn(input, Some(&mut permission_prompter))?;
         self.runtime = runtime;
@@ -219,7 +224,9 @@ impl LiveCli {
 
     fn run_prompt_stream_json(&mut self, input: &str) -> CliResult<()> {
         let session = self.runtime.session().clone();
-        let mut runtime = build_runtime(self.runtime_params(session, false))?.runtime;
+        let build = build_runtime(self.runtime_params(session, false))?;
+        let mut runtime = build.runtime;
+        self.tokio_runtime = build.tokio_runtime;
         let mut permission_prompter = CliPermissionPrompter::new(self.permission_mode);
 
         emit_json_event("turn_start", json!({"prompt": input}));
@@ -266,126 +273,226 @@ impl LiveCli {
     }
 
     fn handle_repl_command(&mut self, command: SlashCommand) -> CliResult<bool> {
-        Ok(match command {
-            SlashCommand::Help => {
-                println!("{}", render_repl_help());
-                false
-            }
-            SlashCommand::Status => {
-                self.print_status();
-                false
-            }
-            SlashCommand::Cost => {
-                self.print_cost();
-                false
-            }
-            SlashCommand::Compact => {
-                self.compact()?;
-                false
-            }
-            SlashCommand::Init => {
-                run_init()?;
-                false
-            }
-            SlashCommand::Diff => {
-                Self::print_diff()?;
-                false
-            }
-            SlashCommand::Version => {
-                Self::print_version();
-                false
-            }
-            SlashCommand::Memory => {
-                Self::print_memory()?;
-                false
-            }
-            SlashCommand::DebugToolCall => {
-                self.run_debug_tool_call()?;
-                false
-            }
-            SlashCommand::Commit => {
-                self.run_commit()?;
-                true
-            }
-            SlashCommand::Bughunter { scope } => {
-                self.run_bughunter(scope.as_deref())?;
-                false
-            }
-            SlashCommand::Pr { context } => {
-                self.run_pr(context.as_deref())?;
-                false
-            }
-            SlashCommand::Issue { context } => {
-                self.run_issue(context.as_deref())?;
-                false
-            }
-            SlashCommand::Ultraplan { task } => {
-                self.run_ultraplan(task.as_deref())?;
-                false
-            }
-            SlashCommand::Teleport { target } => {
-                Self::run_teleport(target.as_deref())?;
-                false
-            }
-            SlashCommand::Export { path } => {
-                self.export_session(path.as_deref())?;
-                false
-            }
-            SlashCommand::Config { section } => {
-                Self::print_config(section.as_deref())?;
-                false
-            }
-            SlashCommand::Models { provider } => {
-                models_cmd::run_models(provider.as_deref())?;
-                false
-            }
-            SlashCommand::Providers => {
-                models_cmd::run_providers()?;
-                false
-            }
-            SlashCommand::Agents { args } => {
-                Self::print_agents(args.as_deref())?;
-                false
-            }
-            SlashCommand::Skills { args } => {
-                Self::print_skills(args.as_deref())?;
-                false
-            }
-            SlashCommand::Model { model } => self.set_model(model)?,
-            SlashCommand::Permissions { mode } => self.set_permissions(mode)?,
-            SlashCommand::Clear { confirm } => self.clear_session(confirm)?,
-            SlashCommand::Resume { session_path } => self.resume_session(session_path)?,
-            SlashCommand::Session { action, target } => {
-                self.handle_session_command(action.as_deref(), target.as_deref())?
-            }
-            SlashCommand::Plugins { action, target } => {
-                self.handle_plugins_command(action.as_deref(), target.as_deref())?
-            }
-            SlashCommand::Branch { action, target } => {
-                self.print_branch_slash(action.as_deref(), target.as_deref())?;
-                false
-            }
+        match command {
+            SlashCommand::Help => self.repl_handle_help(),
+            SlashCommand::Status => self.repl_handle_status(),
+            SlashCommand::Cost => self.repl_handle_cost(),
+            SlashCommand::Compact => self.repl_handle_compact(),
+            SlashCommand::Init => self.repl_handle_init(),
+            SlashCommand::Diff => self.repl_handle_diff(),
+            SlashCommand::Version => self.repl_handle_version(),
+            SlashCommand::Memory => self.repl_handle_memory(),
+            SlashCommand::DebugToolCall => self.repl_handle_debug_tool_call(),
+            SlashCommand::Commit => self.repl_handle_commit(),
+            SlashCommand::Bughunter { scope } => self.repl_handle_bughunter(scope),
+            SlashCommand::Pr { context } => self.repl_handle_pr(context),
+            SlashCommand::Issue { context } => self.repl_handle_issue(context),
+            SlashCommand::Ultraplan { task } => self.repl_handle_ultraplan(task),
+            SlashCommand::Teleport { target } => self.repl_handle_teleport(target),
+            SlashCommand::Export { path } => self.repl_handle_export(path),
+            SlashCommand::Config { section } => self.repl_handle_config(section),
+            SlashCommand::Models { provider } => self.repl_handle_models(provider),
+            SlashCommand::Providers => self.repl_handle_providers(),
+            SlashCommand::Agents { args } => self.repl_handle_agents(args),
+            SlashCommand::Skills { args } => self.repl_handle_skills(args),
+            SlashCommand::Model { model } => self.repl_handle_model(model),
+            SlashCommand::Permissions { mode } => self.repl_handle_permissions(mode),
+            SlashCommand::Clear { confirm } => self.repl_handle_clear(confirm),
+            SlashCommand::Resume { session_path } => self.repl_handle_resume(session_path),
+            SlashCommand::Session { action, target } => self.repl_handle_session(action, target),
+            SlashCommand::Plugins { action, target } => self.repl_handle_plugins(action, target),
+            SlashCommand::Branch { action, target } => self.repl_handle_branch(action, target),
             SlashCommand::Worktree {
                 action,
                 path,
                 branch,
-            } => {
-                self.print_worktree_slash(action.as_deref(), path.as_deref(), branch.as_deref())?;
-                false
+            } => self.repl_handle_worktree(action, path, branch),
+            SlashCommand::CommitPushPr { context } => self.repl_handle_commit_push_pr(context),
+            SlashCommand::Doctor => self.repl_handle_doctor(),
+            SlashCommand::Update { action } => {
+                let output = crate::auto_update::handle_update_command(action.as_deref());
+                println!("{output}");
+                Ok(false)
             }
-            SlashCommand::CommitPushPr { context } => {
-                self.run_commit_push_pr(context.as_deref())?;
-                true
-            }
-            SlashCommand::Doctor => {
-                self.run_doctor();
-                false
-            }
-            SlashCommand::Unknown(name) => {
-                eprintln!("{}", render_unknown_repl_command(&name));
-                false
-            }
-        })
+            SlashCommand::Unknown(name) => self.repl_handle_unknown(name),
+            _ => self.repl_handle_unsupported(),
+        }
+    }
+
+    fn repl_handle_help(&mut self) -> CliResult<bool> {
+        println!("{}", render_repl_help());
+        Ok(false)
+    }
+
+    fn repl_handle_status(&mut self) -> CliResult<bool> {
+        self.print_status();
+        Ok(false)
+    }
+
+    fn repl_handle_cost(&mut self) -> CliResult<bool> {
+        self.print_cost();
+        Ok(false)
+    }
+
+    fn repl_handle_compact(&mut self) -> CliResult<bool> {
+        self.compact()?;
+        Ok(false)
+    }
+
+    fn repl_handle_init(&mut self) -> CliResult<bool> {
+        run_init()?;
+        Ok(false)
+    }
+
+    fn repl_handle_diff(&mut self) -> CliResult<bool> {
+        Self::print_diff()?;
+        Ok(false)
+    }
+
+    fn repl_handle_version(&mut self) -> CliResult<bool> {
+        Self::print_version();
+        Ok(false)
+    }
+
+    fn repl_handle_memory(&mut self) -> CliResult<bool> {
+        Self::print_memory()?;
+        Ok(false)
+    }
+
+    fn repl_handle_debug_tool_call(&mut self) -> CliResult<bool> {
+        self.run_debug_tool_call()?;
+        Ok(false)
+    }
+
+    fn repl_handle_commit(&mut self) -> CliResult<bool> {
+        self.run_commit()?;
+        Ok(true)
+    }
+
+    fn repl_handle_bughunter(&mut self, scope: Option<String>) -> CliResult<bool> {
+        self.run_bughunter(scope.as_deref())?;
+        Ok(false)
+    }
+
+    fn repl_handle_pr(&mut self, context: Option<String>) -> CliResult<bool> {
+        self.run_pr(context.as_deref())?;
+        Ok(false)
+    }
+
+    fn repl_handle_issue(&mut self, context: Option<String>) -> CliResult<bool> {
+        self.run_issue(context.as_deref())?;
+        Ok(false)
+    }
+
+    fn repl_handle_ultraplan(&mut self, task: Option<String>) -> CliResult<bool> {
+        self.run_ultraplan(task.as_deref())?;
+        Ok(false)
+    }
+
+    fn repl_handle_teleport(&mut self, target: Option<String>) -> CliResult<bool> {
+        Self::run_teleport(target.as_deref())?;
+        Ok(false)
+    }
+
+    fn repl_handle_export(&mut self, path: Option<String>) -> CliResult<bool> {
+        self.export_session(path.as_deref())?;
+        Ok(false)
+    }
+
+    fn repl_handle_config(&mut self, section: Option<String>) -> CliResult<bool> {
+        Self::print_config(section.as_deref())?;
+        Ok(false)
+    }
+
+    fn repl_handle_models(&mut self, provider: Option<String>) -> CliResult<bool> {
+        models_cmd::run_models(provider.as_deref())?;
+        Ok(false)
+    }
+
+    fn repl_handle_providers(&mut self) -> CliResult<bool> {
+        models_cmd::run_providers()?;
+        Ok(false)
+    }
+
+    fn repl_handle_agents(&mut self, args: Option<String>) -> CliResult<bool> {
+        Self::print_agents(args.as_deref())?;
+        Ok(false)
+    }
+
+    fn repl_handle_skills(&mut self, args: Option<String>) -> CliResult<bool> {
+        Self::print_skills(args.as_deref())?;
+        Ok(false)
+    }
+
+    fn repl_handle_model(&mut self, model: Option<String>) -> CliResult<bool> {
+        self.set_model(model)
+    }
+
+    fn repl_handle_permissions(&mut self, mode: Option<String>) -> CliResult<bool> {
+        self.set_permissions(mode)
+    }
+
+    fn repl_handle_clear(&mut self, confirm: bool) -> CliResult<bool> {
+        self.clear_session(confirm)
+    }
+
+    fn repl_handle_resume(&mut self, session_path: Option<String>) -> CliResult<bool> {
+        self.resume_session(session_path)
+    }
+
+    fn repl_handle_session(
+        &mut self,
+        action: Option<String>,
+        target: Option<String>,
+    ) -> CliResult<bool> {
+        self.handle_session_command(action.as_deref(), target.as_deref())
+    }
+
+    fn repl_handle_plugins(
+        &mut self,
+        action: Option<String>,
+        target: Option<String>,
+    ) -> CliResult<bool> {
+        self.handle_plugins_command(action.as_deref(), target.as_deref())
+    }
+
+    fn repl_handle_branch(
+        &mut self,
+        action: Option<String>,
+        target: Option<String>,
+    ) -> CliResult<bool> {
+        self.print_branch_slash(action.as_deref(), target.as_deref())?;
+        Ok(false)
+    }
+
+    fn repl_handle_worktree(
+        &mut self,
+        action: Option<String>,
+        path: Option<String>,
+        branch: Option<String>,
+    ) -> CliResult<bool> {
+        self.print_worktree_slash(action.as_deref(), path.as_deref(), branch.as_deref())?;
+        Ok(false)
+    }
+
+    fn repl_handle_commit_push_pr(&mut self, context: Option<String>) -> CliResult<bool> {
+        self.run_commit_push_pr(context.as_deref())?;
+        Ok(true)
+    }
+
+    fn repl_handle_doctor(&mut self) -> CliResult<bool> {
+        self.run_doctor();
+        Ok(false)
+    }
+
+    fn repl_handle_unknown(&mut self, name: String) -> CliResult<bool> {
+        eprintln!("{}", render_unknown_repl_command(&name));
+        Ok(false)
+    }
+
+    fn repl_handle_unsupported(&mut self) -> CliResult<bool> {
+        eprintln!("This slash command is not supported in this Codineer build yet.");
+        Ok(false)
     }
 
     fn print_branch_slash(&self, action: Option<&str>, target: Option<&str>) -> CliResult<()> {
@@ -415,8 +522,10 @@ impl LiveCli {
 
     fn collect_lsp_diagnostics(&self) -> Option<LspContextEnrichment> {
         let manager = self.lsp_manager.as_ref()?;
-        let rt = tokio::runtime::Runtime::new().ok()?;
-        let diagnostics = rt.block_on(manager.collect_workspace_diagnostics()).ok()?;
+        let diagnostics = self
+            .tokio_runtime
+            .block_on(manager.collect_workspace_diagnostics())
+            .ok()?;
         let enrichment = LspContextEnrichment {
             file_path: env::current_dir().unwrap_or_default(),
             diagnostics,
@@ -431,18 +540,14 @@ impl LiveCli {
     }
 
     fn shutdown_mcp(&self) {
-        if let Ok(rt) = tokio::runtime::Runtime::new() {
-            if let Ok(mut guard) = self.mcp_manager.lock() {
-                let _ = rt.block_on(guard.shutdown());
-            }
+        if let Ok(mut guard) = self.mcp_manager.lock() {
+            let _ = self.tokio_runtime.block_on(guard.shutdown());
         }
     }
 
     fn shutdown_lsp(&self) {
         if let Some(manager) = &self.lsp_manager {
-            if let Ok(rt) = tokio::runtime::Runtime::new() {
-                let _ = rt.block_on(manager.shutdown());
-            }
+            let _ = self.tokio_runtime.block_on(manager.shutdown());
         }
     }
 
@@ -502,6 +607,7 @@ impl LiveCli {
         params.model = model.clone();
         let build = build_runtime(params)?;
         self.runtime = build.runtime;
+        self.tokio_runtime = build.tokio_runtime;
         self.model.clone_from(&build.resolved_model);
         println!(
             "{}",
@@ -533,7 +639,9 @@ impl LiveCli {
         let previous = self.permission_mode.as_str().to_string();
         let session = self.runtime.session().clone();
         self.permission_mode = permission_mode_from_label(normalized)?;
-        self.runtime = build_runtime(self.runtime_params(session, true))?.runtime;
+        let build = build_runtime(self.runtime_params(session, true))?;
+        self.runtime = build.runtime;
+        self.tokio_runtime = build.tokio_runtime;
         println!(
             "{}",
             format_permissions_switch_report(&previous, normalized)
@@ -550,7 +658,9 @@ impl LiveCli {
         }
 
         self.session = create_managed_session_handle()?;
-        self.runtime = build_runtime(self.runtime_params(Session::new(), true))?.runtime;
+        let build = build_runtime(self.runtime_params(Session::new(), true))?;
+        self.runtime = build.runtime;
+        self.tokio_runtime = build.tokio_runtime;
         println!(
             "Session cleared\n  Mode             fresh session\n  Preserved model  {}\n  Permission mode  {}\n  Session          {}",
             self.model,
@@ -568,7 +678,9 @@ impl LiveCli {
     fn activate_session(&mut self, handle: SessionHandle) -> CliResult<usize> {
         let session = Session::load_from_path(&handle.path)?;
         let count = session.messages.len();
-        self.runtime = build_runtime(self.runtime_params(session, true))?.runtime;
+        let build = build_runtime(self.runtime_params(session, true))?;
+        self.runtime = build.runtime;
+        self.tokio_runtime = build.tokio_runtime;
         self.session = handle;
         Ok(count)
     }
@@ -773,7 +885,9 @@ impl LiveCli {
 
     fn reload_runtime_features(&mut self) -> CliResult<()> {
         let session = self.runtime.session().clone();
-        self.runtime = build_runtime(self.runtime_params(session, true))?.runtime;
+        let build = build_runtime(self.runtime_params(session, true))?;
+        self.runtime = build.runtime;
+        self.tokio_runtime = build.tokio_runtime;
         self.persist_session()
     }
 
@@ -782,7 +896,9 @@ impl LiveCli {
         let removed = result.removed_message_count;
         let kept = result.compacted_session.messages.len();
         let skipped = removed == 0;
-        self.runtime = build_runtime(self.runtime_params(result.compacted_session, true))?.runtime;
+        let build = build_runtime(self.runtime_params(result.compacted_session, true))?;
+        self.runtime = build.runtime;
+        self.tokio_runtime = build.tokio_runtime;
         self.persist_session()?;
         println!("{}", format_compact_report(removed, kept, skipped));
         Ok(())
@@ -985,6 +1101,8 @@ pub(crate) fn run_repl(
     resume_path: Option<std::path::PathBuf>,
 ) -> CliResult<()> {
     start_resize_monitor();
+    let _update_thread =
+        crate::auto_update::background_update_check(crate::auto_update::UpdateConfig::default());
     let mut cli = LiveCli::new(model, true, allowed_tools, permission_mode)?;
 
     // Restore a previous session if requested.  An empty session (0 messages)

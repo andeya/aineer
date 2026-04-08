@@ -1,6 +1,7 @@
 pub mod microcompact;
 pub mod reactive;
 
+use crate::model_context::context_window_for_model;
 use crate::session::{ContentBlock, ConversationMessage, MessageRole, Session};
 
 const COMPACT_CONTINUATION_PREAMBLE: &str =
@@ -8,6 +9,41 @@ const COMPACT_CONTINUATION_PREAMBLE: &str =
 const COMPACT_RECENT_MESSAGES_NOTE: &str = "Recent messages are preserved verbatim.";
 const COMPACT_DIRECT_RESUME_INSTRUCTION: &str = "Continue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, and do not preface with continuation text.";
 
+/// System prompt for model-assisted compaction summaries (caller may override via [`ModelCompactionConfig::summary_prompt`]).
+pub const COMPACT_SUMMARY_SYSTEM_PROMPT: &str = "You are a conversation summarizer. Given the previous messages from a coding assistant conversation, create a concise but comprehensive summary that preserves:
+1. Key decisions made and their rationale
+2. Files that were modified, created, or read
+3. Tools that were used and their outcomes
+4. Current task state and any pending work
+5. Important context that would be needed to continue the conversation
+
+Output ONLY the summary text, no preamble.";
+
+/// Configuration for model-assisted compaction.
+#[derive(Debug, Clone)]
+pub struct ModelCompactionConfig {
+    /// Whether to use model-assisted compaction (requires [`crate::conversation::ApiClient`]).
+    pub enabled: bool,
+    /// Maximum tokens to use for the compaction summary call (output budget).
+    pub max_summary_tokens: usize,
+    /// System prompt for the summarization model.
+    pub summary_prompt: String,
+}
+
+impl Default for ModelCompactionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_summary_tokens: 2048,
+            summary_prompt: COMPACT_SUMMARY_SYSTEM_PROMPT.to_string(),
+        }
+    }
+}
+
+/// Configuration for heuristic compaction of older messages.
+///
+/// [`should_compact`] uses fixed `max_estimated_tokens` plus `preserve_recent_messages`.
+/// For model-specific context limits, use [`should_compact_for_model`] with the active model id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CompactionConfig {
     pub preserve_recent_messages: usize,
@@ -31,6 +67,87 @@ pub struct CompactionResult {
     pub removed_message_count: usize,
 }
 
+/// Result of applying a model-generated compaction summary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelCompactionResult {
+    pub summary: String,
+    pub compacted_session: Session,
+    pub removed_message_count: usize,
+}
+
+/// Build the messages that would be sent to the model for compaction.
+/// The actual API call is done by the caller ([`crate::conversation::ConversationRuntime`]).
+///
+/// Returns [`None`] when there is nothing to compact ([`should_compact`] is false or there are no
+/// removable messages).
+#[must_use]
+pub fn build_model_compact_request(
+    session: &Session,
+    config: &CompactionConfig,
+) -> Option<(Vec<ConversationMessage>, usize)> {
+    if !should_compact(session, *config) {
+        return None;
+    }
+
+    let existing_summary = session
+        .messages
+        .first()
+        .and_then(extract_existing_compacted_summary);
+    let compacted_prefix_len = usize::from(existing_summary.is_some());
+    let keep_from = session
+        .messages
+        .len()
+        .saturating_sub(config.preserve_recent_messages);
+    if keep_from <= compacted_prefix_len {
+        return None;
+    }
+
+    let removed = &session.messages[compacted_prefix_len..keep_from];
+    let user_text = format!(
+        "Summarize the following conversation segment for session compaction.\n\n---\n{}",
+        removed_messages_as_text(removed)
+    );
+    Some((vec![ConversationMessage::user_text(user_text)], keep_from))
+}
+
+/// Apply a model-generated summary to the session (same structure as [`compact_session`]).
+#[must_use]
+pub fn apply_model_compact_summary(
+    session: &Session,
+    summary: &str,
+    preserve_from: usize,
+) -> ModelCompactionResult {
+    let existing_summary = session
+        .messages
+        .first()
+        .and_then(extract_existing_compacted_summary);
+    let compacted_prefix_len = usize::from(existing_summary.is_some());
+    let preserved = session.messages[preserve_from.min(session.messages.len())..].to_vec();
+    let removed_message_count = preserve_from.saturating_sub(compacted_prefix_len);
+
+    let merged = merge_compact_summaries(existing_summary.as_deref(), summary.trim());
+    let continuation = get_compact_continuation_message(&merged, true, !preserved.is_empty());
+
+    let mut compacted_messages = vec![ConversationMessage {
+        role: MessageRole::System,
+        blocks: vec![ContentBlock::Text { text: continuation }],
+        usage: None,
+    }];
+    compacted_messages.extend(preserved);
+
+    ModelCompactionResult {
+        summary: merged,
+        compacted_session: Session {
+            version: session.version,
+            messages: compacted_messages,
+            cwd: session.cwd.clone(),
+            model_id: session.model_id.clone(),
+            created_at: session.created_at.clone(),
+        },
+        removed_message_count,
+    }
+}
+
 #[must_use]
 pub fn estimate_session_tokens(session: &Session) -> usize {
     session.messages.iter().map(estimate_message_tokens).sum()
@@ -47,6 +164,14 @@ pub fn should_compact(session: &Session, config: CompactionConfig) -> bool {
             .map(estimate_message_tokens)
             .sum::<usize>()
             >= config.max_estimated_tokens
+}
+
+/// Returns true when estimated session size meets or exceeds the model's effective input budget.
+#[must_use]
+pub fn should_compact_for_model(session: &Session, model: &str) -> bool {
+    let window = context_window_for_model(model);
+    let tokens = estimate_session_tokens(session);
+    tokens >= window.effective_input_budget()
 }
 
 #[must_use]
@@ -128,9 +253,35 @@ pub fn compact_session(session: &Session, config: CompactionConfig) -> Compactio
         compacted_session: Session {
             version: session.version,
             messages: compacted_messages,
+            cwd: session.cwd.clone(),
+            model_id: session.model_id.clone(),
+            created_at: session.created_at.clone(),
         },
         removed_message_count: removed.len(),
     }
+}
+
+fn removed_messages_as_text(messages: &[ConversationMessage]) -> String {
+    messages
+        .iter()
+        .enumerate()
+        .map(|(index, message)| {
+            let role = match message.role {
+                MessageRole::System => "system",
+                MessageRole::User => "user",
+                MessageRole::Assistant => "assistant",
+                MessageRole::Tool => "tool",
+            };
+            let body = message
+                .blocks
+                .iter()
+                .map(summarize_block)
+                .collect::<Vec<_>>()
+                .join("\n");
+            format!("## Message {index} ({role})\n{body}")
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 fn compacted_summary_prefix_len(session: &Session) -> usize {
@@ -416,17 +567,38 @@ fn truncate_summary(content: &str, max_chars: usize) -> String {
     truncated
 }
 
+/// Heuristic token estimate for a single string (UTF-8 aware).
+#[must_use]
+pub fn estimate_tokens(text: &str) -> usize {
+    // Byte-based estimation is more accurate than char-based for multilingual content
+    // ~4 bytes per token for English, ~2-3 for CJK
+    let byte_len = text.len();
+    let char_len = text.chars().count();
+    // If mostly ASCII, use byte_len / 4; if CJK-heavy, use char_len / 1.5
+    let ascii_ratio = byte_len as f64 / char_len.max(1) as f64;
+    if ascii_ratio > 1.5 {
+        // Mostly CJK/multi-byte
+        (char_len as f64 / 1.5).ceil() as usize + 1
+    } else {
+        byte_len / 4 + 1
+    }
+}
+
 fn estimate_message_tokens(message: &ConversationMessage) -> usize {
     message
         .blocks
         .iter()
         .map(|block| match block {
-            ContentBlock::Text { text } => text.len() / 4 + 1,
-            ContentBlock::Image { data, .. } => data.len() / 4 + 1,
-            ContentBlock::ToolUse { name, input, .. } => (name.len() + input.len()) / 4 + 1,
+            ContentBlock::Text { text } => estimate_tokens(text),
+            ContentBlock::Image { data, .. } => estimate_tokens(data),
+            ContentBlock::ToolUse { name, input, .. } => {
+                estimate_tokens(name.as_str()).saturating_add(estimate_tokens(input.as_str()))
+            }
             ContentBlock::ToolResult {
                 tool_name, output, ..
-            } => (tool_name.len() + output.len()) / 4 + 1,
+            } => {
+                estimate_tokens(tool_name.as_str()).saturating_add(estimate_tokens(output.as_str()))
+            }
         })
         .sum()
 }
@@ -531,9 +703,12 @@ fn extract_summary_timeline(summary: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        collect_key_files, compact_session, estimate_session_tokens, format_compact_summary,
-        get_compact_continuation_message, infer_pending_work, should_compact, CompactionConfig,
+        apply_model_compact_summary, build_model_compact_request, collect_key_files,
+        compact_session, estimate_session_tokens, estimate_tokens, format_compact_summary,
+        get_compact_continuation_message, infer_pending_work, should_compact,
+        should_compact_for_model, CompactionConfig,
     };
+    use crate::model_context::context_window_for_model;
     use crate::session::{ContentBlock, ConversationMessage, MessageRole, Session};
 
     #[test]
@@ -545,8 +720,8 @@ mod tests {
     #[test]
     fn leaves_small_sessions_unchanged() {
         let session = Session {
-            version: 1,
             messages: vec![ConversationMessage::user_text("hello")],
+            ..Session::new()
         };
 
         let result = compact_session(&session, CompactionConfig::default());
@@ -559,7 +734,6 @@ mod tests {
     #[test]
     fn compacts_older_messages_into_a_system_summary() {
         let session = Session {
-            version: 1,
             messages: vec![
                 ConversationMessage::user_text("one ".repeat(200)),
                 ConversationMessage::assistant(vec![ContentBlock::Text {
@@ -574,6 +748,7 @@ mod tests {
                     usage: None,
                 },
             ],
+            ..Session::new()
         };
 
         let result = compact_session(
@@ -610,7 +785,6 @@ mod tests {
     #[test]
     fn keeps_previous_compacted_context_when_compacting_again() {
         let initial_session = Session {
-            version: 1,
             messages: vec![
                 ConversationMessage::user_text("Investigate rust/crates/runtime/src/compact.rs"),
                 ConversationMessage::assistant(vec![ContentBlock::Text {
@@ -623,6 +797,7 @@ mod tests {
                     text: "Next: preserve prior summary context during auto compact.".to_string(),
                 }]),
             ],
+            ..Session::new()
         };
         let config = CompactionConfig {
             preserve_recent_messages: 2,
@@ -640,8 +815,8 @@ mod tests {
 
         let second = compact_session(
             &Session {
-                version: 1,
                 messages: follow_up_messages,
+                ..Session::new()
             },
             config,
         );
@@ -674,7 +849,6 @@ mod tests {
     fn ignores_existing_compacted_summary_when_deciding_to_recompact() {
         let summary = "<summary>Conversation summary:\n- Scope: earlier work preserved.\n- Key timeline:\n  - user: large preserved context\n</summary>";
         let session = Session {
-            version: 1,
             messages: vec![
                 ConversationMessage {
                     role: MessageRole::System,
@@ -688,6 +862,7 @@ mod tests {
                     text: "recent".to_string(),
                 }]),
             ],
+            ..Session::new()
         };
 
         assert!(!should_compact(
@@ -727,5 +902,119 @@ mod tests {
         ]);
         assert_eq!(pending.len(), 1);
         assert!(pending[0].contains("Next: update tests"));
+    }
+
+    #[test]
+    fn estimate_tokens_ascii_uses_byte_heuristic() {
+        let text = "a".repeat(400);
+        assert_eq!(estimate_tokens(&text), 101);
+    }
+
+    #[test]
+    fn estimate_tokens_cjk_uses_char_heuristic() {
+        // Three UTF-8 bytes per char → bytes/chars ratio > 1.5
+        let text = "字".repeat(100);
+        assert_eq!(text.chars().count(), 100);
+        let t = estimate_tokens(&text);
+        assert!(
+            t < 200,
+            "CJK path should estimate fewer tokens than byte/4 for same char count"
+        );
+        assert_eq!(t, 68);
+    }
+
+    #[test]
+    fn should_compact_for_model_false_when_under_budget() {
+        let session = Session {
+            messages: vec![ConversationMessage::user_text("hi")],
+            ..Session::new()
+        };
+        assert!(!should_compact_for_model(&session, "unknown-small-context"));
+    }
+
+    #[test]
+    fn should_compact_for_model_true_when_at_or_over_effective_budget() {
+        let budget = context_window_for_model("unknown-small-context").effective_input_budget();
+        // ASCII: `estimate_tokens` is `byte_len / 4 + 1` — size so sum meets `budget`.
+        let filler_len = budget.saturating_sub(1).saturating_mul(4);
+        let text = "x".repeat(filler_len);
+        let session = Session {
+            messages: vec![ConversationMessage::user_text(text)],
+            ..Session::new()
+        };
+        assert!(estimate_session_tokens(&session) >= budget);
+        assert!(should_compact_for_model(&session, "unknown-small-context"));
+    }
+
+    #[test]
+    fn build_model_compact_request_includes_removed_segment_and_preserve_index() {
+        let session = Session {
+            messages: vec![
+                ConversationMessage::user_text("one ".repeat(200)),
+                ConversationMessage::assistant(vec![ContentBlock::Text {
+                    text: "two ".repeat(200),
+                }]),
+                ConversationMessage::tool_result("1", "bash", "ok ".repeat(200), false),
+                ConversationMessage {
+                    role: MessageRole::Assistant,
+                    blocks: vec![ContentBlock::Text {
+                        text: "recent".to_string(),
+                    }],
+                    usage: None,
+                },
+            ],
+            ..Session::new()
+        };
+        let config = CompactionConfig {
+            preserve_recent_messages: 2,
+            max_estimated_tokens: 1,
+        };
+        let (messages, preserve_from) =
+            build_model_compact_request(&session, &config).expect("should compact");
+        assert_eq!(preserve_from, 2);
+        assert_eq!(messages.len(), 1);
+        let ContentBlock::Text { text } = &messages[0].blocks[0] else {
+            panic!("expected user text");
+        };
+        assert!(text.contains("## Message 0"));
+        assert!(text.contains("## Message 1"));
+        assert!(!text.contains("recent"));
+    }
+
+    #[test]
+    fn apply_model_compact_summary_matches_compact_session_shape() {
+        let session = Session {
+            messages: vec![
+                ConversationMessage::user_text("old ".repeat(100)),
+                ConversationMessage::assistant(vec![ContentBlock::Text {
+                    text: "reply".to_string(),
+                }]),
+                ConversationMessage::user_text("keep me"),
+            ],
+            ..Session::new()
+        };
+        let config = CompactionConfig {
+            preserve_recent_messages: 1,
+            max_estimated_tokens: 1,
+        };
+        let (_, preserve_from) = build_model_compact_request(&session, &config).unwrap();
+        let model_summary = "User asked for work; assistant replied; pending: tests.";
+        let applied = apply_model_compact_summary(&session, model_summary, preserve_from);
+        assert_eq!(applied.removed_message_count, 2);
+        assert_eq!(applied.compacted_session.messages.len(), 2);
+        assert_eq!(
+            applied.compacted_session.messages[1].role,
+            MessageRole::User
+        );
+        assert!(applied.summary.contains(model_summary));
+    }
+
+    #[test]
+    fn build_model_compact_request_returns_none_when_not_needed() {
+        let session = Session {
+            messages: vec![ConversationMessage::user_text("hello")],
+            ..Session::new()
+        };
+        assert!(build_model_compact_request(&session, &CompactionConfig::default()).is_none());
     }
 }

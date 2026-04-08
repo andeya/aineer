@@ -74,6 +74,13 @@ pub fn handle_slash_command_simple(
     handle_slash_command(input, session, compaction, &mut ())
 }
 
+/// Dispatches slash commands implemented in this crate (`commands`).
+///
+/// Only [`SlashCommand::Compact`] and [`SlashCommand::Help`] are handled here and return
+/// [`Some`]. Every other variant returns [`None`]: those commands are parsed as
+/// [`SlashCommand`] variants for typing and help, but execution is delegated to the CLI / REPL
+/// layer (`codineer-cli`), which performs the actual work. Do not assume a match arm here implies
+/// the command is fully implemented in-crate—check the CLI dispatch path when adding handlers.
 fn dispatch_slash_command(
     command: SlashCommand,
     session: &Session,
@@ -128,6 +135,7 @@ fn dispatch_slash_command(
         | SlashCommand::Agents { .. }
         | SlashCommand::Skills { .. }
         | SlashCommand::Doctor
+        | SlashCommand::Update { .. }
         | SlashCommand::Unknown(_) => None,
     }
 }

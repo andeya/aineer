@@ -4,11 +4,17 @@ mod permission;
 mod stream;
 mod tool_executor;
 
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use api::{MessageRequest, ProviderClient, ProviderKind, ToolChoice};
+use api::{
+    CacheControl, CacheScope, CacheType, MessageRequest, ProviderClient, ProviderKind, ToolChoice,
+    ToolDefinition,
+};
 use runtime::{
-    ApiClient, ApiRequest, AssistantEvent, ConversationRuntime, HookDispatcher, RuntimeError,
+    ApiClient, ApiRequest, AssistantEvent, CacheLock, ConversationRuntime, HookDispatcher,
+    RuntimeError,
 };
 use tools::GlobalToolRegistry;
 
@@ -17,7 +23,7 @@ use crate::tracing_observer::TracingObserver;
 
 pub(crate) type CliObserver = (HookDispatcher, TracingObserver);
 
-use crate::cli::{discover_mcp_tools, filter_tool_specs, AllowedToolSet, SharedMcpManager};
+use crate::cli::{discover_mcp_tools, AllowedToolSet, SharedMcpManager};
 use crate::progress::InternalPromptProgressReporter;
 use crate::{build_runtime_plugin_state, max_tokens_for_model};
 
@@ -46,6 +52,8 @@ pub(crate) struct RuntimeParams {
 
 pub(crate) struct RuntimeBuildResult {
     pub runtime: ConversationRuntime<DefaultRuntimeClient, CliToolExecutor, CliObserver>,
+    /// Tokio runtime shared by [`DefaultRuntimeClient`] and [`CliToolExecutor`] for this build.
+    pub tokio_runtime: Arc<tokio::runtime::Runtime>,
     pub resolved_model: String,
     pub model_aliases: std::collections::BTreeMap<String, String>,
 }
@@ -90,6 +98,8 @@ pub(crate) fn build_runtime(params: RuntimeParams) -> CliResult<RuntimeBuildResu
         .collect();
 
     let shared_runtime = Arc::new(tokio::runtime::Runtime::new()?);
+    let cached_mcp_tools: Arc<Mutex<Option<Vec<ToolDefinition>>>> = Arc::new(Mutex::new(None));
+    let activated_tools: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
     let observer: CliObserver = (
         HookDispatcher::from_feature_config(runtime_config.feature_config()),
         TracingObserver,
@@ -108,7 +118,9 @@ pub(crate) fn build_runtime(params: RuntimeParams) -> CliResult<RuntimeBuildResu
             mcp_manager: Arc::clone(&mcp_manager),
             tools_disabled_by_provider: false,
             fallback_models,
-            cached_tools: None,
+            cached_mcp_tools: Arc::clone(&cached_mcp_tools),
+            activated_tools: Arc::clone(&activated_tools),
+            cache_lock: CacheLock::default(),
         },
         CliToolExecutor::new(
             allowed_tools.clone(),
@@ -116,14 +128,21 @@ pub(crate) fn build_runtime(params: RuntimeParams) -> CliResult<RuntimeBuildResu
             tool_registry.clone(),
             Arc::clone(&mcp_manager),
             Arc::clone(&shared_runtime),
+            Arc::clone(&cached_mcp_tools),
+            Arc::clone(&activated_tools),
         ),
-        permission_policy(permission_mode, &tool_registry),
+        permission_policy(
+            permission_mode,
+            &tool_registry,
+            runtime_config.permission_rules(),
+        ),
         system_prompt,
         observer,
     );
     let model_aliases = runtime_config.model_aliases().clone();
     Ok(RuntimeBuildResult {
         runtime,
+        tokio_runtime: shared_runtime,
         resolved_model,
         model_aliases,
     })
@@ -141,10 +160,14 @@ pub(crate) struct DefaultRuntimeClient {
     mcp_manager: SharedMcpManager,
     tools_disabled_by_provider: bool,
     fallback_models: Vec<(String, ProviderClient)>,
-    /// Session-scoped tool schema cache. Locks the tool definitions at first
-    /// build so mid-session MCP reconnects or config changes don't alter the
-    /// byte-level serialization and bust the API prompt cache.
-    cached_tools: Option<Vec<api::ToolDefinition>>,
+    /// Session-scoped MCP tool list (shared with [`CliToolExecutor`]). Cleared when
+    /// [`CacheLock`] expires so MCP reconnects can refresh definitions.
+    cached_mcp_tools: Arc<Mutex<Option<Vec<ToolDefinition>>>>,
+    /// Extended-tier and MCP tool names activated via [`ToolSearch`] for this session.
+    activated_tools: Arc<Mutex<HashSet<String>>>,
+    /// Aligns tool cache refresh with a 1h window so TTL expiry does not
+    /// invalidate the MCP tool list mid-session.
+    cache_lock: CacheLock,
 }
 
 impl DefaultRuntimeClient {
@@ -152,30 +175,79 @@ impl DefaultRuntimeClient {
         self.enable_tools && !self.tools_disabled_by_provider
     }
 
+    fn cache_control_for_remaining(remaining: Duration) -> CacheControl {
+        CacheControl {
+            kind: CacheType::Ephemeral,
+            ttl: Some(Self::format_tool_cache_ttl_hint(remaining)),
+            scope: Some(CacheScope::Global),
+        }
+    }
+
+    /// Anthropic-style `ttl` string for the last tool definition (`5m`, `1h`, …).
+    fn format_tool_cache_ttl_hint(remaining: Duration) -> String {
+        let secs = remaining.as_secs().max(1);
+        if secs >= 3600 {
+            let h = secs.div_ceil(3600);
+            format!("{h}h")
+        } else {
+            let m = secs.div_ceil(60).max(1);
+            format!("{m}m")
+        }
+    }
+
     fn build_message_request(&mut self, request: &ApiRequest) -> MessageRequest {
         let use_tools = self.effective_tools_enabled();
         let tools = if use_tools {
-            let cached = self.cached_tools.get_or_insert_with(|| {
-                let mut specs = filter_tool_specs(&self.tool_registry, self.allowed_tools.as_ref());
-                specs.extend(discover_mcp_tools(&self.runtime, &self.mcp_manager));
-                if let Some(last) = specs.last_mut() {
-                    last.cache_control = Some(api::CacheControl::ephemeral());
+            if !self.cache_lock.is_valid() {
+                if let Ok(mut guard) = self.cached_mcp_tools.lock() {
+                    *guard = None;
                 }
-                specs
-            });
-            Some(cached.clone())
+                self.cache_lock = CacheLock::default();
+            }
+            let mcp = {
+                let mut guard = self
+                    .cached_mcp_tools
+                    .lock()
+                    .expect("MCP tool cache mutex poisoned");
+                guard
+                    .get_or_insert_with(|| discover_mcp_tools(&self.runtime, &self.mcp_manager))
+                    .clone()
+            };
+            let activated = self
+                .activated_tools
+                .lock()
+                .expect("activated_tools mutex poisoned");
+            let mut specs = self
+                .tool_registry
+                .definitions_for_lazy_prompt(self.allowed_tools.as_ref(), Some(&*activated));
+            specs.extend(mcp.into_iter().filter(|def| {
+                self.allowed_tools
+                    .as_ref()
+                    .is_none_or(|allowed| allowed.contains(&def.name))
+                    && activated.contains(&def.name)
+            }));
+            if let Some(last) = specs.last_mut() {
+                last.cache_control = Some(Self::cache_control_for_remaining(
+                    self.cache_lock.remaining(),
+                ));
+            }
+            Some(specs)
         } else {
             None
         };
+        let model = request.model_override.as_ref().unwrap_or(&self.model);
         MessageRequest {
-            model: self.model.clone(),
-            max_tokens: max_tokens_for_model(&self.model),
+            model: model.clone(),
+            max_tokens: request
+                .max_output_tokens
+                .unwrap_or_else(|| max_tokens_for_model(model)),
             messages: convert_messages(&request.messages),
             system: (!request.system_prompt.is_empty()).then(|| request.system_prompt.clone()),
             tools,
             tool_choice: use_tools.then_some(ToolChoice::Auto),
             stream: true,
             thinking: None,
+            gemini_cached_content: None,
         }
     }
 

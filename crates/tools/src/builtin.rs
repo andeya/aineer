@@ -31,7 +31,7 @@ pub trait BuiltinTool: Sync {
 /// This trait enables heterogeneous storage in `&[&dyn BuiltinToolDispatch]`.
 pub trait BuiltinToolDispatch: Sync {
     fn name(&self) -> &'static str;
-    fn dispatch(&self, input: &Value) -> Result<ToolOutput, ToolError>;
+    fn dispatch(&self, input: Value) -> Result<ToolOutput, ToolError>;
     fn check_concurrency_safe(&self, input: &Value) -> bool;
 }
 
@@ -41,8 +41,8 @@ impl<T: BuiltinTool> BuiltinToolDispatch for T {
         T::NAME
     }
 
-    fn dispatch(&self, input: &Value) -> Result<ToolOutput, ToolError> {
-        let typed: T::Input = serde_json::from_value(input.clone())?;
+    fn dispatch(&self, input: Value) -> Result<ToolOutput, ToolError> {
+        let typed: T::Input = serde_json::from_value(input)?;
         T::execute(typed)
     }
 
@@ -59,12 +59,7 @@ pub fn find_builtin(name: &str) -> Option<&'static dyn BuiltinToolDispatch> {
     BUILTIN_TOOLS.iter().find(|t| t.name() == name).copied()
 }
 
-/// All registered builtin tools. Tools are added here as they're migrated to the trait.
-///
-/// The old `execute_tool` match statement serves as fallback for tools not yet listed here.
-static BUILTIN_TOOLS: &[&dyn BuiltinToolDispatch] = &[&SleepTool, &StructuredOutputTool];
-
-// -- Example migrated tools below --
+// -- Built-in tools implemented in this module --
 
 struct SleepTool;
 
@@ -74,6 +69,24 @@ impl BuiltinTool for SleepTool {
 
     fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
         let output = crate::execute_sleep(input);
+        serde_json::to_string_pretty(&output)
+            .map(ToolOutput::ok)
+            .map_err(ToolError::from)
+    }
+
+    fn is_concurrency_safe(_input: &Self::Input) -> bool {
+        true
+    }
+}
+
+struct ToolSearchTool;
+
+impl BuiltinTool for ToolSearchTool {
+    const NAME: &'static str = "ToolSearch";
+    type Input = crate::types::ToolSearchInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        let output = crate::execute_tool_search_with_context(input, None, &[], None);
         serde_json::to_string_pretty(&output)
             .map(ToolOutput::ok)
             .map_err(ToolError::from)
@@ -102,6 +115,52 @@ impl BuiltinTool for StructuredOutputTool {
     }
 }
 
+/// All registered builtin tools.
+static BUILTIN_TOOLS: &[&dyn BuiltinToolDispatch] = &[
+    &SleepTool,
+    &StructuredOutputTool,
+    &ToolSearchTool,
+    &crate::AgentTool,
+    &crate::AskUserQuestionTool,
+    &crate::BashTool,
+    &crate::BriefTool,
+    &crate::ConfigTool,
+    &crate::cron::CronCreateTool,
+    &crate::cron::CronDeleteTool,
+    &crate::cron::CronListTool,
+    &crate::EditFileTool,
+    &crate::plan_mode::EnterPlanModeTool,
+    &crate::worktree::EnterWorktreeTool,
+    &crate::plan_mode::ExitPlanModeTool,
+    &crate::worktree::ExitWorktreeTool,
+    &crate::GlobSearchTool,
+    &crate::GrepSearchTool,
+    &crate::mcp_resource::ListMcpResourcesTool,
+    &crate::lsp_tool::LspTool,
+    &crate::mcp_resource::McpSearchTool,
+    &crate::notebook::NotebookEditTool,
+    &crate::MultiEditTool,
+    &crate::powershell::PowerShellTool,
+    &crate::ReadFileTool,
+    &crate::mcp_resource::ReadMcpResourceTool,
+    &crate::ReplTool,
+    &crate::collab::SendMessageTool,
+    &crate::SendUserMessageTool,
+    &crate::SkillTool,
+    &crate::collab::SlashCommandTool,
+    &crate::task::TaskCreateTool,
+    &crate::task::TaskGetTool,
+    &crate::task::TaskListTool,
+    &crate::task::TaskStopTool,
+    &crate::task::TaskUpdateTool,
+    &crate::collab::TeamCreateTool,
+    &crate::collab::TeamDeleteTool,
+    &crate::TodoWriteTool,
+    &crate::web::WebFetchTool,
+    &crate::web::WebSearchTool,
+    &crate::WriteFileTool,
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -110,13 +169,35 @@ mod tests {
     fn find_registered_tool() {
         assert!(find_builtin("Sleep").is_some());
         assert!(find_builtin("StructuredOutput").is_some());
+        assert!(find_builtin("ToolSearch").is_some());
         assert!(find_builtin("nonexistent").is_none());
+    }
+
+    #[test]
+    fn tool_search_dispatch_finds_extended_tool() {
+        let input = serde_json::json!({ "query": "web fetch", "max_results": 3 });
+        let result = find_builtin("ToolSearch").unwrap().dispatch(input);
+        assert!(result.is_ok());
+        let content = result.unwrap().content;
+        assert!(content.contains("WebFetch"));
+    }
+
+    #[test]
+    fn tool_search_category_filters() {
+        let input = serde_json::json!({
+            "query": "list",
+            "category": "mcp",
+            "max_results": 5
+        });
+        let result = find_builtin("ToolSearch").unwrap().dispatch(input);
+        assert!(result.is_ok());
+        assert!(result.unwrap().content.contains("ListMcpResources"));
     }
 
     #[test]
     fn sleep_tool_dispatch() {
         let input = serde_json::json!({ "duration_ms": 1 });
-        let result = find_builtin("Sleep").unwrap().dispatch(&input);
+        let result = find_builtin("Sleep").unwrap().dispatch(input);
         assert!(result.is_ok());
         let output = result.unwrap();
         assert!(!output.is_error);
@@ -134,7 +215,7 @@ mod tests {
     #[test]
     fn bad_input_returns_error() {
         let bad_input = serde_json::json!({ "wrong_field": true });
-        let result = find_builtin("Sleep").unwrap().dispatch(&bad_input);
+        let result = find_builtin("Sleep").unwrap().dispatch(bad_input);
         assert!(matches!(result, Err(ToolError::InputError(_))));
     }
 }

@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
-use std::time::{SystemTime, UNIX_EPOCH};
 
-use runtime::{
+pub use codineer_core::OAuthTokenSet;
+use codineer_core::{
     load_oauth_credentials, save_oauth_credentials, OAuthConfig, OAuthRefreshRequest,
     OAuthTokenExchangeRequest,
 };
@@ -18,6 +18,7 @@ use crate::types::{MessageRequest, MessageResponse, StreamEvent};
 pub const DEFAULT_BASE_URL: &str = "https://api.anthropic.com";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 
+#[non_exhaustive]
 #[derive(Clone, PartialEq, Eq)]
 pub enum AuthSource {
     None,
@@ -98,41 +99,25 @@ impl AuthSource {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub struct OAuthTokenSet {
-    pub access_token: String,
-    pub refresh_token: Option<String>,
-    pub expires_at: Option<u64>,
-    #[serde(default)]
-    pub scopes: Vec<String>,
-}
-
-impl OAuthTokenSet {
-    #[must_use]
-    pub fn is_expired(&self) -> bool {
-        self.expires_at
-            .is_some_and(|expires_at| expires_at <= now_unix_timestamp())
-    }
-}
-
 impl From<OAuthTokenSet> for AuthSource {
     fn from(value: OAuthTokenSet) -> Self {
         Self::BearerToken(value.access_token)
     }
 }
 
-impl From<runtime::ResolvedCredential> for AuthSource {
-    fn from(value: runtime::ResolvedCredential) -> Self {
+impl From<codineer_core::ResolvedCredential> for AuthSource {
+    fn from(value: codineer_core::ResolvedCredential) -> Self {
         match value {
-            runtime::ResolvedCredential::ApiKey(key) => Self::ApiKey(key),
-            runtime::ResolvedCredential::BearerToken(token) => Self::BearerToken(token),
-            runtime::ResolvedCredential::ApiKeyAndBearer {
+            codineer_core::ResolvedCredential::ApiKey(key) => Self::ApiKey(key),
+            codineer_core::ResolvedCredential::BearerToken(token) => Self::BearerToken(token),
+            codineer_core::ResolvedCredential::ApiKeyAndBearer {
                 api_key,
                 bearer_token,
             } => Self::ApiKeyAndBearer {
                 api_key,
                 bearer_token,
             },
+            _ => Self::None,
         }
     }
 }
@@ -477,13 +462,7 @@ fn resolve_saved_oauth_token_set(
         expires_at: refreshed.expires_at,
         scopes: refreshed.scopes,
     };
-    save_oauth_credentials(&runtime::OAuthTokenSet {
-        access_token: resolved.access_token.clone(),
-        refresh_token: resolved.refresh_token.clone(),
-        expires_at: resolved.expires_at,
-        scopes: resolved.scopes.clone(),
-    })
-    .map_err(ApiError::from)?;
+    save_oauth_credentials(&resolved).map_err(ApiError::from)?;
     Ok(resolved)
 }
 
@@ -500,19 +479,7 @@ where
 }
 
 fn load_saved_oauth_token() -> Result<Option<OAuthTokenSet>, ApiError> {
-    let token_set = load_oauth_credentials().map_err(ApiError::from)?;
-    Ok(token_set.map(|token_set| OAuthTokenSet {
-        access_token: token_set.access_token,
-        refresh_token: token_set.refresh_token,
-        expires_at: token_set.expires_at,
-        scopes: token_set.scopes,
-    }))
-}
-
-fn now_unix_timestamp() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_secs())
+    load_oauth_credentials().map_err(ApiError::from)
 }
 
 #[cfg(test)]

@@ -4,11 +4,13 @@ use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use runtime::{clear_oauth_credentials, save_oauth_credentials, OAuthConfig};
+use codineer_core::{
+    clear_oauth_credentials, load_oauth_credentials, save_oauth_credentials, OAuthConfig,
+    OAuthTokenSet,
+};
 
 use super::{
-    now_unix_timestamp, resolve_saved_oauth_token, resolve_startup_auth_source, AuthSource,
-    CodineerApiClient, OAuthTokenSet,
+    resolve_saved_oauth_token, resolve_startup_auth_source, AuthSource, CodineerApiClient,
 };
 use crate::providers::{
     backoff_for_attempt, is_retryable_status, request_id_from_headers, RetryPolicy,
@@ -40,6 +42,12 @@ fn cleanup_temp_config_home(config_home: &std::path::Path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => panic!("cleanup temp dir: {error}"),
     }
+}
+
+fn now_unix_timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_secs())
 }
 
 fn sample_oauth_config(token_url: String) -> OAuthConfig {
@@ -157,7 +165,7 @@ fn auth_source_from_saved_oauth_when_env_absent() {
     std::env::set_var("CODINEER_CONFIG_HOME", &config_home);
     std::env::remove_var("ANTHROPIC_AUTH_TOKEN");
     std::env::remove_var("ANTHROPIC_API_KEY");
-    save_oauth_credentials(&runtime::OAuthTokenSet {
+    save_oauth_credentials(&OAuthTokenSet {
         access_token: "saved-access-token".to_string(),
         refresh_token: Some("refresh".to_string()),
         expires_at: Some(now_unix_timestamp() + 300),
@@ -198,7 +206,7 @@ fn resolve_saved_oauth_token_refreshes_expired_credentials() {
     std::env::set_var("CODINEER_CONFIG_HOME", &config_home);
     std::env::remove_var("ANTHROPIC_AUTH_TOKEN");
     std::env::remove_var("ANTHROPIC_API_KEY");
-    save_oauth_credentials(&runtime::OAuthTokenSet {
+    save_oauth_credentials(&OAuthTokenSet {
         access_token: "expired-access-token".to_string(),
         refresh_token: Some("refresh-token".to_string()),
         expires_at: Some(1),
@@ -213,7 +221,7 @@ fn resolve_saved_oauth_token_refreshes_expired_credentials() {
         .expect("resolve refreshed token")
         .expect("token set present");
     assert_eq!(resolved.access_token, "refreshed-token");
-    let stored = runtime::load_oauth_credentials()
+    let stored = load_oauth_credentials()
         .expect("load stored credentials")
         .expect("stored token set");
     assert_eq!(stored.access_token, "refreshed-token");
@@ -230,7 +238,7 @@ fn resolve_startup_auth_source_uses_saved_oauth_without_loading_config() {
     std::env::set_var("CODINEER_CONFIG_HOME", &config_home);
     std::env::remove_var("ANTHROPIC_AUTH_TOKEN");
     std::env::remove_var("ANTHROPIC_API_KEY");
-    save_oauth_credentials(&runtime::OAuthTokenSet {
+    save_oauth_credentials(&OAuthTokenSet {
         access_token: "saved-access-token".to_string(),
         refresh_token: Some("refresh".to_string()),
         expires_at: Some(now_unix_timestamp() + 300),
@@ -254,7 +262,7 @@ fn resolve_startup_auth_source_errors_when_refreshable_token_lacks_config() {
     std::env::set_var("CODINEER_CONFIG_HOME", &config_home);
     std::env::remove_var("ANTHROPIC_AUTH_TOKEN");
     std::env::remove_var("ANTHROPIC_API_KEY");
-    save_oauth_credentials(&runtime::OAuthTokenSet {
+    save_oauth_credentials(&OAuthTokenSet {
         access_token: "expired-access-token".to_string(),
         refresh_token: Some("refresh-token".to_string()),
         expires_at: Some(1),
@@ -267,7 +275,7 @@ fn resolve_startup_auth_source_errors_when_refreshable_token_lacks_config() {
         matches!(error, crate::error::ApiError::Auth(message) if message.contains("runtime OAuth config is missing"))
     );
 
-    let stored = runtime::load_oauth_credentials()
+    let stored = load_oauth_credentials()
         .expect("load stored credentials")
         .expect("stored token set");
     assert_eq!(stored.access_token, "expired-access-token");
@@ -285,7 +293,7 @@ fn resolve_saved_oauth_token_preserves_refresh_token_when_refresh_response_omits
     std::env::set_var("CODINEER_CONFIG_HOME", &config_home);
     std::env::remove_var("ANTHROPIC_AUTH_TOKEN");
     std::env::remove_var("ANTHROPIC_API_KEY");
-    save_oauth_credentials(&runtime::OAuthTokenSet {
+    save_oauth_credentials(&OAuthTokenSet {
         access_token: "expired-access-token".to_string(),
         refresh_token: Some("refresh-token".to_string()),
         expires_at: Some(1),
@@ -301,7 +309,7 @@ fn resolve_saved_oauth_token_preserves_refresh_token_when_refresh_response_omits
         .expect("token set present");
     assert_eq!(resolved.access_token, "refreshed-token");
     assert_eq!(resolved.refresh_token.as_deref(), Some("refresh-token"));
-    let stored = runtime::load_oauth_credentials()
+    let stored = load_oauth_credentials()
         .expect("load stored credentials")
         .expect("stored token set");
     assert_eq!(stored.refresh_token.as_deref(), Some("refresh-token"));
@@ -322,6 +330,7 @@ fn message_request_stream_helper_sets_stream_true() {
         tool_choice: None,
         stream: false,
         thinking: None,
+        gemini_cached_content: None,
     };
 
     assert!(request.with_streaming().stream);
@@ -452,7 +461,7 @@ fn auth_source_debug_redacts_secrets() {
 
 #[test]
 fn resolved_credential_api_key_maps_to_auth_source_api_key() {
-    let cred = runtime::ResolvedCredential::ApiKey("sk-key".into());
+    let cred = codineer_core::ResolvedCredential::ApiKey("sk-key".into());
     let auth = AuthSource::from(cred);
     assert_eq!(auth.api_key(), Some("sk-key"));
     assert_eq!(auth.bearer_token(), None);
@@ -460,7 +469,7 @@ fn resolved_credential_api_key_maps_to_auth_source_api_key() {
 
 #[test]
 fn resolved_credential_bearer_maps_to_auth_source_bearer() {
-    let cred = runtime::ResolvedCredential::BearerToken("tok-123".into());
+    let cred = codineer_core::ResolvedCredential::BearerToken("tok-123".into());
     let auth = AuthSource::from(cred);
     assert_eq!(auth.bearer_token(), Some("tok-123"));
     assert_eq!(auth.api_key(), None);
@@ -468,7 +477,7 @@ fn resolved_credential_bearer_maps_to_auth_source_bearer() {
 
 #[test]
 fn resolved_credential_both_maps_to_auth_source_both() {
-    let cred = runtime::ResolvedCredential::ApiKeyAndBearer {
+    let cred = codineer_core::ResolvedCredential::ApiKeyAndBearer {
         api_key: "key".into(),
         bearer_token: "tok".into(),
     };

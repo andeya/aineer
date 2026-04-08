@@ -1,9 +1,42 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 pub use codineer_core::prompt_types::{
     BlockKind, CacheControl, CacheScope, CacheType, SystemBlock, ThinkingConfig, ThinkingMode,
 };
+
+/// Gemini cached content reference for context caching.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GeminiCachedContent {
+    /// The name/ID of the cached content resource (e.g. "cachedContents/abc123")
+    pub name: String,
+    /// When this cache expires
+    #[serde(skip_serializing_if = "Option::is_none", alias = "expireTime")]
+    pub expire_time: Option<String>,
+}
+
+/// Stable fingerprint for Gemini context cache lookup (SHA-256, first 8 bytes).
+#[must_use]
+pub fn gemini_cache_key_hash(
+    system: Option<&[SystemBlock]>,
+    tools: Option<&[ToolDefinition]>,
+) -> u64 {
+    let mut hasher = Sha256::new();
+    if let Some(blocks) = system.filter(|b| !b.is_empty()) {
+        for block in blocks {
+            hasher.update(block.text.as_bytes());
+            hasher.update([0u8]);
+        }
+    }
+    if let Some(tools) = tools.filter(|t| !t.is_empty()) {
+        if let Ok(encoded) = serde_json::to_string(tools) {
+            hasher.update(encoded.as_bytes());
+        }
+    }
+    let digest = hasher.finalize();
+    u64::from_be_bytes(digest[..8].try_into().expect("8 bytes"))
+}
 
 // ── Message request ─────────────────────────────────────────────────
 
@@ -22,6 +55,9 @@ pub struct MessageRequest {
     pub stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking: Option<ThinkingConfig>,
+    /// When set, OpenAI-compat requests include Google's `cachedContent` and omit duplicated system/tools.
+    #[serde(skip_serializing_if = "Option::is_none", rename = "cachedContent")]
+    pub gemini_cached_content: Option<String>,
 }
 
 impl MessageRequest {
@@ -70,6 +106,7 @@ impl InputMessage {
     }
 }
 
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum InputContentBlock {
@@ -105,6 +142,7 @@ pub struct ImageSource {
     pub data: String,
 }
 
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ToolResultContentBlock {
@@ -123,6 +161,7 @@ pub struct ToolDefinition {
     pub cache_control: Option<CacheControl>,
 }
 
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ToolChoice {
@@ -155,6 +194,7 @@ impl MessageResponse {
     }
 }
 
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum OutputContentBlock {
@@ -228,6 +268,7 @@ pub struct ContentBlockDeltaEvent {
     pub delta: ContentBlockDelta,
 }
 
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ContentBlockDelta {
@@ -245,6 +286,7 @@ pub struct ContentBlockStopEvent {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MessageStopEvent {}
 
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum StreamEvent {
@@ -277,6 +319,7 @@ mod tests {
             tool_choice: Some(ToolChoice::Auto),
             stream: false,
             thinking: None,
+            gemini_cached_content: None,
         };
         let json = serde_json::to_string(&request).expect("serialize");
         let deserialized: MessageRequest = serde_json::from_str(&json).expect("deserialize");
@@ -464,6 +507,47 @@ mod tests {
             cache_creation_input_tokens: 10,
         };
         assert_eq!(usage.total_tokens(), 180);
+    }
+
+    #[test]
+    fn gemini_cached_content_round_trips_json() {
+        let v = GeminiCachedContent {
+            name: "cachedContents/abc".to_string(),
+            expire_time: Some("2025-01-01T00:00:00Z".to_string()),
+        };
+        let json = serde_json::to_value(&v).expect("serialize");
+        assert_eq!(json["name"], "cachedContents/abc");
+        assert_eq!(json["expire_time"], "2025-01-01T00:00:00Z");
+        let back: GeminiCachedContent = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(back, v);
+    }
+
+    #[test]
+    fn gemini_cached_content_deserializes_google_expire_time_field() {
+        let json = json!({
+            "name": "cachedContents/abc",
+            "expireTime": "2025-01-01T00:00:00Z"
+        });
+        let v: GeminiCachedContent = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(v.expire_time, Some("2025-01-01T00:00:00Z".to_string()));
+    }
+
+    #[test]
+    fn gemini_cache_key_hash_stable_for_same_inputs() {
+        let sys = SystemBlock::from_plain("sys");
+        let tools = vec![ToolDefinition {
+            name: "t".to_string(),
+            description: None,
+            input_schema: json!({}),
+            cache_control: None,
+        }];
+        let a = gemini_cache_key_hash(Some(&sys), Some(&tools));
+        let b = gemini_cache_key_hash(Some(&sys), Some(&tools));
+        assert_eq!(a, b);
+        assert_ne!(
+            a,
+            gemini_cache_key_hash(Some(&SystemBlock::from_plain("other")), Some(&tools))
+        );
     }
 
     #[test]

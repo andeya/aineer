@@ -1,6 +1,7 @@
 use std::env::VarError;
 use std::time::Duration;
 
+#[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
 pub enum ApiError {
     #[error(
@@ -106,6 +107,29 @@ impl ApiError {
                 error_type.as_deref(),
                 Some("overloaded_error" | "rate_limit_error")
             ),
+        }
+    }
+
+    /// Convert to a [`RuntimeError::Api`] preserving structured HTTP status and
+    /// error classification fields for the recovery engine.
+    #[must_use]
+    pub fn into_runtime_error(self) -> codineer_core::error::RuntimeError {
+        let (status_code, error_type) = self.extract_classification();
+        codineer_core::error::RuntimeError::api(status_code, error_type, self.to_string())
+    }
+
+    fn extract_classification(&self) -> (u16, Option<String>) {
+        match self {
+            Self::Api {
+                status, error_type, ..
+            } => (status.as_u16(), error_type.clone()),
+            Self::StreamApplicationError { error_type, .. } => (0, error_type.clone()),
+            Self::Http(e) => (e.status().map_or(0, |s| s.as_u16()), None),
+            Self::RetriesExhausted { last_error, .. } => last_error.extract_classification(),
+            Self::MissingCredentials { .. } | Self::ExpiredOAuthToken | Self::Auth(_) => {
+                (401, Some("authentication_error".to_string()))
+            }
+            _ => (0, None),
         }
     }
 }

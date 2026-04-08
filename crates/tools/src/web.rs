@@ -4,6 +4,8 @@ use std::time::{Duration, Instant};
 
 use reqwest::Client;
 
+use crate::builtin::BuiltinTool;
+use crate::tool_output::{ToolError, ToolOutput};
 use crate::types::{
     SearchHit, WebFetchInput, WebFetchOutput, WebSearchInput, WebSearchOutput, WebSearchResultItem,
 };
@@ -22,7 +24,7 @@ pub(crate) fn http_client() -> &'static Client {
             .pool_max_idle_per_host(10)
             .user_agent("codineer-rust-tools/0.1")
             .build()
-            .expect("failed to build global reqwest client")
+            .unwrap_or_else(|_| Client::new())
     })
 }
 
@@ -34,16 +36,22 @@ pub(crate) fn http_client() -> &'static Client {
 ///   starving the scheduler.
 /// - Called from a purely synchronous thread (e.g. CLI CliToolExecutor):
 ///   spins up a lightweight `current_thread` runtime for this call only.
+static WEB_BLOCK_ON_RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+
 pub(crate) fn block_on_web<F, T>(fut: F) -> T
 where
     F: std::future::Future<Output = T>,
 {
     match tokio::runtime::Handle::try_current() {
         Ok(handle) => tokio::task::block_in_place(|| handle.block_on(fut)),
-        Err(_) => tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("failed to build fallback tokio runtime")
+        Err(_) => WEB_BLOCK_ON_RUNTIME
+            .get_or_init(|| {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .or_else(|_| tokio::runtime::Builder::new_current_thread().build())
+                    .expect("failed to build fallback tokio runtime")
+            })
             .block_on(fut),
     }
 }
@@ -547,4 +555,38 @@ pub(crate) fn normalize_domain_filter(domain: &str) -> String {
 pub(crate) fn dedupe_hits(hits: &mut Vec<SearchHit>) {
     let mut seen = BTreeSet::new();
     hits.retain(|hit| seen.insert(hit.url.clone()));
+}
+
+// ---------------------------------------------------------------------------
+// BuiltinTool adapters
+// ---------------------------------------------------------------------------
+
+pub(crate) struct WebFetchTool;
+
+impl BuiltinTool for WebFetchTool {
+    const NAME: &'static str = "WebFetch";
+    type Input = WebFetchInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        crate::to_pretty_json(execute_web_fetch(&input).map_err(ToolError::execution)?)
+    }
+
+    fn is_concurrency_safe(_input: &Self::Input) -> bool {
+        true
+    }
+}
+
+pub(crate) struct WebSearchTool;
+
+impl BuiltinTool for WebSearchTool {
+    const NAME: &'static str = "WebSearch";
+    type Input = WebSearchInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        crate::to_pretty_json(execute_web_search(&input).map_err(ToolError::execution)?)
+    }
+
+    fn is_concurrency_safe(_input: &Self::Input) -> bool {
+        true
+    }
 }

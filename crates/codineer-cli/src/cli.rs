@@ -71,6 +71,7 @@ pub(crate) enum CliAction {
         /// Path to a session file to restore before entering the REPL.
         resume_path: Option<PathBuf>,
     },
+    Update,
     Help,
     SubcommandHelp {
         name: &'static str,
@@ -248,17 +249,22 @@ const SUBCOMMAND_HELP: &[(&str, &str, &str)] = &[
         "Scaffold .codineer/ directory with settings, gitignore, and CODINEER.md.",
         "codineer init",
     ),
+    (
+        "update",
+        "Check for Codineer updates from GitHub releases.",
+        "codineer update",
+    ),
 ];
 
 /// All known CLI subcommand names (single source of truth for suggestion matching).
-pub(crate) fn subcommand_names() -> Vec<String> {
-    let mut names: Vec<String> = SUBCOMMAND_HELP
+/// Subcommand primary names, same order as [`subcommand_names`] but without allocating owned
+/// strings (for suggestion matching).
+pub(crate) fn subcommand_names_static() -> Vec<&'static str> {
+    SUBCOMMAND_HELP
         .iter()
-        .map(|(name, _, _)| (*name).to_string())
-        .collect();
-    names.push("help".to_string());
-    names.push("prompt".to_string());
-    names
+        .map(|(name, _, _)| *name)
+        .chain(["help", "prompt"])
+        .collect()
 }
 
 pub(crate) fn parse_args(args: &[String]) -> Result<CliAction, String> {
@@ -337,6 +343,7 @@ pub(crate) fn parse_args(args: &[String]) -> Result<CliAction, String> {
         "providers" => Ok(CliAction::Providers),
         "config" => parse_config_args(&rest[1..]),
         "init" => Ok(CliAction::Init),
+        "update" => Ok(CliAction::Update),
         "prompt" => {
             let prompt = rest[1..].join(" ");
             if prompt.trim().is_empty() {
@@ -471,6 +478,7 @@ pub(crate) fn default_permission_mode() -> PermissionMode {
         .unwrap_or(PermissionMode::WorkspaceWrite)
 }
 
+#[cfg(test)]
 pub(crate) fn filter_tool_specs(
     tool_registry: &GlobalToolRegistry,
     allowed_tools: Option<&AllowedToolSet>,

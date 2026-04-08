@@ -10,6 +10,7 @@ use strum::{AsRefStr, EnumString};
 ///
 /// `Copy` + `Hash` + `Eq` enables O(1) `HashMap` lookups.
 /// `strum` derives enable bidirectional string conversion for config files.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, AsRefStr, EnumString, strum::Display)]
 pub enum EventKind {
     SessionStart,
@@ -47,12 +48,14 @@ pub enum EventKind {
     InstructionsLoaded,
     TaskCreated,
     TaskCompleted,
+    ToolProgress,
 }
 
 /// Rich event payload with borrowed data for zero-copy emission.
 ///
 /// Each variant carries only references into the runtime's owned state,
 /// avoiding allocation on every event.
+#[non_exhaustive]
 #[derive(Debug)]
 pub enum RuntimeEvent<'a> {
     SessionStart {
@@ -180,6 +183,11 @@ pub enum RuntimeEvent<'a> {
         task_id: &'a str,
         success: bool,
     },
+    ToolProgress {
+        tool_use_id: &'a str,
+        tool_name: &'a str,
+        progress: &'a str,
+    },
 }
 
 impl RuntimeEvent<'_> {
@@ -222,6 +230,7 @@ impl RuntimeEvent<'_> {
             Self::InstructionsLoaded { .. } => EventKind::InstructionsLoaded,
             Self::TaskCreated { .. } => EventKind::TaskCreated,
             Self::TaskCompleted { .. } => EventKind::TaskCompleted,
+            Self::ToolProgress { .. } => EventKind::ToolProgress,
         }
     }
 }
@@ -258,6 +267,13 @@ mod tests {
             reason: "test".into(),
         };
         assert_eq!(event.kind(), EventKind::Stop);
+
+        let event = RuntimeEvent::ToolProgress {
+            tool_use_id: "t1",
+            tool_name: "bash",
+            progress: "running",
+        };
+        assert_eq!(event.kind(), EventKind::ToolProgress);
     }
 
     #[test]
@@ -298,11 +314,12 @@ mod tests {
             "InstructionsLoaded",
             "TaskCreated",
             "TaskCompleted",
+            "ToolProgress",
         ];
         for kind_str in &kinds {
             let parsed: Result<EventKind, _> = kind_str.parse();
             assert!(parsed.is_ok(), "Failed to parse: {kind_str}");
         }
-        assert_eq!(kinds.len(), 35);
+        assert_eq!(kinds.len(), 36);
     }
 }

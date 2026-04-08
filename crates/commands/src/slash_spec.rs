@@ -1,5 +1,6 @@
 use std::borrow::ToOwned;
 
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SlashCommandCategory {
     Core,
@@ -282,8 +283,17 @@ const SLASH_COMMAND_SPECS: &[SlashCommandSpec] = &[
         resume_supported: true,
         category: SlashCommandCategory::Core,
     },
+    SlashCommandSpec {
+        name: "update",
+        aliases: &[],
+        summary: "Check for Codineer updates (check|dismiss|status)",
+        argument_hint: Some("[check|dismiss|status]"),
+        resume_supported: true,
+        category: SlashCommandCategory::Core,
+    },
 ];
 
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SlashCommand {
     Help,
@@ -360,6 +370,9 @@ pub enum SlashCommand {
         args: Option<String>,
     },
     Doctor,
+    Update {
+        action: Option<String>,
+    },
     Unknown(String),
 }
 
@@ -402,6 +415,7 @@ impl SlashCommand {
             Self::Agents { .. } => "agents",
             Self::Skills { .. } => "skills",
             Self::Doctor => "doctor",
+            Self::Update { .. } => "update",
             Self::Unknown(name) => name,
         }
     }
@@ -493,6 +507,9 @@ impl SlashCommand {
                 args: remainder_after_command(trimmed, command),
             },
             "doctor" => Self::Doctor,
+            "update" => Self::Update {
+                action: remainder_after_command(trimmed, command),
+            },
             other => Self::Unknown(other.to_string()),
         })
     }

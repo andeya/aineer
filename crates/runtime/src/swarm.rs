@@ -16,6 +16,7 @@ pub struct SwarmTask {
 }
 
 /// Task priority levels for scheduling.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SwarmPriority {
     Low,
@@ -35,6 +36,7 @@ pub struct SwarmTaskResult {
 }
 
 /// Completion status for a swarm task.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SwarmTaskStatus {
     Success,

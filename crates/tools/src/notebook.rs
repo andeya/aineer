@@ -1,5 +1,7 @@
 use serde_json::{json, Value};
 
+use crate::builtin::BuiltinTool;
+use crate::tool_output::{ToolError, ToolOutput};
 use crate::types::{NotebookCellType, NotebookEditInput, NotebookEditMode, NotebookEditOutput};
 
 pub(crate) fn execute_notebook_edit(
@@ -228,4 +230,19 @@ pub(crate) fn format_notebook_edit_mode(mode: NotebookEditMode) -> String {
 
 pub(crate) fn make_cell_id(index: usize) -> String {
     format!("cell-{}", index + 1)
+}
+
+// ---------------------------------------------------------------------------
+// BuiltinTool adapters
+// ---------------------------------------------------------------------------
+
+pub(crate) struct NotebookEditTool;
+
+impl BuiltinTool for NotebookEditTool {
+    const NAME: &'static str = "NotebookEdit";
+    type Input = NotebookEditInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        crate::to_pretty_json(execute_notebook_edit(input).map_err(ToolError::execution)?)
+    }
 }

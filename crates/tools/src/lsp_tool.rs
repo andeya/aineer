@@ -17,6 +17,8 @@ use lsp::{
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::builtin::BuiltinTool;
+use crate::tool_output::{ToolError, ToolOutput};
 use crate::types::LspInput;
 
 // ── Global LSP state ─────────────────────────────────────────────────────────
@@ -415,6 +417,27 @@ pub fn initialize_lsp_manager(configs_json: &Value) -> Result<(), String> {
         .map_err(|_| "LSP manager lock poisoned".to_string())?;
     *guard = Some(Arc::new(manager));
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// BuiltinTool adapters
+// ---------------------------------------------------------------------------
+
+pub(crate) struct LspTool;
+
+impl BuiltinTool for LspTool {
+    const NAME: &'static str = "Lsp";
+    type Input = LspInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        execute_lsp(input)
+            .map(ToolOutput::ok)
+            .map_err(ToolError::execution)
+    }
+
+    fn is_concurrency_safe(_input: &Self::Input) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]

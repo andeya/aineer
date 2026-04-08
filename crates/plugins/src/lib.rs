@@ -3,6 +3,7 @@
 mod bundled;
 mod constants;
 mod definition;
+pub mod directory_layout;
 mod error;
 mod install;
 mod lifecycle;
@@ -15,5 +16,6 @@ mod types;
 mod tests;
 
 pub use definition::builtin_plugins;
+pub use directory_layout::{scan_agent_files, scan_command_files};
 pub use error::{PluginError, PluginManifestValidationError};
 pub use types::*;

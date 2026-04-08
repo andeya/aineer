@@ -37,7 +37,7 @@ fn exposes_mvp_tools() {
 
 #[test]
 fn rejects_unknown_tool_names() {
-    let error = execute_tool("nope", &json!({})).expect_err("tool should be rejected");
+    let error = execute_tool_str("nope", &json!({})).expect_err("tool should be rejected");
     assert!(error.contains("unsupported tool"));
 }
 
@@ -52,7 +52,7 @@ fn web_fetch_returns_prompt_aware_summary() {
         )
     }));
 
-    let result = execute_tool(
+    let result = execute_tool_str(
         "WebFetch",
         &json!({
             "url": format!("http://{}/page", server.addr()),
@@ -68,7 +68,7 @@ fn web_fetch_returns_prompt_aware_summary() {
     assert!(summary.contains("Test Page"));
     assert!(summary.contains("Hello world from local server"));
 
-    let titled = execute_tool(
+    let titled = execute_tool_str(
         "WebFetch",
         &json!({
             "url": format!("http://{}/page", server.addr()),
@@ -88,7 +88,7 @@ fn web_fetch_supports_plain_text_and_rejects_invalid_url() {
         HttpResponse::text(200, "OK", "plain text response")
     }));
 
-    let result = execute_tool(
+    let result = execute_tool_str(
         "WebFetch",
         &json!({
             "url": format!("http://{}/plain", server.addr()),
@@ -104,7 +104,7 @@ fn web_fetch_supports_plain_text_and_rejects_invalid_url() {
         .expect("result")
         .contains("plain text response"));
 
-    let error = execute_tool(
+    let error = execute_tool_str(
         "WebFetch",
         &json!({
             "url": "not a url",
@@ -138,7 +138,7 @@ fn web_search_extracts_and_filters_results() {
         "CODINEER_WEB_SEARCH_BASE_URL",
         format!("http://{}/search", server.addr()),
     );
-    let result = execute_tool(
+    let result = execute_tool_str(
         "WebSearch",
         &json!({
             "query": "rust web search",
@@ -186,7 +186,7 @@ fn web_search_handles_generic_links_and_invalid_base_url() {
         "CODINEER_WEB_SEARCH_BASE_URL",
         format!("http://{}/fallback", server.addr()),
     );
-    let result = execute_tool(
+    let result = execute_tool_str(
         "WebSearch",
         &json!({
             "query": "generic links"
@@ -207,7 +207,7 @@ fn web_search_handles_generic_links_and_invalid_base_url() {
     assert_eq!(content[1]["url"], "https://docs.rs/tokio");
 
     std::env::set_var("CODINEER_WEB_SEARCH_BASE_URL", "://bad-base-url");
-    let error = execute_tool("WebSearch", &json!({ "query": "generic links" }))
+    let error = execute_tool_str("WebSearch", &json!({ "query": "generic links" }))
         .expect_err("invalid base URL should fail");
     std::env::remove_var("CODINEER_WEB_SEARCH_BASE_URL");
     assert!(error.contains("relative URL without a base") || error.contains("empty host"));
@@ -278,7 +278,7 @@ fn todo_write_persists_and_returns_previous_state() {
     let path = temp_path("todos.json");
     std::env::set_var("CODINEER_TODO_STORE", &path);
 
-    let first = execute_tool(
+    let first = execute_tool_str(
         "TodoWrite",
         &json!({
             "todos": [
@@ -291,7 +291,7 @@ fn todo_write_persists_and_returns_previous_state() {
     let first_output: serde_json::Value = serde_json::from_str(&first).expect("valid json");
     assert_eq!(first_output["oldTodos"].as_array().expect("array").len(), 0);
 
-    let second = execute_tool(
+    let second = execute_tool_str(
         "TodoWrite",
         &json!({
             "todos": [
@@ -325,12 +325,12 @@ fn todo_write_rejects_invalid_payloads_and_sets_verification_nudge() {
     let path = temp_path("todos-errors.json");
     std::env::set_var("CODINEER_TODO_STORE", &path);
 
-    let empty = execute_tool("TodoWrite", &json!({ "todos": [] }))
+    let empty = execute_tool_str("TodoWrite", &json!({ "todos": [] }))
         .expect_err("empty todos should fail");
     assert!(empty.contains("todos must not be empty"));
 
     // Multiple in_progress items are now allowed for parallel workflows
-    let _multi_active = execute_tool(
+    let _multi_active = execute_tool_str(
         "TodoWrite",
         &json!({
             "todos": [
@@ -341,7 +341,7 @@ fn todo_write_rejects_invalid_payloads_and_sets_verification_nudge() {
     )
     .expect("multiple in-progress todos should succeed");
 
-    let blank_content = execute_tool(
+    let blank_content = execute_tool_str(
         "TodoWrite",
         &json!({
             "todos": [
@@ -352,7 +352,7 @@ fn todo_write_rejects_invalid_payloads_and_sets_verification_nudge() {
     .expect_err("blank content should fail");
     assert!(blank_content.contains("todo content must not be empty"));
 
-    let nudge = execute_tool(
+    let nudge = execute_tool_str(
         "TodoWrite",
         &json!({
             "todos": [
@@ -376,7 +376,7 @@ fn skill_loads_local_skill_prompt() {
     let _guard = env_lock()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let result = execute_tool(
+    let result = execute_tool_str(
         "Skill",
         &json!({
             "skill": "help",
@@ -396,7 +396,7 @@ fn skill_loads_local_skill_prompt() {
         .expect("prompt")
         .contains("Guide on using oh-my-codex plugin"));
 
-    let dollar_result = execute_tool(
+    let dollar_result = execute_tool_str(
         "Skill",
         &json!({
             "skill": "$help"
@@ -414,7 +414,7 @@ fn skill_loads_local_skill_prompt() {
 
 #[test]
 fn tool_search_supports_keyword_and_select_queries() {
-    let keyword = execute_tool(
+    let keyword = execute_tool_str(
         "ToolSearch",
         &json!({"query": "web current", "max_results": 3}),
     )
@@ -423,21 +423,21 @@ fn tool_search_supports_keyword_and_select_queries() {
     let matches = keyword_output["matches"].as_array().expect("matches");
     assert!(matches.iter().any(|value| value == "WebSearch"));
 
-    let selected = execute_tool("ToolSearch", &json!({"query": "select:Agent,Skill"}))
+    let selected = execute_tool_str("ToolSearch", &json!({"query": "select:Agent,Skill"}))
         .expect("ToolSearch should succeed");
     let selected_output: serde_json::Value =
         serde_json::from_str(&selected).expect("valid json");
     assert_eq!(selected_output["matches"][0], "Agent");
     assert_eq!(selected_output["matches"][1], "Skill");
 
-    let aliased = execute_tool("ToolSearch", &json!({"query": "AgentTool"}))
+    let aliased = execute_tool_str("ToolSearch", &json!({"query": "AgentTool"}))
         .expect("ToolSearch should support tool aliases");
     let aliased_output: serde_json::Value = serde_json::from_str(&aliased).expect("valid json");
     assert_eq!(aliased_output["matches"][0], "Agent");
     assert_eq!(aliased_output["normalized_query"], "agent");
 
     let selected_with_alias =
-        execute_tool("ToolSearch", &json!({"query": "select:AgentTool,Skill"}))
+        execute_tool_str("ToolSearch", &json!({"query": "select:AgentTool,Skill"}))
             .expect("ToolSearch alias select should succeed");
     let selected_with_alias_output: serde_json::Value =
         serde_json::from_str(&selected_with_alias).expect("valid json");
@@ -495,7 +495,7 @@ fn agent_persists_handoff_metadata() {
     assert!(captured_job.allowed_tools.contains("read_file"));
     assert!(!captured_job.allowed_tools.contains("Agent"));
 
-    let normalized = execute_tool(
+    let normalized = execute_tool_str(
         "Agent",
         &json!({
             "description": "Verify the branch",
@@ -508,7 +508,7 @@ fn agent_persists_handoff_metadata() {
         serde_json::from_str(&normalized).expect("valid json");
     assert_eq!(normalized_output["subagentType"], "Explore");
 
-    let named = execute_tool(
+    let named = execute_tool_str(
         "Agent",
         &json!({
             "description": "Review the branch",
@@ -544,6 +544,7 @@ fn agent_fake_runner_can_persist_completion_and_failure() {
                 AgentRunStatus::Completed,
                 Some("Finished successfully"),
                 None,
+                None,
             )
         },
     )
@@ -570,6 +571,7 @@ fn agent_fake_runner_can_persist_completion_and_failure() {
                 AgentRunStatus::Failed,
                 None,
                 Some(String::from("simulated failure")),
+                None,
             )
         },
     )
@@ -616,11 +618,11 @@ fn agent_fake_runner_can_persist_completion_and_failure() {
 
 #[test]
 fn skill_rejects_path_traversal() {
-    let err = execute_tool("Skill", &json!({"skill": "../../../etc/passwd", "args": "x"}))
+    let err = execute_tool_str("Skill", &json!({"skill": "../../../etc/passwd", "args": "x"}))
         .expect_err("should reject path traversal");
     assert!(err.contains("must not contain"), "got: {err}");
 
-    let err = execute_tool("Skill", &json!({"skill": "foo/bar", "args": "x"}))
+    let err = execute_tool_str("Skill", &json!({"skill": "foo/bar", "args": "x"}))
         .expect_err("should reject slash");
     assert!(err.contains("must not contain"), "got: {err}");
 }

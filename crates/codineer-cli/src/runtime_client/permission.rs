@@ -1,6 +1,6 @@
 use std::io::Write;
 
-use runtime::{PermissionMode, PermissionPolicy};
+use runtime::{PermissionMode, PermissionPolicy, PermissionRule};
 use tools::GlobalToolRegistry;
 
 pub(crate) struct CliPermissionPrompter {
@@ -52,9 +52,10 @@ impl runtime::PermissionPrompter for CliPermissionPrompter {
 pub(crate) fn permission_policy(
     mode: PermissionMode,
     tool_registry: &GlobalToolRegistry,
+    rules: &[PermissionRule],
 ) -> PermissionPolicy {
     tool_registry.permission_specs(None).into_iter().fold(
-        PermissionPolicy::new(mode),
+        PermissionPolicy::new(mode).with_rules(rules.to_vec()),
         |policy, (name, required_permission)| {
             policy.with_tool_requirement(name, required_permission)
         },

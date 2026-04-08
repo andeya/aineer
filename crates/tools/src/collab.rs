@@ -16,6 +16,8 @@ use std::sync::{Mutex, OnceLock};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use crate::builtin::BuiltinTool;
+use crate::tool_output::{ToolError, ToolOutput};
 use crate::types::{SendMessageInput, SlashCommandInput, TeamCreateInput, TeamDeleteInput};
 use crate::web::{block_on_web, http_client};
 
@@ -141,6 +143,62 @@ pub(crate) fn execute_slash_command(input: SlashCommandInput) -> Result<String, 
         .get(&name)
         .ok_or_else(|| format!("slash command '/{name}' not registered"))?;
     handler(&name, &args)
+}
+
+// ---------------------------------------------------------------------------
+// BuiltinTool adapters
+// ---------------------------------------------------------------------------
+
+pub(crate) struct TeamCreateTool;
+
+impl BuiltinTool for TeamCreateTool {
+    const NAME: &'static str = "TeamCreate";
+    type Input = TeamCreateInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        execute_team_create(input)
+            .map(ToolOutput::ok)
+            .map_err(ToolError::execution)
+    }
+}
+
+pub(crate) struct TeamDeleteTool;
+
+impl BuiltinTool for TeamDeleteTool {
+    const NAME: &'static str = "TeamDelete";
+    type Input = TeamDeleteInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        execute_team_delete(input)
+            .map(ToolOutput::ok)
+            .map_err(ToolError::execution)
+    }
+}
+
+pub(crate) struct SendMessageTool;
+
+impl BuiltinTool for SendMessageTool {
+    const NAME: &'static str = "SendMessage";
+    type Input = SendMessageInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        execute_send_message(input)
+            .map(ToolOutput::ok)
+            .map_err(ToolError::execution)
+    }
+}
+
+pub(crate) struct SlashCommandTool;
+
+impl BuiltinTool for SlashCommandTool {
+    const NAME: &'static str = "SlashCommand";
+    type Input = SlashCommandInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        execute_slash_command(input)
+            .map(ToolOutput::ok)
+            .map_err(ToolError::execution)
+    }
 }
 
 #[cfg(test)]

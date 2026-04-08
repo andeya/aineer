@@ -31,6 +31,7 @@ reqwest = { version = "0.12", default-features = false, features = [
 rustyline = "15"
 runtime.workspace = true
 plugins.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 syntect = "5"
@@ -40,7 +41,13 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 unicode-width = "0.2"
 arboard = "3.6.1"
+flate2 = "1"
 png = "0.18"
+tar = "0.4"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[features]
+default = []
 
 [lints]
 workspace = true

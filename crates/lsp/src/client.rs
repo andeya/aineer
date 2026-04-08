@@ -47,14 +47,12 @@ impl LspClient {
             .envs(config.env.clone());
 
         let mut child = command.spawn()?;
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| LspError::Protocol("missing LSP stdin pipe".to_string()))?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| LspError::Protocol("missing LSP stdout pipe".to_string()))?;
+        let stdin = child.stdin.take().ok_or_else(|| LspError::Protocol {
+            message: "missing LSP stdin pipe".to_string(),
+        })?;
+        let stdout = child.stdout.take().ok_or_else(|| LspError::Protocol {
+            message: "missing LSP stdout pipe".to_string(),
+        })?;
         let stderr = child.stderr.take();
 
         let (diag_version_tx, _diag_version_rx) = watch::channel(0u64);
@@ -91,10 +89,12 @@ impl LspClient {
 
     pub(crate) async fn open_document(&self, path: &Path, text: &str) -> Result<(), LspError> {
         let uri = file_url(path)?;
-        let language_id = self
-            .config
-            .language_id_for(path)
-            .ok_or_else(|| LspError::UnsupportedDocument(path.to_path_buf()))?;
+        let language_id =
+            self.config
+                .language_id_for(path)
+                .ok_or_else(|| LspError::UnsupportedDocument {
+                    path: path.to_path_buf(),
+                })?;
 
         self.notify(
             "textDocument/didOpen",
@@ -513,7 +513,9 @@ impl LspClient {
                 while let Some(message) = read_message(&mut reader).await? {
                     if let Some(id) = message.get("id").and_then(Value::as_i64) {
                         let response = if let Some(error) = message.get("error") {
-                            Err(LspError::Protocol(error.to_string()))
+                            Err(LspError::Protocol {
+                                message: error.to_string(),
+                            })
                         } else {
                             Ok(message.get("result").cloned().unwrap_or(Value::Null))
                         };
@@ -552,7 +554,9 @@ impl LspClient {
                 let drained = pending.keys().copied().collect::<Vec<_>>();
                 for id in drained {
                     if let Some(sender) = pending.remove(&id) {
-                        let _ = sender.send(Err(LspError::Protocol(error.to_string())));
+                        let _ = sender.send(Err(LspError::Protocol {
+                            message: error.to_string(),
+                        }));
                     }
                 }
             }
@@ -654,8 +658,12 @@ impl LspClient {
 
         let response = tokio::time::timeout(std::time::Duration::from_secs(30), receiver)
             .await
-            .map_err(|_| LspError::Protocol(format!("{method} request timed out after 30s")))?
-            .map_err(|_| LspError::Protocol(format!("request channel closed for {method}")))??;
+            .map_err(|_| LspError::Protocol {
+                message: format!("{method} request timed out after 30s"),
+            })?
+            .map_err(|_| LspError::Protocol {
+                message: format!("request channel closed for {method}"),
+            })??;
         Ok(serde_json::from_value(response)?)
     }
 
@@ -863,14 +871,19 @@ where
         if let Some((name, value)) = trimmed.split_once(':') {
             if name.eq_ignore_ascii_case("Content-Length") {
                 let value = value.trim().to_string();
-                content_length = Some(
-                    value
-                        .parse::<usize>()
-                        .map_err(|_| LspError::InvalidContentLength(value.clone()))?,
-                );
+                content_length =
+                    Some(
+                        value
+                            .parse::<usize>()
+                            .map_err(|_| LspError::InvalidContentLength {
+                                value: value.clone(),
+                            })?,
+                    );
             }
         } else {
-            return Err(LspError::InvalidHeader(trimmed.to_string()));
+            return Err(LspError::InvalidHeader {
+                header: trimmed.to_string(),
+            });
         }
     }
 
@@ -890,7 +903,9 @@ where
 fn file_url(path: &Path) -> Result<String, LspError> {
     url::Url::from_file_path(path)
         .map(|url| url.to_string())
-        .map_err(|()| LspError::PathToUrl(path.to_path_buf()))
+        .map_err(|()| LspError::PathToUrl {
+            path: path.to_path_buf(),
+        })
 }
 
 fn location_to_symbol_locations(locations: Vec<Location>) -> Vec<SymbolLocation> {

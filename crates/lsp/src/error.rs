@@ -1,75 +1,34 @@
-use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
 
-#[derive(Debug)]
+#[non_exhaustive]
+#[derive(Debug, thiserror::Error)]
 pub enum LspError {
-    Io(std::io::Error),
-    Json(serde_json::Error),
-    InvalidHeader(String),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
+    #[error("invalid LSP header: {header}")]
+    InvalidHeader { header: String },
+    #[error("missing LSP Content-Length header")]
     MissingContentLength,
-    InvalidContentLength(String),
-    UnsupportedDocument(PathBuf),
-    UnknownServer(String),
+    #[error("invalid LSP Content-Length value: {value}")]
+    InvalidContentLength { value: String },
+    #[error("no LSP server configured for {}", path.display())]
+    UnsupportedDocument { path: PathBuf },
+    #[error("unknown LSP server: {name}")]
+    UnknownServer { name: String },
+    #[error("duplicate LSP extension mapping for {extension}: {existing_server} and {new_server}")]
     DuplicateExtension {
         extension: String,
         existing_server: String,
         new_server: String,
     },
-    PathToUrl(PathBuf),
-    Protocol(String),
-    PayloadTooLarge {
-        content_length: usize,
-        limit: usize,
-    },
-}
-
-impl Display for LspError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Io(error) => write!(f, "{error}"),
-            Self::Json(error) => write!(f, "{error}"),
-            Self::InvalidHeader(header) => write!(f, "invalid LSP header: {header}"),
-            Self::MissingContentLength => write!(f, "missing LSP Content-Length header"),
-            Self::InvalidContentLength(value) => {
-                write!(f, "invalid LSP Content-Length value: {value}")
-            }
-            Self::UnsupportedDocument(path) => {
-                write!(f, "no LSP server configured for {}", path.display())
-            }
-            Self::UnknownServer(name) => write!(f, "unknown LSP server: {name}"),
-            Self::DuplicateExtension {
-                extension,
-                existing_server,
-                new_server,
-            } => write!(
-                f,
-                "duplicate LSP extension mapping for {extension}: {existing_server} and {new_server}"
-            ),
-            Self::PathToUrl(path) => write!(f, "failed to convert path to file URL: {}", path.display()),
-            Self::Protocol(message) => write!(f, "LSP protocol error: {message}"),
-            Self::PayloadTooLarge {
-                content_length,
-                limit,
-            } => write!(
-                f,
-                "LSP payload too large: Content-Length {content_length} exceeds {limit} byte limit"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for LspError {}
-
-impl From<std::io::Error> for LspError {
-    fn from(value: std::io::Error) -> Self {
-        Self::Io(value)
-    }
-}
-
-impl From<serde_json::Error> for LspError {
-    fn from(value: serde_json::Error) -> Self {
-        Self::Json(value)
-    }
+    #[error("failed to convert path to file URL: {}", path.display())]
+    PathToUrl { path: PathBuf },
+    #[error("LSP protocol error: {message}")]
+    Protocol { message: String },
+    #[error("LSP payload too large: Content-Length {content_length} exceeds {limit} byte limit")]
+    PayloadTooLarge { content_length: usize, limit: usize },
 }
 
 #[cfg(test)]
@@ -87,7 +46,10 @@ mod tests {
         assert!(!json_display.to_string().is_empty());
 
         assert_eq!(
-            LspError::InvalidHeader("bad".into()).to_string(),
+            LspError::InvalidHeader {
+                header: "bad".into()
+            }
+            .to_string(),
             "invalid LSP header: bad"
         );
         assert_eq!(
@@ -95,14 +57,22 @@ mod tests {
             "missing LSP Content-Length header"
         );
         assert_eq!(
-            LspError::InvalidContentLength("xyz".into()).to_string(),
+            LspError::InvalidContentLength {
+                value: "xyz".into()
+            }
+            .to_string(),
             "invalid LSP Content-Length value: xyz"
         );
-        assert!(LspError::UnsupportedDocument(PathBuf::from("/foo.txt"))
-            .to_string()
-            .contains("/foo.txt"));
+        assert!(LspError::UnsupportedDocument {
+            path: PathBuf::from("/foo.txt")
+        }
+        .to_string()
+        .contains("/foo.txt"));
         assert_eq!(
-            LspError::UnknownServer("rust-analyzer".into()).to_string(),
+            LspError::UnknownServer {
+                name: "rust-analyzer".into()
+            }
+            .to_string(),
             "unknown LSP server: rust-analyzer"
         );
         assert!(LspError::DuplicateExtension {
@@ -112,11 +82,16 @@ mod tests {
         }
         .to_string()
         .contains(".rs"));
-        assert!(LspError::PathToUrl(PathBuf::from("/bad"))
-            .to_string()
-            .contains("/bad"));
+        assert!(LspError::PathToUrl {
+            path: PathBuf::from("/bad")
+        }
+        .to_string()
+        .contains("/bad"));
         assert_eq!(
-            LspError::Protocol("timeout".into()).to_string(),
+            LspError::Protocol {
+                message: "timeout".into()
+            }
+            .to_string(),
             "LSP protocol error: timeout"
         );
         assert!(LspError::PayloadTooLarge {

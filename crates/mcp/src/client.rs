@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use crate::config::{McpOAuthConfig, McpServerConfig, ScopedMcpServerConfig};
 use crate::naming::{mcp_server_signature, mcp_tool_prefix, normalize_name_for_mcp};
 
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum McpClientTransport {
     Stdio(McpStdioTransport),

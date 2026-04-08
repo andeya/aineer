@@ -4,6 +4,7 @@ use crate::providers::openai_compat::{self, OpenAiCompatClient, OpenAiCompatConf
 use crate::providers::{self, ProviderKind};
 use crate::types::{MessageRequest, MessageResponse, StreamEvent};
 
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub enum ProviderClient {
     CodineerApi(CodineerApiClient),
@@ -41,7 +42,7 @@ impl ProviderClient {
     /// Build a provider client using a pre-resolved credential from a `CredentialChain`.
     pub fn from_model_with_credential(
         model: &str,
-        credential: runtime::ResolvedCredential,
+        credential: codineer_core::ResolvedCredential,
     ) -> Result<Self, ApiError> {
         let auth = AuthSource::from(credential);
         match providers::detect_provider_kind(model) {

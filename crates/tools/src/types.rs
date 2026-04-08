@@ -109,6 +109,8 @@ pub(crate) struct AgentInput {
 #[derive(Debug, Deserialize)]
 pub struct ToolSearchInput {
     pub query: String,
+    #[serde(default)]
+    pub category: Option<String>,
     pub max_results: Option<usize>,
 }
 
@@ -263,6 +265,15 @@ impl fmt::Display for AgentRunStatus {
     }
 }
 
+/// Structured outcome of a sub-agent run for parent runtimes (manifest + optional inspection).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentResult {
+    pub summary: String,
+    #[serde(rename = "filesModified")]
+    pub files_modified: Vec<String>,
+    pub success: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct AgentOutput {
     #[serde(rename = "agentId")]
@@ -285,6 +296,12 @@ pub(crate) struct AgentOutput {
     pub(crate) completed_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) error: Option<String>,
+    #[serde(
+        default,
+        rename = "agentResult",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub(crate) agent_result: Option<AgentResult>,
 }
 
 #[derive(Debug, Clone)]
@@ -295,9 +312,16 @@ pub(crate) struct AgentJob {
     pub(crate) allowed_tools: BTreeSet<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct ToolSearchHit {
+    pub name: String,
+    pub description: String,
+}
+
 #[derive(Debug, Serialize)]
 pub struct ToolSearchOutput {
     pub matches: Vec<String>,
+    pub hits: Vec<ToolSearchHit>,
     pub query: String,
     pub normalized_query: String,
     #[serde(rename = "total_deferred_tools")]

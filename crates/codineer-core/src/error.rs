@@ -6,6 +6,7 @@
 //! - Typed recovery strategies (see `recovery.rs`)
 //! - `#[from]` automatic conversion from downstream errors
 
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum RuntimeError {
     #[error("max iterations exceeded ({iterations})")]
@@ -24,8 +25,12 @@ pub enum RuntimeError {
     Cancelled,
     #[error("compaction failed: {0}")]
     Compaction(String),
-    #[error("api error: {0}")]
-    Api(String),
+    #[error("api error: {message}")]
+    Api {
+        status_code: u16,
+        error_type: Option<String>,
+        message: String,
+    },
     #[error("tool error: {0}")]
     Tool(String),
     #[error("recovery exhausted ({kind}): {reason}")]
@@ -42,6 +47,16 @@ impl RuntimeError {
         Self::Other(message.into())
     }
 
+    /// Create a structured API error with status code and error classification.
+    #[must_use]
+    pub fn api(status_code: u16, error_type: Option<String>, message: impl Into<String>) -> Self {
+        Self::Api {
+            status_code,
+            error_type,
+            message: message.into(),
+        }
+    }
+
     /// Check if this error represents a context overflow.
     #[must_use]
     pub fn is_context_overflow(&self) -> bool {
@@ -52,6 +67,12 @@ impl RuntimeError {
     #[must_use]
     pub fn is_cancelled(&self) -> bool {
         matches!(self, Self::Cancelled)
+    }
+
+    /// Check if this error is an API error.
+    #[must_use]
+    pub fn is_api(&self) -> bool {
+        matches!(self, Self::Api { .. })
     }
 }
 
@@ -81,6 +102,26 @@ mod tests {
         .is_context_overflow());
         assert!(!RuntimeError::Cancelled.is_context_overflow());
         assert!(RuntimeError::Cancelled.is_cancelled());
+        assert!(RuntimeError::api(429, Some("rate_limit_error".into()), "slow down").is_api());
+        assert!(!RuntimeError::Cancelled.is_api());
+    }
+
+    #[test]
+    fn api_error_constructor() {
+        let err = RuntimeError::api(413, Some("request_too_large".into()), "prompt is too long");
+        assert_eq!(err.to_string(), "api error: prompt is too long");
+        match err {
+            RuntimeError::Api {
+                status_code,
+                error_type,
+                message,
+            } => {
+                assert_eq!(status_code, 413);
+                assert_eq!(error_type.as_deref(), Some("request_too_large"));
+                assert_eq!(message, "prompt is too long");
+            }
+            _ => panic!("expected Api variant"),
+        }
     }
 
     #[test]

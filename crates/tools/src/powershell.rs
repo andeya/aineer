@@ -1,3 +1,5 @@
+use crate::builtin::BuiltinTool;
+use crate::tool_output::{ToolError, ToolOutput};
 use crate::types::PowerShellInput;
 
 pub(crate) fn execute_powershell(
@@ -171,4 +173,21 @@ pub(crate) fn execute_shell_command(
         persisted_output_size: None,
         sandbox_status: None,
     })
+}
+
+// ---------------------------------------------------------------------------
+// BuiltinTool adapters
+// ---------------------------------------------------------------------------
+
+pub(crate) struct PowerShellTool;
+
+impl BuiltinTool for PowerShellTool {
+    const NAME: &'static str = "PowerShell";
+    type Input = PowerShellInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        crate::to_pretty_json(
+            execute_powershell(input).map_err(|e| ToolError::execution(e.to_string()))?,
+        )
+    }
 }

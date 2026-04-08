@@ -106,7 +106,7 @@ fn subagent_runtime_executes_tool_loop_with_isolated_session() {
 
 #[test]
 fn agent_rejects_blank_required_fields() {
-    let missing_description = execute_tool(
+    let missing_description = execute_tool_str(
         "Agent",
         &json!({
             "description": "  ",
@@ -116,7 +116,7 @@ fn agent_rejects_blank_required_fields() {
     .expect_err("blank description should fail");
     assert!(missing_description.contains("description must not be empty"));
 
-    let missing_prompt = execute_tool(
+    let missing_prompt = execute_tool_str(
         "Agent",
         &json!({
             "description": "Inspect branch",
@@ -150,7 +150,7 @@ fn notebook_edit_replaces_inserts_and_deletes_cells() {
     )
     .expect("write notebook");
 
-    let replaced = execute_tool(
+    let replaced = execute_tool_str(
         "NotebookEdit",
         &json!({
             "notebook_path": path.display().to_string(),
@@ -164,7 +164,7 @@ fn notebook_edit_replaces_inserts_and_deletes_cells() {
     assert_eq!(replaced_output["cell_id"], "cell-a");
     assert_eq!(replaced_output["cell_type"], "code");
 
-    let inserted = execute_tool(
+    let inserted = execute_tool_str(
         "NotebookEdit",
         &json!({
             "notebook_path": path.display().to_string(),
@@ -177,7 +177,7 @@ fn notebook_edit_replaces_inserts_and_deletes_cells() {
     .expect("NotebookEdit insert should succeed");
     let inserted_output: serde_json::Value = serde_json::from_str(&inserted).expect("json");
     assert_eq!(inserted_output["cell_type"], "markdown");
-    let appended = execute_tool(
+    let appended = execute_tool_str(
         "NotebookEdit",
         &json!({
             "notebook_path": path.display().to_string(),
@@ -189,7 +189,7 @@ fn notebook_edit_replaces_inserts_and_deletes_cells() {
     let appended_output: serde_json::Value = serde_json::from_str(&appended).expect("json");
     assert_eq!(appended_output["cell_type"], "code");
 
-    let deleted = execute_tool(
+    let deleted = execute_tool_str(
         "NotebookEdit",
         &json!({
             "notebook_path": path.display().to_string(),
@@ -226,7 +226,7 @@ fn notebook_edit_rejects_invalid_inputs() {
 
     let text_path = nb_root.join("notebook.txt");
     fs::write(&text_path, "not a notebook").expect("write text file");
-    let wrong_extension = execute_tool(
+    let wrong_extension = execute_tool_str(
         "NotebookEdit",
         &json!({
             "notebook_path": text_path.display().to_string(),
@@ -244,7 +244,7 @@ fn notebook_edit_rejects_invalid_inputs() {
     )
     .expect("write empty notebook");
 
-    let missing_source = execute_tool(
+    let missing_source = execute_tool_str(
         "NotebookEdit",
         &json!({
             "notebook_path": empty_notebook.display().to_string(),
@@ -254,7 +254,7 @@ fn notebook_edit_rejects_invalid_inputs() {
     .expect_err("insert without source should fail");
     assert!(missing_source.contains("new_source is required"));
 
-    let missing_cell = execute_tool(
+    let missing_cell = execute_tool_str(
         "NotebookEdit",
         &json!({
             "notebook_path": empty_notebook.display().to_string(),
@@ -274,7 +274,7 @@ fn bash_tool_reports_success_exit_failure_timeout_and_background() {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let no_sandbox = true;
-    let success = execute_tool(
+    let success = execute_tool_str(
         "bash",
         &json!({ "command": "printf 'hello'", "timeout": 5000, "dangerouslyDisableSandbox": no_sandbox }),
     )
@@ -283,7 +283,7 @@ fn bash_tool_reports_success_exit_failure_timeout_and_background() {
     assert_eq!(success_output["stdout"], "hello");
     assert_eq!(success_output["interrupted"], false);
 
-    let failure = execute_tool(
+    let failure = execute_tool_str(
         "bash",
         &json!({ "command": "printf 'oops' >&2; exit 7", "timeout": 5000, "dangerouslyDisableSandbox": no_sandbox }),
     )
@@ -295,7 +295,7 @@ fn bash_tool_reports_success_exit_failure_timeout_and_background() {
         .expect("stderr")
         .contains("oops"));
 
-    let timeout = execute_tool(
+    let timeout = execute_tool_str(
         "bash",
         &json!({ "command": "sleep 10", "timeout": 10, "dangerouslyDisableSandbox": no_sandbox }),
     )
@@ -308,7 +308,7 @@ fn bash_tool_reports_success_exit_failure_timeout_and_background() {
         .expect("stderr")
         .contains("Command exceeded timeout"));
 
-    let background = execute_tool(
+    let background = execute_tool_str(
         "bash",
         &json!({ "command": "sleep 1", "run_in_background": true, "dangerouslyDisableSandbox": no_sandbox }),
     )
@@ -328,7 +328,7 @@ fn file_tools_cover_read_write_and_edit_behaviors() {
     let original_dir = std::env::current_dir().expect("cwd");
     std::env::set_current_dir(&root).expect("set cwd");
 
-    let write_create = execute_tool(
+    let write_create = execute_tool_str(
         "write_file",
         &json!({ "path": "nested/demo.txt", "content": "alpha\nbeta\nalpha\n" }),
     )
@@ -337,7 +337,7 @@ fn file_tools_cover_read_write_and_edit_behaviors() {
     assert_eq!(write_create_output["type"], "create");
     assert!(root.join("nested/demo.txt").exists());
 
-    let write_update = execute_tool(
+    let write_update = execute_tool_str(
         "write_file",
         &json!({ "path": "nested/demo.txt", "content": "alpha\nbeta\ngamma\n" }),
     )
@@ -346,13 +346,13 @@ fn file_tools_cover_read_write_and_edit_behaviors() {
     assert_eq!(write_update_output["type"], "update");
     assert_eq!(write_update_output["originalFile"], "alpha\nbeta\nalpha\n");
 
-    let read_full = execute_tool("read_file", &json!({ "path": "nested/demo.txt" }))
+    let read_full = execute_tool_str("read_file", &json!({ "path": "nested/demo.txt" }))
         .expect("read full should succeed");
     let read_full_output: serde_json::Value = serde_json::from_str(&read_full).expect("json");
     assert_eq!(read_full_output["file"]["content"], "alpha\nbeta\ngamma");
     assert_eq!(read_full_output["file"]["startLine"], 1);
 
-    let read_slice = execute_tool(
+    let read_slice = execute_tool_str(
         "read_file",
         &json!({ "path": "nested/demo.txt", "offset": 1, "limit": 1 }),
     )
@@ -361,7 +361,7 @@ fn file_tools_cover_read_write_and_edit_behaviors() {
     assert_eq!(read_slice_output["file"]["content"], "beta");
     assert_eq!(read_slice_output["file"]["startLine"], 2);
 
-    let read_past_end = execute_tool(
+    let read_past_end = execute_tool_str(
         "read_file",
         &json!({ "path": "nested/demo.txt", "offset": 50 }),
     )
@@ -371,11 +371,11 @@ fn file_tools_cover_read_write_and_edit_behaviors() {
     assert_eq!(read_past_end_output["file"]["content"], "");
     assert_eq!(read_past_end_output["file"]["startLine"], 4);
 
-    let read_error = execute_tool("read_file", &json!({ "path": "missing.txt" }))
+    let read_error = execute_tool_str("read_file", &json!({ "path": "missing.txt" }))
         .expect_err("missing file should fail");
     assert!(!read_error.is_empty());
 
-    let edit_once = execute_tool(
+    let edit_once = execute_tool_str(
         "edit_file",
         &json!({ "path": "nested/demo.txt", "old_string": "alpha", "new_string": "omega" }),
     )
@@ -387,12 +387,12 @@ fn file_tools_cover_read_write_and_edit_behaviors() {
         "omega\nbeta\ngamma\n"
     );
 
-    execute_tool(
+    execute_tool_str(
         "write_file",
         &json!({ "path": "nested/demo.txt", "content": "alpha\nbeta\nalpha\n" }),
     )
     .expect("reset file");
-    let edit_all = execute_tool(
+    let edit_all = execute_tool_str(
         "edit_file",
         &json!({
             "path": "nested/demo.txt",
@@ -409,14 +409,14 @@ fn file_tools_cover_read_write_and_edit_behaviors() {
         "omega\nbeta\nomega\n"
     );
 
-    let edit_same = execute_tool(
+    let edit_same = execute_tool_str(
         "edit_file",
         &json!({ "path": "nested/demo.txt", "old_string": "omega", "new_string": "omega" }),
     )
     .expect_err("identical old/new should fail");
     assert!(edit_same.contains("must differ"));
 
-    let edit_missing = execute_tool(
+    let edit_missing = execute_tool_str(
         "edit_file",
         &json!({ "path": "nested/demo.txt", "old_string": "missing", "new_string": "omega" }),
     )
@@ -444,7 +444,7 @@ fn glob_and_grep_tools_cover_success_and_errors() {
     .expect("write rust file");
     fs::write(root.join("nested/notes.txt"), "alpha\nbeta\n").expect("write txt file");
 
-    let globbed = execute_tool("glob_search", &json!({ "pattern": "nested/*.rs" }))
+    let globbed = execute_tool_str("glob_search", &json!({ "pattern": "nested/*.rs" }))
         .expect("glob should succeed");
     let globbed_output: serde_json::Value = serde_json::from_str(&globbed).expect("json");
     assert_eq!(globbed_output["numFiles"], 1);
@@ -454,11 +454,11 @@ fn glob_and_grep_tools_cover_success_and_errors() {
         .replace('\\', "/")
         .ends_with("nested/lib.rs"));
 
-    let glob_error = execute_tool("glob_search", &json!({ "pattern": "[" }))
+    let glob_error = execute_tool_str("glob_search", &json!({ "pattern": "[" }))
         .expect_err("invalid glob should fail");
     assert!(!glob_error.is_empty());
 
-    let grep_content = execute_tool(
+    let grep_content = execute_tool_str(
         "grep_search",
         &json!({
             "pattern": "alpha",
@@ -480,7 +480,7 @@ fn glob_and_grep_tools_cover_success_and_errors() {
         .expect("content")
         .contains("let alpha = 2;"));
 
-    let grep_count = execute_tool(
+    let grep_count = execute_tool_str(
         "grep_search",
         &json!({ "pattern": "alpha", "path": "nested", "output_mode": "count" }),
     )
@@ -488,7 +488,7 @@ fn glob_and_grep_tools_cover_success_and_errors() {
     let grep_count_output: serde_json::Value = serde_json::from_str(&grep_count).expect("json");
     assert_eq!(grep_count_output["numMatches"], 3);
 
-    let grep_error = execute_tool(
+    let grep_error = execute_tool_str(
         "grep_search",
         &json!({ "pattern": "(alpha", "path": "nested" }),
     )
@@ -502,7 +502,7 @@ fn glob_and_grep_tools_cover_success_and_errors() {
 #[test]
 fn sleep_waits_and_reports_duration() {
     let started = std::time::Instant::now();
-    let result = execute_tool("Sleep", &json!({"duration_ms": 20})).expect("Sleep should succeed");
+    let result = execute_tool_str("Sleep", &json!({"duration_ms": 20})).expect("Sleep should succeed");
     let elapsed = started.elapsed();
     let output: serde_json::Value = serde_json::from_str(&result).expect("json");
     assert_eq!(output["duration_ms"], 20);
@@ -524,7 +524,7 @@ fn brief_returns_sent_message_and_attachment_metadata() {
     ));
     std::fs::write(&attachment, b"png-data").expect("write attachment");
 
-    let result = execute_tool(
+    let result = execute_tool_str(
         "SendUserMessage",
         &json!({
             "message": "hello user",
@@ -570,11 +570,11 @@ fn config_reads_and_writes_supported_values() {
     std::env::remove_var("CODINEER_CONFIG_HOME");
     std::env::set_current_dir(&cwd).expect("set cwd");
 
-    let get = execute_tool("Config", &json!({"setting": "verbose"})).expect("get config");
+    let get = execute_tool_str("Config", &json!({"setting": "verbose"})).expect("get config");
     let get_output: serde_json::Value = serde_json::from_str(&get).expect("json");
     assert_eq!(get_output["value"], false);
 
-    let set = execute_tool(
+    let set = execute_tool_str(
         "Config",
         &json!({"setting": "permissions.defaultMode", "value": "plan"}),
     )
@@ -583,7 +583,7 @@ fn config_reads_and_writes_supported_values() {
     assert_eq!(set_output["operation"], "set");
     assert_eq!(set_output["newValue"], "plan");
 
-    let invalid = execute_tool(
+    let invalid = execute_tool_str(
         "Config",
         &json!({"setting": "permissions.defaultMode", "value": "bogus"}),
     )
@@ -591,7 +591,7 @@ fn config_reads_and_writes_supported_values() {
     assert!(invalid.contains("Invalid value"));
 
     let unknown =
-        execute_tool("Config", &json!({"setting": "nope"})).expect("unknown setting result");
+        execute_tool_str("Config", &json!({"setting": "nope"})).expect("unknown setting result");
     let unknown_output: serde_json::Value = serde_json::from_str(&unknown).expect("json");
     assert_eq!(unknown_output["success"], false);
 
@@ -609,7 +609,7 @@ fn config_reads_and_writes_supported_values() {
 
 #[test]
 fn structured_output_echoes_input_payload() {
-    let result = execute_tool("StructuredOutput", &json!({"ok": true, "items": [1, 2, 3]}))
+    let result = execute_tool_str("StructuredOutput", &json!({"ok": true, "items": [1, 2, 3]}))
         .expect("StructuredOutput should succeed");
     let output: serde_json::Value = serde_json::from_str(&result).expect("json");
     assert_eq!(output["data"], "Structured output provided successfully");
@@ -628,7 +628,7 @@ fn repl_executes_python_code() {
         eprintln!("skipping: python3/python not found via command_exists");
         return;
     }
-    let result = execute_tool(
+    let result = execute_tool_str(
         "REPL",
         &json!({"language": "python", "code": "print(1 + 1)", "timeout_ms": 5000}),
     )
@@ -703,7 +703,7 @@ fn powershell_errors_when_shell_is_missing() {
     std::fs::create_dir_all(&empty_dir).expect("create empty dir");
     std::env::set_var("PATH", empty_dir.display().to_string());
 
-    let err = execute_tool("PowerShell", &json!({"command": "Write-Output hello"}))
+    let err = execute_tool_str("PowerShell", &json!({"command": "Write-Output hello"}))
         .expect_err("PowerShell should fail when shell is missing");
 
     std::env::set_var("PATH", original_path);

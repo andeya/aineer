@@ -3,6 +3,7 @@
 use std::fmt::{Display, Formatter};
 
 /// The scope / origin of a configuration entry.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ConfigSource {
     User,

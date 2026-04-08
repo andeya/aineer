@@ -41,6 +41,7 @@ impl ToolOutput {
 }
 
 /// Tool execution error.
+#[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
 pub enum ToolError {
     #[error("unsupported tool: {name}")]

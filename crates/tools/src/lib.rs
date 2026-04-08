@@ -1,11 +1,14 @@
 //! Built-in tool implementations for the Codineer agent runtime.
 
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use serde::Deserialize;
+use api::ToolDefinition;
 use serde_json::Value;
+
+use crate::builtin::BuiltinTool;
 
 use runtime::{
     edit_file, execute_bash, glob_search, grep_search, read_file, write_file, BashCommandInput,
@@ -34,9 +37,12 @@ pub use collab::{register_slash_command, SlashCommandHandler};
 pub use lsp_tool::initialize_lsp_manager;
 pub use mcp_resource::{register_mcp_resource, McpResource};
 pub use plan_mode::is_plan_mode;
-pub use registry::{GlobalToolRegistry, ToolManifestEntry, ToolRegistry, ToolSource, ToolSpec};
+pub use registry::{
+    GlobalToolRegistry, ToolManifestEntry, ToolRegistry, ToolSource, ToolSpec, ToolTier,
+};
 pub use specs::mvp_tool_specs;
-pub use types::ToolSearchInput;
+pub use tool_output::{ToolError, ToolOutput};
+pub use types::{AgentResult, ToolSearchHit, ToolSearchInput};
 
 #[cfg(test)]
 pub(crate) use agent::{
@@ -49,262 +55,27 @@ pub(crate) use types::AgentJob;
 
 use crate::types::{
     AskUserQuestionInput, AskUserQuestionOutput, BriefInput, BriefOutput, BriefStatus, ConfigInput,
-    CronCreateInput, CronDeleteInput, CronListInput, EditFileInput, EnterPlanModeInput,
-    EnterWorktreeInput, ExitPlanModeInput, ExitWorktreeInput, GlobSearchInputValue,
-    ListMcpResourcesInput, LspInput, McpSearchInput, MultiEditInput, MultiEditOutput,
-    NotebookEditInput, PowerShellInput, QuestionOption, ReadFileInput, ReadMcpResourceInput,
-    ReplInput, ReplOutput, ResolvedAttachment, SendMessageInput, SkillInput, SkillOutput,
-    SlashCommandInput, SleepInput, SleepOutput, StructuredOutputInput, StructuredOutputResult,
-    TaskCreateInput, TaskGetInput, TaskListInput, TaskStopInput, TaskUpdateInput, TeamCreateInput,
-    TeamDeleteInput, TodoItem, TodoStatus, TodoWriteInput, TodoWriteOutput, ToolSearchOutput,
-    UserQuestion, WebFetchInput, WebSearchInput, WriteFileInput,
+    EditFileInput, GlobSearchInputValue, MultiEditInput, MultiEditOutput, QuestionOption,
+    ReadFileInput, ReplInput, ReplOutput, ResolvedAttachment, SkillInput, SkillOutput, SleepInput,
+    SleepOutput, StructuredOutputInput, StructuredOutputResult, TodoItem, TodoStatus,
+    TodoWriteInput, TodoWriteOutput, ToolSearchOutput, UserQuestion, WriteFileInput,
 };
 
 #[must_use]
 #[allow(clippy::double_must_use)]
-pub fn execute_tool(name: &str, input: &Value) -> Result<String, String> {
-    // Try trait-based dispatch first (migrated tools)
+pub fn execute_tool(name: &str, input: Value) -> Result<ToolOutput, ToolError> {
     if let Some(tool) = builtin::find_builtin(name) {
-        return tool
-            .dispatch(input)
-            .map(|o| o.content)
-            .map_err(|e| e.to_string());
+        return tool.dispatch(input);
     }
-    // Fallback: legacy match (tools not yet migrated to BuiltinTool trait)
-    match name {
-        "bash" => from_value::<BashCommandInput>(input).and_then(run_bash),
-        "read_file" => from_value::<ReadFileInput>(input).and_then(run_read_file),
-        "write_file" => from_value::<WriteFileInput>(input).and_then(run_write_file),
-        "edit_file" => from_value::<EditFileInput>(input).and_then(run_edit_file),
-        "glob_search" => from_value::<GlobSearchInputValue>(input).and_then(run_glob_search),
-        "grep_search" => from_value::<GrepSearchInput>(input).and_then(run_grep_search),
-        "WebFetch" => from_value::<WebFetchInput>(input).and_then(run_web_fetch),
-        "WebSearch" => from_value::<WebSearchInput>(input).and_then(run_web_search),
-        "TodoWrite" => from_value::<TodoWriteInput>(input).and_then(run_todo_write),
-        "Skill" => from_value::<SkillInput>(input).and_then(run_skill),
-        "Agent" => from_value::<AgentInput>(input).and_then(run_agent),
-        "ToolSearch" => from_value::<ToolSearchInput>(input).and_then(run_tool_search),
-        "NotebookEdit" => from_value::<NotebookEditInput>(input).and_then(run_notebook_edit),
-        "SendUserMessage" | "Brief" => from_value::<BriefInput>(input).and_then(run_brief),
-        "Config" => from_value::<ConfigInput>(input).and_then(run_config),
-        "REPL" => from_value::<ReplInput>(input).and_then(run_repl),
-        "PowerShell" => from_value::<PowerShellInput>(input).and_then(run_powershell),
-        "MultiEdit" => from_value::<MultiEditInput>(input).and_then(run_multi_edit),
-        "AskUserQuestion" => {
-            from_value::<AskUserQuestionInput>(input).and_then(run_ask_user_question)
-        }
-        "Lsp" => from_value::<LspInput>(input).and_then(run_lsp),
-        "TaskCreate" => from_value::<TaskCreateInput>(input).and_then(run_task_create),
-        "TaskGet" => from_value::<TaskGetInput>(input).and_then(run_task_get),
-        "TaskList" => from_value::<TaskListInput>(input).and_then(run_task_list),
-        "TaskUpdate" => from_value::<TaskUpdateInput>(input).and_then(run_task_update),
-        "TaskStop" => from_value::<TaskStopInput>(input).and_then(run_task_stop),
-        "EnterPlanMode" => from_value::<EnterPlanModeInput>(input).and_then(run_enter_plan_mode),
-        "ExitPlanMode" => from_value::<ExitPlanModeInput>(input).and_then(run_exit_plan_mode),
-        "EnterWorktree" => from_value::<EnterWorktreeInput>(input).and_then(run_enter_worktree),
-        "ExitWorktree" => from_value::<ExitWorktreeInput>(input).and_then(run_exit_worktree),
-        "CronCreate" => from_value::<CronCreateInput>(input).and_then(run_cron_create),
-        "CronDelete" => from_value::<CronDeleteInput>(input).and_then(run_cron_delete),
-        "CronList" => from_value::<CronListInput>(input).and_then(run_cron_list),
-        "ListMcpResources" => {
-            from_value::<ListMcpResourcesInput>(input).and_then(run_list_mcp_resources)
-        }
-        "ReadMcpResource" => {
-            from_value::<ReadMcpResourceInput>(input).and_then(run_read_mcp_resource)
-        }
-        "MCPSearch" => from_value::<McpSearchInput>(input).and_then(run_mcp_search),
-        "TeamCreate" => from_value::<TeamCreateInput>(input).and_then(run_team_create),
-        "TeamDelete" => from_value::<TeamDeleteInput>(input).and_then(run_team_delete),
-        "SendMessage" => from_value::<SendMessageInput>(input).and_then(run_send_message),
-        "SlashCommand" => from_value::<SlashCommandInput>(input).and_then(run_slash_command),
-        _ => Err(format!("unsupported tool: {name}")),
-    }
+    Err(ToolError::Unsupported {
+        name: name.to_string(),
+    })
 }
 
-fn from_value<T: for<'de> Deserialize<'de>>(input: &Value) -> Result<T, String> {
-    serde_json::from_value(input.clone()).map_err(|error| error.to_string())
-}
-
-fn run_bash(input: BashCommandInput) -> Result<String, String> {
-    serde_json::to_string_pretty(&execute_bash(input).map_err(|error| error.to_string())?)
-        .map_err(|error| error.to_string())
-}
-
-#[allow(clippy::needless_pass_by_value)]
-fn run_read_file(input: ReadFileInput) -> Result<String, String> {
-    to_pretty_json(read_file(&input.path, input.offset, input.limit).map_err(io_to_string)?)
-}
-
-#[allow(clippy::needless_pass_by_value)]
-fn run_write_file(input: WriteFileInput) -> Result<String, String> {
-    to_pretty_json(write_file(&input.path, &input.content).map_err(io_to_string)?)
-}
-
-#[allow(clippy::needless_pass_by_value)]
-fn run_edit_file(input: EditFileInput) -> Result<String, String> {
-    to_pretty_json(
-        edit_file(
-            &input.path,
-            &input.old_string,
-            &input.new_string,
-            input.replace_all.unwrap_or(false),
-            input.last_modified_at,
-        )
-        .map_err(io_to_string)?,
-    )
-}
-
-#[allow(clippy::needless_pass_by_value)]
-fn run_glob_search(input: GlobSearchInputValue) -> Result<String, String> {
-    to_pretty_json(glob_search(&input.pattern, input.path.as_deref()).map_err(io_to_string)?)
-}
-
-#[allow(clippy::needless_pass_by_value)]
-fn run_grep_search(input: GrepSearchInput) -> Result<String, String> {
-    to_pretty_json(grep_search(&input).map_err(io_to_string)?)
-}
-
-#[allow(clippy::needless_pass_by_value)]
-fn run_web_fetch(input: WebFetchInput) -> Result<String, String> {
-    to_pretty_json(crate::web::execute_web_fetch(&input)?)
-}
-
-#[allow(clippy::needless_pass_by_value)]
-fn run_web_search(input: WebSearchInput) -> Result<String, String> {
-    to_pretty_json(crate::web::execute_web_search(&input)?)
-}
-
-fn run_todo_write(input: TodoWriteInput) -> Result<String, String> {
-    to_pretty_json(execute_todo_write(input)?)
-}
-
-fn run_skill(input: SkillInput) -> Result<String, String> {
-    to_pretty_json(execute_skill(input)?)
-}
-
-fn run_agent(input: AgentInput) -> Result<String, String> {
-    to_pretty_json(crate::agent::execute_agent(input)?)
-}
-
-fn run_tool_search(input: ToolSearchInput) -> Result<String, String> {
-    to_pretty_json(execute_tool_search(input))
-}
-
-fn run_notebook_edit(input: NotebookEditInput) -> Result<String, String> {
-    to_pretty_json(crate::notebook::execute_notebook_edit(input)?)
-}
-
-fn run_brief(input: BriefInput) -> Result<String, String> {
-    to_pretty_json(execute_brief(input)?)
-}
-
-fn run_config(input: ConfigInput) -> Result<String, String> {
-    to_pretty_json(crate::config_tool::execute_config(input)?)
-}
-
-fn run_repl(input: ReplInput) -> Result<String, String> {
-    to_pretty_json(execute_repl(input)?)
-}
-
-fn run_powershell(input: PowerShellInput) -> Result<String, String> {
-    to_pretty_json(crate::powershell::execute_powershell(input).map_err(|error| error.to_string())?)
-}
-
-fn run_multi_edit(input: MultiEditInput) -> Result<String, String> {
-    to_pretty_json(execute_multi_edit(input)?)
-}
-
-fn run_ask_user_question(input: AskUserQuestionInput) -> Result<String, String> {
-    to_pretty_json(execute_ask_user_question(input)?)
-}
-
-fn run_lsp(input: LspInput) -> Result<String, String> {
-    crate::lsp_tool::execute_lsp(input)
-}
-
-fn run_task_create(input: TaskCreateInput) -> Result<String, String> {
-    crate::task::execute_task_create(input)
-}
-
-fn run_task_get(input: TaskGetInput) -> Result<String, String> {
-    crate::task::execute_task_get(input)
-}
-
-fn run_task_list(input: TaskListInput) -> Result<String, String> {
-    crate::task::execute_task_list(input)
-}
-
-fn run_task_update(input: TaskUpdateInput) -> Result<String, String> {
-    crate::task::execute_task_update(input)
-}
-
-fn run_task_stop(input: TaskStopInput) -> Result<String, String> {
-    crate::task::execute_task_stop(input)
-}
-
-fn run_enter_plan_mode(input: EnterPlanModeInput) -> Result<String, String> {
-    crate::plan_mode::execute_enter_plan_mode(input)
-}
-
-fn run_exit_plan_mode(input: ExitPlanModeInput) -> Result<String, String> {
-    crate::plan_mode::execute_exit_plan_mode(input)
-}
-
-fn run_enter_worktree(input: EnterWorktreeInput) -> Result<String, String> {
-    crate::worktree::execute_enter_worktree(input)
-}
-
-fn run_exit_worktree(input: ExitWorktreeInput) -> Result<String, String> {
-    crate::worktree::execute_exit_worktree(input)
-}
-
-fn run_cron_create(input: CronCreateInput) -> Result<String, String> {
-    crate::cron::execute_cron_create(input)
-}
-
-fn run_cron_delete(input: CronDeleteInput) -> Result<String, String> {
-    crate::cron::execute_cron_delete(input)
-}
-
-fn run_cron_list(input: CronListInput) -> Result<String, String> {
-    crate::cron::execute_cron_list(input)
-}
-
-fn run_list_mcp_resources(input: ListMcpResourcesInput) -> Result<String, String> {
-    crate::mcp_resource::execute_list_mcp_resources(input)
-}
-
-fn run_read_mcp_resource(input: ReadMcpResourceInput) -> Result<String, String> {
-    crate::mcp_resource::execute_read_mcp_resource(input)
-}
-
-fn run_mcp_search(input: McpSearchInput) -> Result<String, String> {
-    crate::mcp_resource::execute_mcp_search(input)
-}
-
-fn run_team_create(input: TeamCreateInput) -> Result<String, String> {
-    crate::collab::execute_team_create(input)
-}
-
-fn run_team_delete(input: TeamDeleteInput) -> Result<String, String> {
-    crate::collab::execute_team_delete(input)
-}
-
-fn run_send_message(input: SendMessageInput) -> Result<String, String> {
-    crate::collab::execute_send_message(input)
-}
-
-fn run_slash_command(input: SlashCommandInput) -> Result<String, String> {
-    crate::collab::execute_slash_command(input)
-}
-
-fn to_pretty_json<T: serde::Serialize>(value: T) -> Result<String, String> {
-    serde_json::to_string_pretty(&value).map_err(|error| error.to_string())
-}
-
-#[allow(clippy::needless_pass_by_value)]
-fn io_to_string(error: std::io::Error) -> String {
-    error.to_string()
+pub(crate) fn to_pretty_json<T: serde::Serialize>(value: T) -> Result<ToolOutput, ToolError> {
+    serde_json::to_string_pretty(&value)
+        .map(ToolOutput::ok)
+        .map_err(Into::into)
 }
 
 fn execute_todo_write(input: TodoWriteInput) -> Result<TodoWriteOutput, String> {
@@ -438,42 +209,46 @@ fn resolve_skill_path(skill: &str) -> Result<std::path::PathBuf, String> {
     Err(format!("unknown skill: {requested}"))
 }
 
-fn execute_tool_search(input: ToolSearchInput) -> ToolSearchOutput {
-    execute_tool_search_with_context(input, None)
-}
-
-pub fn execute_tool_search_with_context(
-    input: ToolSearchInput,
-    pending_mcp_servers: Option<Vec<String>>,
-) -> ToolSearchOutput {
-    let deferred = deferred_tool_specs();
-    let max_results = input.max_results.unwrap_or(5).max(1);
-    let query = input.query.trim().to_string();
-    let normalized_query = normalize_tool_search_query(&query);
-    let matches = search_tool_specs(&query, max_results, &deferred);
-
-    ToolSearchOutput {
-        matches,
-        query,
-        normalized_query,
-        total_deferred_tools: deferred.len(),
-        pending_mcp_servers: pending_mcp_servers.filter(|servers| !servers.is_empty()),
-    }
-}
-
-fn deferred_tool_specs() -> Vec<ToolSpec> {
-    mvp_tool_specs()
+fn searchable_tool_hits(
+    extra_definitions: &[ToolDefinition],
+    allowed_tools: Option<&BTreeSet<String>>,
+) -> Vec<ToolSearchHit> {
+    let mut out: Vec<ToolSearchHit> = mvp_tool_specs()
         .into_iter()
-        .filter(|spec| {
-            !matches!(
-                spec.name,
-                "bash" | "read_file" | "write_file" | "edit_file" | "glob_search" | "grep_search"
-            )
+        .filter(|spec| spec.tier == ToolTier::Extended)
+        .filter(|spec| allowed_tools.is_none_or(|allowed| allowed.contains(spec.name)))
+        .map(|spec| ToolSearchHit {
+            name: spec.name.to_string(),
+            description: spec.description.to_string(),
         })
+        .collect();
+    for def in extra_definitions {
+        if !allowed_tools.is_none_or(|allowed| allowed.contains(&def.name)) {
+            continue;
+        }
+        out.push(ToolSearchHit {
+            name: def.name.clone(),
+            description: def.description.clone().unwrap_or_default(),
+        });
+    }
+    out
+}
+
+fn apply_category_filter(hits: &[ToolSearchHit], category: Option<&str>) -> Vec<ToolSearchHit> {
+    let Some(cat) = category.filter(|c| !c.trim().is_empty()) else {
+        return hits.to_vec();
+    };
+    let c = cat.to_ascii_lowercase();
+    hits.iter()
+        .filter(|h| {
+            h.name.to_ascii_lowercase().contains(&c)
+                || h.description.to_ascii_lowercase().contains(&c)
+        })
+        .cloned()
         .collect()
 }
 
-fn search_tool_specs(query: &str, max_results: usize, specs: &[ToolSpec]) -> Vec<String> {
+fn search_tool_hits(query: &str, max_results: usize, hits: &[ToolSearchHit]) -> Vec<ToolSearchHit> {
     if query.trim().is_empty() {
         return Vec::new();
     }
@@ -485,10 +260,9 @@ fn search_tool_specs(query: &str, max_results: usize, specs: &[ToolSpec]) -> Vec
             .filter(|part| !part.is_empty())
             .filter_map(|wanted| {
                 let wanted = canonical_tool_token(wanted);
-                specs
-                    .iter()
-                    .find(|spec| canonical_tool_token(spec.name) == wanted)
-                    .map(|spec| spec.name.to_string())
+                hits.iter()
+                    .find(|h| canonical_tool_token(&h.name) == wanted)
+                    .cloned()
             })
             .take(max_results)
             .collect();
@@ -505,22 +279,19 @@ fn search_tool_specs(query: &str, max_results: usize, specs: &[ToolSpec]) -> Vec
             optional.push(term);
         }
     }
-    let terms = if required.is_empty() {
+    let terms: Vec<&str> = if required.is_empty() {
         optional.clone()
     } else {
         required.iter().chain(optional.iter()).copied().collect()
     };
 
-    let mut scored = specs
+    let mut scored = hits
         .iter()
-        .filter_map(|spec| {
-            let name = spec.name.to_lowercase();
-            let canonical_name = canonical_tool_token(spec.name);
-            let normalized_description = normalize_tool_search_query(spec.description);
-            let haystack = format!(
-                "{name} {} {canonical_name}",
-                spec.description.to_lowercase()
-            );
+        .filter_map(|hit| {
+            let name = hit.name.to_lowercase();
+            let canonical_name = canonical_tool_token(&hit.name);
+            let normalized_description = normalize_tool_search_query(&hit.description);
+            let haystack = format!("{name} {} {canonical_name}", hit.description.to_lowercase());
             let normalized_haystack = format!("{canonical_name} {normalized_description}");
             if required.iter().any(|term| !haystack.contains(term)) {
                 return None;
@@ -549,16 +320,52 @@ fn search_tool_specs(query: &str, max_results: usize, specs: &[ToolSpec]) -> Vec
             if score == 0 && !lowered.is_empty() {
                 return None;
             }
-            Some((score, spec.name.to_string()))
+            Some((score, hit.clone()))
         })
         .collect::<Vec<_>>();
 
-    scored.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
+    scored.sort_by(|left, right| {
+        right
+            .0
+            .cmp(&left.0)
+            .then_with(|| left.1.name.cmp(&right.1.name))
+    });
     scored
         .into_iter()
-        .map(|(_, name)| name)
+        .map(|(_, hit)| hit)
         .take(max_results)
         .collect()
+}
+
+/// Search built-ins (extended tier), plugins, and MCP tools. Used by [`crate::builtin::ToolSearchTool`]
+/// with empty `extra_definitions` when no registry context exists.
+pub fn execute_tool_search_with_context(
+    input: ToolSearchInput,
+    pending_mcp_servers: Option<Vec<String>>,
+    extra_definitions: &[ToolDefinition],
+    allowed_tools: Option<&BTreeSet<String>>,
+) -> ToolSearchOutput {
+    let corpus = searchable_tool_hits(extra_definitions, allowed_tools);
+    let max_results = input.max_results.unwrap_or(5).max(1);
+    let query = input.query.trim().to_string();
+    let normalized_query = normalize_tool_search_query(&query);
+    let category = input
+        .category
+        .as_ref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty());
+    let filtered = apply_category_filter(&corpus, category);
+    let hits = search_tool_hits(&query, max_results, &filtered);
+    let matches: Vec<String> = hits.iter().map(|h| h.name.clone()).collect();
+
+    ToolSearchOutput {
+        matches,
+        hits,
+        query,
+        normalized_query,
+        total_deferred_tools: corpus.len(),
+        pending_mcp_servers: pending_mcp_servers.filter(|servers| !servers.is_empty()),
+    }
 }
 
 fn normalize_tool_search_query(query: &str) -> String {
@@ -879,6 +686,202 @@ pub(crate) fn kill_process(pid: u32) {
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// BuiltinTool adapters (registered in `builtin::BUILTIN_TOOLS`)
+// ---------------------------------------------------------------------------
+
+pub(crate) struct BashTool;
+
+impl BuiltinTool for BashTool {
+    const NAME: &'static str = "bash";
+    type Input = BashCommandInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        execute_bash(input)
+            .map(|o| ToolOutput::ok(serde_json::to_string_pretty(&o).unwrap_or_default()))
+            .map_err(ToolError::Io)
+    }
+}
+
+pub(crate) struct ReadFileTool;
+
+impl BuiltinTool for ReadFileTool {
+    const NAME: &'static str = "read_file";
+    type Input = ReadFileInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        to_pretty_json(read_file(&input.path, input.offset, input.limit).map_err(ToolError::Io)?)
+    }
+
+    fn is_concurrency_safe(_input: &Self::Input) -> bool {
+        true
+    }
+}
+
+pub(crate) struct WriteFileTool;
+
+impl BuiltinTool for WriteFileTool {
+    const NAME: &'static str = "write_file";
+    type Input = WriteFileInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        to_pretty_json(write_file(&input.path, &input.content).map_err(ToolError::Io)?)
+    }
+}
+
+pub(crate) struct EditFileTool;
+
+impl BuiltinTool for EditFileTool {
+    const NAME: &'static str = "edit_file";
+    type Input = EditFileInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        to_pretty_json(
+            edit_file(
+                &input.path,
+                &input.old_string,
+                &input.new_string,
+                input.replace_all.unwrap_or(false),
+                input.last_modified_at,
+            )
+            .map_err(ToolError::Io)?,
+        )
+    }
+}
+
+pub(crate) struct GlobSearchTool;
+
+impl BuiltinTool for GlobSearchTool {
+    const NAME: &'static str = "glob_search";
+    type Input = GlobSearchInputValue;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        to_pretty_json(glob_search(&input.pattern, input.path.as_deref()).map_err(ToolError::Io)?)
+    }
+
+    fn is_concurrency_safe(_input: &Self::Input) -> bool {
+        true
+    }
+}
+
+pub(crate) struct GrepSearchTool;
+
+impl BuiltinTool for GrepSearchTool {
+    const NAME: &'static str = "grep_search";
+    type Input = GrepSearchInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        to_pretty_json(grep_search(&input).map_err(ToolError::Io)?)
+    }
+
+    fn is_concurrency_safe(_input: &Self::Input) -> bool {
+        true
+    }
+}
+
+pub(crate) struct TodoWriteTool;
+
+impl BuiltinTool for TodoWriteTool {
+    const NAME: &'static str = "TodoWrite";
+    type Input = TodoWriteInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        to_pretty_json(execute_todo_write(input).map_err(ToolError::execution)?)
+    }
+}
+
+pub(crate) struct SkillTool;
+
+impl BuiltinTool for SkillTool {
+    const NAME: &'static str = "Skill";
+    type Input = SkillInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        to_pretty_json(execute_skill(input).map_err(ToolError::execution)?)
+    }
+
+    fn is_concurrency_safe(_input: &Self::Input) -> bool {
+        true
+    }
+}
+
+pub(crate) struct AgentTool;
+
+impl BuiltinTool for AgentTool {
+    const NAME: &'static str = "Agent";
+    type Input = AgentInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        to_pretty_json(crate::agent::execute_agent(input).map_err(ToolError::execution)?)
+    }
+}
+
+pub(crate) struct BriefTool;
+
+impl BuiltinTool for BriefTool {
+    const NAME: &'static str = "Brief";
+    type Input = BriefInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        to_pretty_json(execute_brief(input).map_err(ToolError::execution)?)
+    }
+}
+
+pub(crate) struct SendUserMessageTool;
+
+impl BuiltinTool for SendUserMessageTool {
+    const NAME: &'static str = "SendUserMessage";
+    type Input = BriefInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        to_pretty_json(execute_brief(input).map_err(ToolError::execution)?)
+    }
+}
+
+pub(crate) struct ConfigTool;
+
+impl BuiltinTool for ConfigTool {
+    const NAME: &'static str = "Config";
+    type Input = ConfigInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        to_pretty_json(crate::config_tool::execute_config(input).map_err(ToolError::execution)?)
+    }
+}
+
+pub(crate) struct ReplTool;
+
+impl BuiltinTool for ReplTool {
+    const NAME: &'static str = "REPL";
+    type Input = ReplInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        to_pretty_json(execute_repl(input).map_err(ToolError::execution)?)
+    }
+}
+
+pub(crate) struct MultiEditTool;
+
+impl BuiltinTool for MultiEditTool {
+    const NAME: &'static str = "MultiEdit";
+    type Input = MultiEditInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        to_pretty_json(execute_multi_edit(input).map_err(ToolError::execution)?)
+    }
+}
+
+pub(crate) struct AskUserQuestionTool;
+
+impl BuiltinTool for AskUserQuestionTool {
+    const NAME: &'static str = "AskUserQuestion";
+    type Input = AskUserQuestionInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        to_pretty_json(execute_ask_user_question(input).map_err(ToolError::execution)?)
     }
 }
 

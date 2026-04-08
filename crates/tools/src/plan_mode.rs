@@ -6,6 +6,8 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use crate::builtin::BuiltinTool;
+use crate::tool_output::{ToolError, ToolOutput};
 use crate::types::{EnterPlanModeInput, ExitPlanModeInput};
 
 /// Global plan-mode flag.  True while the model is constrained to read-only
@@ -34,6 +36,36 @@ pub(crate) fn execute_exit_plan_mode(_input: ExitPlanModeInput) -> Result<String
         return Ok("Plan mode was not active. No change.".to_string());
     }
     Ok("Plan mode deactivated. Normal execution mode restored.".to_string())
+}
+
+// ---------------------------------------------------------------------------
+// BuiltinTool adapters
+// ---------------------------------------------------------------------------
+
+pub(crate) struct EnterPlanModeTool;
+
+impl BuiltinTool for EnterPlanModeTool {
+    const NAME: &'static str = "EnterPlanMode";
+    type Input = EnterPlanModeInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        execute_enter_plan_mode(input)
+            .map(ToolOutput::ok)
+            .map_err(ToolError::execution)
+    }
+}
+
+pub(crate) struct ExitPlanModeTool;
+
+impl BuiltinTool for ExitPlanModeTool {
+    const NAME: &'static str = "ExitPlanMode";
+    type Input = ExitPlanModeInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        execute_exit_plan_mode(input)
+            .map(ToolOutput::ok)
+            .map_err(ToolError::execution)
+    }
 }
 
 #[cfg(test)]

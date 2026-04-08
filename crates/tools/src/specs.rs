@@ -1,7 +1,7 @@
 use runtime::PermissionMode;
 use serde_json::json;
 
-use crate::registry::ToolSpec;
+use crate::registry::{ToolSpec, ToolTier};
 
 #[must_use]
 #[allow(clippy::too_many_lines)]
@@ -33,6 +33,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::DangerFullAccess,
+            tier: ToolTier::Core,
         },
         ToolSpec {
             name: "read_file",
@@ -48,6 +49,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::ReadOnly,
+            tier: ToolTier::Core,
         },
         ToolSpec {
             name: "write_file",
@@ -62,6 +64,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::WorkspaceWrite,
+            tier: ToolTier::Core,
         },
         ToolSpec {
             name: "edit_file",
@@ -82,6 +85,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::WorkspaceWrite,
+            tier: ToolTier::Core,
         },
         ToolSpec {
             name: "glob_search",
@@ -96,6 +100,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::ReadOnly,
+            tier: ToolTier::Core,
         },
         ToolSpec {
             name: "grep_search",
@@ -171,6 +176,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::ReadOnly,
+            tier: ToolTier::Core,
         },
         ToolSpec {
             name: "WebFetch",
@@ -186,6 +192,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::ReadOnly,
+            tier: ToolTier::Extended,
         },
         ToolSpec {
             name: "WebSearch",
@@ -207,6 +214,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::ReadOnly,
+            tier: ToolTier::Extended,
         },
         ToolSpec {
             name: "TodoWrite",
@@ -235,6 +243,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::WorkspaceWrite,
+            tier: ToolTier::Extended,
         },
         ToolSpec {
             name: "Skill",
@@ -249,6 +258,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::ReadOnly,
+            tier: ToolTier::Extended,
         },
         ToolSpec {
             name: "Agent",
@@ -266,20 +276,24 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::DangerFullAccess,
+            tier: ToolTier::Extended,
         },
         ToolSpec {
             name: "ToolSearch",
-            description: "Search for deferred or specialized tools by exact name or keywords.",
+            description: "Search for deferred or specialized tools by exact name or keywords. \
+                Includes MCP tools when available.",
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "query": { "type": "string" },
+                    "category": { "type": "string", "description": "Optional substring filter on tool name or description." },
                     "max_results": { "type": "integer", "minimum": 1 }
                 },
                 "required": ["query"],
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::ReadOnly,
+            tier: ToolTier::Core,
         },
         ToolSpec {
             name: "NotebookEdit",
@@ -297,6 +311,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::WorkspaceWrite,
+            tier: ToolTier::Extended,
         },
         ToolSpec {
             name: "Sleep",
@@ -310,6 +325,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::ReadOnly,
+            tier: ToolTier::Extended,
         },
         ToolSpec {
             name: "SendUserMessage",
@@ -331,6 +347,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::ReadOnly,
+            tier: ToolTier::Extended,
         },
         ToolSpec {
             name: "Config",
@@ -347,6 +364,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::WorkspaceWrite,
+            tier: ToolTier::Extended,
         },
         ToolSpec {
             name: "StructuredOutput",
@@ -356,6 +374,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": true
             }),
             required_permission: PermissionMode::ReadOnly,
+            tier: ToolTier::Extended,
         },
         ToolSpec {
             name: "REPL",
@@ -371,6 +390,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::DangerFullAccess,
+            tier: ToolTier::Extended,
         },
         ToolSpec {
             name: "PowerShell",
@@ -387,6 +407,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::DangerFullAccess,
+            tier: ToolTier::Extended,
         },
         ToolSpec {
             name: "MultiEdit",
@@ -414,6 +435,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::WorkspaceWrite,
+            tier: ToolTier::Extended,
         },
         ToolSpec {
             name: "AskUserQuestion",
@@ -456,6 +478,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::ReadOnly,
+            tier: ToolTier::Extended,
         },
         ToolSpec {
             name: "Lsp",
@@ -518,6 +541,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::ReadOnly,
+            tier: ToolTier::Extended,
         },
         ToolSpec {
             name: "TaskCreate",
@@ -544,6 +568,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::DangerFullAccess,
+            tier: ToolTier::Extended,
         },
         ToolSpec {
             name: "TaskGet",
@@ -565,6 +590,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::ReadOnly,
+            tier: ToolTier::Extended,
         },
         ToolSpec {
             name: "TaskList",
@@ -581,6 +607,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::ReadOnly,
+            tier: ToolTier::Extended,
         },
         ToolSpec {
             name: "TaskUpdate",
@@ -600,6 +627,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::WorkspaceWrite,
+            tier: ToolTier::Extended,
         },
         ToolSpec {
             name: "TaskStop",
@@ -613,6 +641,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::DangerFullAccess,
+            tier: ToolTier::Extended,
         },
         ToolSpec {
             name: "EnterPlanMode",
@@ -626,6 +655,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::ReadOnly,
+            tier: ToolTier::Extended,
         },
         ToolSpec {
             name: "ExitPlanMode",
@@ -637,6 +667,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::ReadOnly,
+            tier: ToolTier::Extended,
         },
         ToolSpec {
             name: "TeamCreate",
@@ -658,6 +689,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::WorkspaceWrite,
+            tier: ToolTier::Extended,
         },
         ToolSpec {
             name: "TeamDelete",
@@ -671,6 +703,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::WorkspaceWrite,
+            tier: ToolTier::Extended,
         },
         ToolSpec {
             name: "SendMessage",
@@ -693,6 +726,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::DangerFullAccess,
+            tier: ToolTier::Extended,
         },
         ToolSpec {
             name: "SlashCommand",
@@ -714,6 +748,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::DangerFullAccess,
+            tier: ToolTier::Extended,
         },
         ToolSpec {
             name: "ListMcpResources",
@@ -730,6 +765,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::ReadOnly,
+            tier: ToolTier::Extended,
         },
         ToolSpec {
             name: "ReadMcpResource",
@@ -746,6 +782,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::ReadOnly,
+            tier: ToolTier::Extended,
         },
         ToolSpec {
             name: "MCPSearch",
@@ -763,6 +800,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::ReadOnly,
+            tier: ToolTier::Extended,
         },
         ToolSpec {
             name: "CronCreate",
@@ -789,6 +827,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::DangerFullAccess,
+            tier: ToolTier::Extended,
         },
         ToolSpec {
             name: "CronDelete",
@@ -805,6 +844,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::DangerFullAccess,
+            tier: ToolTier::Extended,
         },
         ToolSpec {
             name: "CronList",
@@ -820,6 +860,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::ReadOnly,
+            tier: ToolTier::Extended,
         },
         ToolSpec {
             name: "EnterWorktree",
@@ -843,6 +884,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::WorkspaceWrite,
+            tier: ToolTier::Extended,
         },
         ToolSpec {
             name: "ExitWorktree",
@@ -860,6 +902,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::WorkspaceWrite,
+            tier: ToolTier::Extended,
         },
     ]
 }

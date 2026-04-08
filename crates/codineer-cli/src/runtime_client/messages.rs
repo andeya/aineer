@@ -15,6 +15,7 @@ pub(crate) fn convert_messages(messages: &[ConversationMessage]) -> Vec<InputMes
                 | runtime::MessageRole::User
                 | runtime::MessageRole::Tool => "user",
                 runtime::MessageRole::Assistant => "assistant",
+                _ => "user",
             };
             let content = message
                 .blocks
@@ -48,6 +49,10 @@ pub(crate) fn convert_messages(messages: &[ConversationMessage]) -> Vec<InputMes
                             text: output.clone(),
                         }],
                         is_error: *is_error,
+                        cache_control: None,
+                    },
+                    _ => InputContentBlock::Text {
+                        text: String::new(),
                         cache_control: None,
                     },
                 })

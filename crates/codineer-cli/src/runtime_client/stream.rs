@@ -51,35 +51,31 @@ impl StreamState {
                 )?;
             }
             ApiStreamEvent::ContentBlockDelta(delta) => match delta.delta {
-                ContentBlockDelta::TextDelta { text } => {
-                    if !text.is_empty() {
-                        if let Some(reporter) = progress {
-                            reporter.mark_text_phase(&text);
-                        }
-                        if let Some(rendered) = self.markdown_stream.push(&self.renderer, &text) {
-                            write_flush(out, &rendered)?;
-                        }
-                        self.events.push(AssistantEvent::TextDelta(text));
+                ContentBlockDelta::TextDelta { text } if !text.is_empty() => {
+                    if let Some(reporter) = progress {
+                        reporter.mark_text_phase(&text);
                     }
+                    if let Some(rendered) = self.markdown_stream.push(&self.renderer, &text) {
+                        write_flush(out, &rendered)?;
+                    }
+                    self.events.push(AssistantEvent::TextDelta(text));
                 }
                 ContentBlockDelta::InputJsonDelta { partial_json } => {
                     if let Some((_, _, input)) = &mut self.pending_tool {
                         input.push_str(&partial_json);
                     }
                 }
-                ContentBlockDelta::ThinkingDelta { thinking } => {
-                    if !thinking.is_empty() {
-                        if let Some(reporter) = progress {
-                            reporter.mark_text_phase(&thinking);
-                        }
-                        if let Some(rendered) = self.markdown_stream.push(&self.renderer, &thinking)
-                        {
-                            write_flush(out, &rendered)?;
-                        }
-                        self.events.push(AssistantEvent::TextDelta(thinking));
+                ContentBlockDelta::ThinkingDelta { thinking } if !thinking.is_empty() => {
+                    if let Some(reporter) = progress {
+                        reporter.mark_text_phase(&thinking);
                     }
+                    if let Some(rendered) = self.markdown_stream.push(&self.renderer, &thinking) {
+                        write_flush(out, &rendered)?;
+                    }
+                    self.events.push(AssistantEvent::TextDelta(thinking));
                 }
                 ContentBlockDelta::SignatureDelta { .. } => {}
+                _ => {}
             },
             ApiStreamEvent::ContentBlockStop(_) => {
                 if let Some(rendered) = self.markdown_stream.flush(&self.renderer) {
@@ -112,6 +108,7 @@ impl StreamState {
                 }
                 self.events.push(AssistantEvent::MessageStop);
             }
+            _ => {}
         }
         Ok(())
     }
@@ -144,7 +141,7 @@ pub(super) async fn stream_with_client(
     let mut stream = client
         .stream_message(message_request)
         .await
-        .map_err(|error| RuntimeError::new(error.to_string()))?;
+        .map_err(api::ApiError::into_runtime_error)?;
     let (gf, gc) = crate::render::gutter_prefixes();
     let mut gutter = crate::render::GutterWriter::new(std::io::stdout(), gf, gc);
     let mut sink = std::io::sink();
@@ -153,7 +150,7 @@ pub(super) async fn stream_with_client(
     while let Some(event) = stream
         .next_event()
         .await
-        .map_err(|error| RuntimeError::new(error.to_string()))?
+        .map_err(api::ApiError::into_runtime_error)?
     {
         state.handle_event(event, progress, out)?;
     }
@@ -175,7 +172,7 @@ pub(super) async fn stream_with_client(
             ..message_request.clone()
         })
         .await
-        .map_err(|error| RuntimeError::new(error.to_string()))?;
+        .map_err(api::ApiError::into_runtime_error)?;
     response_to_events(response, out)
 }
 
@@ -187,14 +184,12 @@ pub(crate) fn push_output_block(
     streaming_tool_input: bool,
 ) -> Result<(), RuntimeError> {
     match block {
-        OutputContentBlock::Text { text } => {
-            if !text.is_empty() {
-                let rendered = TerminalRenderer::new().render_markdown(&text);
-                write!(out, "{rendered}")
-                    .and_then(|()| out.flush())
-                    .map_err(|error| RuntimeError::new(error.to_string()))?;
-                events.push(AssistantEvent::TextDelta(text));
-            }
+        OutputContentBlock::Text { text } if !text.is_empty() => {
+            let rendered = TerminalRenderer::new().render_markdown(&text);
+            write!(out, "{rendered}")
+                .and_then(|()| out.flush())
+                .map_err(|error| RuntimeError::new(error.to_string()))?;
+            events.push(AssistantEvent::TextDelta(text));
         }
         OutputContentBlock::ToolUse { id, name, input } => {
             let initial_input = if streaming_tool_input
@@ -206,16 +201,15 @@ pub(crate) fn push_output_block(
             };
             *pending_tool = Some((id, name, initial_input));
         }
-        OutputContentBlock::Thinking { thinking, .. } => {
-            if !thinking.is_empty() {
-                let rendered = TerminalRenderer::new().render_markdown(&thinking);
-                write!(out, "{rendered}")
-                    .and_then(|()| out.flush())
-                    .map_err(|error| RuntimeError::new(error.to_string()))?;
-                events.push(AssistantEvent::TextDelta(thinking));
-            }
+        OutputContentBlock::Thinking { thinking, .. } if !thinking.is_empty() => {
+            let rendered = TerminalRenderer::new().render_markdown(&thinking);
+            write!(out, "{rendered}")
+                .and_then(|()| out.flush())
+                .map_err(|error| RuntimeError::new(error.to_string()))?;
+            events.push(AssistantEvent::TextDelta(thinking));
         }
         OutputContentBlock::RedactedThinking { .. } => {}
+        _ => {}
     }
     Ok(())
 }

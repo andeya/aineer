@@ -6,30 +6,9 @@ pub use claude_code::ClaudeCodeResolver;
 pub use env_resolver::EnvVarResolver;
 pub use oauth_resolver::CodineerOAuthResolver;
 
+pub use codineer_core::{CredentialStatus, ResolvedCredential};
+
 use std::fmt;
-
-/// A successfully resolved credential ready for use in API requests.
-#[derive(Clone, PartialEq, Eq)]
-pub enum ResolvedCredential {
-    ApiKey(String),
-    BearerToken(String),
-    ApiKeyAndBearer {
-        api_key: String,
-        bearer_token: String,
-    },
-}
-
-impl fmt::Debug for ResolvedCredential {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::ApiKey(_) => write!(f, "ResolvedCredential::ApiKey(***)"),
-            Self::BearerToken(_) => write!(f, "ResolvedCredential::BearerToken(***)"),
-            Self::ApiKeyAndBearer { .. } => {
-                write!(f, "ResolvedCredential::ApiKeyAndBearer(***)")
-            }
-        }
-    }
-}
 
 /// Error type for credential resolution.
 #[derive(Debug)]
@@ -110,15 +89,6 @@ pub trait CredentialResolver: fmt::Debug + Send + Sync {
     fn logout(&self) -> Result<(), Box<dyn std::error::Error>> {
         Err("logout not supported by this credential source".into())
     }
-}
-
-/// Status snapshot of a single resolver in the chain.
-#[derive(Debug, Clone)]
-pub struct CredentialStatus {
-    pub id: String,
-    pub display_name: String,
-    pub available: bool,
-    pub supports_login: bool,
 }
 
 /// An ordered chain of credential resolvers for a single provider.

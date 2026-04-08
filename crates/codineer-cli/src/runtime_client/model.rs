@@ -118,10 +118,11 @@ impl<'a> ModelResolver<'a> {
             if !provider_cfg.headers.is_empty() {
                 c = c.with_custom_headers(provider_cfg.headers.clone());
             }
-            c
+            c.with_gemini_cache_config(self.config.gemini_cache().clone())
         } else if let Some(preset) = api::builtin_preset(&lower) {
             let api_key = resolve_preset_api_key(preset, self.config)?;
             OpenAiCompatClient::new_custom(preset.base_url, api_key)
+                .with_gemini_cache_config(self.config.gemini_cache().clone())
         } else {
             return Err(format!(
                 "unknown provider '{provider_name}'\n\n\

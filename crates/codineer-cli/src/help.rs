@@ -356,18 +356,18 @@ fn suggest_repl_commands(name: &str) -> Vec<String> {
 }
 
 /// Suggest the closest CLI subcommand for a typo'd input.
-pub fn suggest_subcommand(input: &str) -> Option<String> {
-    use crate::cli::subcommand_names;
-    let names = subcommand_names();
+pub fn suggest_subcommand(input: &str) -> Option<&'static str> {
+    use crate::cli::subcommand_names_static;
+    let names = subcommand_names_static();
     let normalized = input.to_ascii_lowercase();
-    let mut best: Option<(usize, String)> = None;
-    for cmd in &names {
+    let mut best: Option<(usize, usize)> = None;
+    for (i, cmd) in names.iter().enumerate() {
         let d = edit_distance(&normalized, cmd);
-        if d <= 2 && (best.is_none() || d < best.as_ref().unwrap().0) {
-            best = Some((d, cmd.clone()));
+        if d <= 2 && best.as_ref().is_none_or(|(best_d, _)| d < *best_d) {
+            best = Some((d, i));
         }
     }
-    best.map(|(_, cmd)| cmd)
+    best.and_then(|(_, i)| names.get(i).copied())
 }
 
 fn edit_distance(left: &str, right: &str) -> usize {

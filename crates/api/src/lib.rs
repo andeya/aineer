@@ -1,5 +1,6 @@
 //! Anthropic and OpenAI-compatible API client with streaming support.
 
+mod cache_strategy;
 mod client;
 mod error;
 mod providers;
@@ -14,6 +15,9 @@ fn default_http_client() -> reqwest::Client {
         .unwrap_or_default()
 }
 
+pub use cache_strategy::{
+    is_gemini_model, GeminiCacheStrategy, NoCacheStrategy, ProviderCacheStrategy,
+};
 pub use client::{
     read_base_url, read_xai_base_url, resolve_saved_oauth_token, resolve_startup_auth_source,
     MessageStream, OAuthTokenSet, ProviderClient,
@@ -28,9 +32,10 @@ pub use providers::{
 };
 pub use sse::{parse_frame, SseParser};
 pub use types::{
-    BlockKind, CacheControl, CacheScope, CacheType, ContentBlockDelta, ContentBlockDeltaEvent,
-    ContentBlockStartEvent, ContentBlockStopEvent, ImageSource, InputContentBlock, InputMessage,
-    MessageDelta, MessageDeltaEvent, MessageRequest, MessageResponse, MessageStartEvent,
-    MessageStopEvent, OutputContentBlock, StreamEvent, SystemBlock, ThinkingConfig, ThinkingMode,
-    ToolChoice, ToolDefinition, ToolResultContentBlock, Usage,
+    gemini_cache_key_hash, BlockKind, CacheControl, CacheScope, CacheType, ContentBlockDelta,
+    ContentBlockDeltaEvent, ContentBlockStartEvent, ContentBlockStopEvent, GeminiCachedContent,
+    ImageSource, InputContentBlock, InputMessage, MessageDelta, MessageDeltaEvent, MessageRequest,
+    MessageResponse, MessageStartEvent, MessageStopEvent, OutputContentBlock, StreamEvent,
+    SystemBlock, ThinkingConfig, ThinkingMode, ToolChoice, ToolDefinition, ToolResultContentBlock,
+    Usage,
 };

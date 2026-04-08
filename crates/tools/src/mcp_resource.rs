@@ -10,6 +10,8 @@ use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 
+use crate::builtin::BuiltinTool;
+use crate::tool_output::{ToolError, ToolOutput};
 use crate::types::{ListMcpResourcesInput, McpSearchInput, ReadMcpResourceInput};
 
 // ── Registry ──────────────────────────────────────────────────────────────────
@@ -49,11 +51,12 @@ fn registry() -> &'static Mutex<Registry> {
 }
 
 /// Register (or update) a resource programmatically.
-pub fn register_mcp_resource(resource: McpResource) {
+pub fn register_mcp_resource(resource: McpResource) -> Result<(), String> {
     registry()
         .lock()
-        .expect("mcp registry poisoned")
+        .map_err(|_| "mcp tool registry poisoned".to_string())?
         .insert(resource.uri.clone(), resource);
+    Ok(())
 }
 
 // ── Tool implementations ──────────────────────────────────────────────────────
@@ -160,6 +163,61 @@ pub(crate) fn execute_mcp_search(input: McpSearchInput) -> Result<String, String
     serde_json::to_string_pretty(&results).map_err(|e| format!("serialization error: {e}"))
 }
 
+// ---------------------------------------------------------------------------
+// BuiltinTool adapters
+// ---------------------------------------------------------------------------
+
+pub(crate) struct ListMcpResourcesTool;
+
+impl BuiltinTool for ListMcpResourcesTool {
+    const NAME: &'static str = "ListMcpResources";
+    type Input = ListMcpResourcesInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        execute_list_mcp_resources(input)
+            .map(ToolOutput::ok)
+            .map_err(ToolError::execution)
+    }
+
+    fn is_concurrency_safe(_input: &Self::Input) -> bool {
+        true
+    }
+}
+
+pub(crate) struct ReadMcpResourceTool;
+
+impl BuiltinTool for ReadMcpResourceTool {
+    const NAME: &'static str = "ReadMcpResource";
+    type Input = ReadMcpResourceInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        execute_read_mcp_resource(input)
+            .map(ToolOutput::ok)
+            .map_err(ToolError::execution)
+    }
+
+    fn is_concurrency_safe(_input: &Self::Input) -> bool {
+        true
+    }
+}
+
+pub(crate) struct McpSearchTool;
+
+impl BuiltinTool for McpSearchTool {
+    const NAME: &'static str = "MCPSearch";
+    type Input = McpSearchInput;
+
+    fn execute(input: Self::Input) -> Result<ToolOutput, ToolError> {
+        execute_mcp_search(input)
+            .map(ToolOutput::ok)
+            .map_err(ToolError::execution)
+    }
+
+    fn is_concurrency_safe(_input: &Self::Input) -> bool {
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,7 +230,8 @@ mod tests {
             description: Some(format!("desc for {name}")),
             mime_type: Some("text/plain".to_string()),
             content: content.to_string(),
-        });
+        })
+        .unwrap();
     }
 
     #[test]

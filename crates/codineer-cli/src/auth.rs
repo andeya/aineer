@@ -48,6 +48,7 @@ fn provider_display_name(kind: ProviderKind) -> &'static str {
         ProviderKind::Xai => "xAI",
         ProviderKind::OpenAi => "OpenAI",
         ProviderKind::Custom => "Custom",
+        _ => "Unknown",
     }
 }
 
@@ -79,6 +80,7 @@ pub fn build_credential_chain(kind: ProviderKind, config: &RuntimeConfig) -> Cre
             CredentialChain::new("OpenAI", vec![Box::new(EnvVarResolver::openai())])
         }
         ProviderKind::Custom => CredentialChain::empty("Custom"),
+        _ => CredentialChain::empty("Unknown"),
     }
 }
 
@@ -244,6 +246,7 @@ pub fn run_status(provider: Option<&str>) -> CliResult<()> {
                     runtime::ResolvedCredential::ApiKey(_) => "API key",
                     runtime::ResolvedCredential::BearerToken(_) => "Bearer token",
                     runtime::ResolvedCredential::ApiKeyAndBearer { .. } => "API key + Bearer token",
+                    _ => "credentials",
                 };
                 println!("  Active: {label}");
             }
