@@ -43,6 +43,10 @@
 | **Git 工作流**（/commit、/pr、/diff、/branch）                                    |   **内置**   |   通过工具   |    通过工具     |  自动提交  |
 | **Vim 模式**                                                                      |   **支持**   |    不支持    |     不支持      |   不支持   |
 | **CI/CD 就绪**（JSON 输出、工具白名单）                                           |   **支持**   |     支持     |      支持       |    有限    |
+| **上下文缓存**（Gemini cachedContents、Anthropic prompt cache）                   |   **支持**   | 仅 Anthropic |     不支持      |   不支持   |
+| **基于模型的压缩**（LLM 总结历史上下文）                                          |   **支持**   |     支持     |     不支持      |   不支持   |
+| **流式工具执行**（并行工具、兄弟中止、进度事件）                                  |   **支持**   |     支持     |     不支持      |   不支持   |
+| **权限规则矩阵**（按工具和输入的 glob 匹配 allow/deny 规则）                     |   **支持**   |     支持     |    白名单模式   |   不支持   |
 
 **核心优势：**
 
@@ -54,6 +58,10 @@
 - **优雅降级** — 不支持 function calling 的模型自动降级为纯文本模式。
 - **项目记忆** — `.codineer/CODINEER.md` 让 AI 拥有关于代码库的持久上下文。提交到仓库，与团队共享。
 - **自适应终端 UI** — 欢迎面板和分割线随窗口宽度实时调整。超窄终端自动切换为单列布局；拖动窗口时输入行原位重绘，无闪烁。兼容 macOS、Linux 和 Windows（Windows Terminal / ConPTY）。
+- **智能上下文缓存** — 自动管理 Gemini 的 `cachedContents` API 和 Anthropic 的 prompt cache，降低长会话的延迟和 Token 成本。
+- **基于模型的压缩** — 当对话上下文溢出时，使用 LLM 调用总结历史（带启发式回退），保留关键决策和文件修改记录。
+- **流式工具执行** — 工具参数到达即启动执行，安全工具并行运行，bash 失败自动中止兄弟进程，实时进度事件反馈。
+- **精细权限规则** — 支持按工具和输入模式的 glob 匹配 `always-allow`/`always-deny`/`always-ask` 规则矩阵，超越三种基础权限模式。
 
 ## 目录
 
@@ -65,6 +73,9 @@
 - [配置](#配置)
 - [项目上下文](#项目上下文)
 - [扩展 Codineer](#扩展-codineer)
+- [会话与恢复](#会话与恢复)
+- [自动更新](#自动更新)
+- [常见问题](#常见问题)
 - [参考](#参考)
 - [许可证](#许可证)
 
@@ -325,6 +336,7 @@ codineer
 | **Agent** | `/agents` `/skills` `/plugin`                                            |
 | **高级**  | `/ultraplan` `/bughunter` `/teleport` `/debug-tool-call` `/vim`          |
 | **诊断**  | `/doctor`                                                                |
+| **更新**  | `/update [check\|apply\|dismiss\|status]`                               |
 | **导航**  | `/init` `/permissions` `/exit`                                           |
 
 **快捷键：**
@@ -383,7 +395,7 @@ codineer --model sonnet --permission-mode read-only "审计代码"
 | ---------------------------- | ---------------------------------------------------- |
 | `-p <文本>`                  | 一次性提问                                           |
 | `--model <名称>`             | 选择模型                                             |
-| `--output-format text\|json` | 输出格式                                             |
+| `--output-format text\|json\|stream-json` | 输出格式（`stream-json` 以换行分隔事件流输出） |
 | `--allowedTools <列表>`      | 限制工具访问（逗号分隔）                             |
 | `--permission-mode <模式>`   | `read-only`、`workspace-write`、`danger-full-access` |
 | `--resume <文件>`            | 恢复已保存的会话                                     |
@@ -467,6 +479,8 @@ Codineer 从多个 JSON 文件合并设置（优先级从高到低）：
 | `enabledPlugins` | object   | 插件启用/禁用覆盖（`name@marketplace` → 布尔值的映射）                                                                                                                                                                              |
 | `plugins`        | object   | 插件管理（externalDirectories、installRoot）                                                                                                                                                                                        |
 | `hooks`          | object   | `PreToolUse` / `PostToolUse` Hook 的 Shell 命令                                                                                                                                                                                     |
+| `geminiCache`    | object   | Gemini 上下文缓存：`{ "enabled": true, "ttlSeconds": 3600 }` — 通过 Google cachedContents API 缓存 system prompt + 工具定义                                                                                                        |
+| `permissionRules`| array    | 精细权限规则：`[{ "tool": "bash", "input": "rm *", "decision": "always-deny" }]`                                                                                                                                                    |
 
 运行时查看合并配置：`/config`、`/config env`、`/config model`
 
@@ -599,6 +613,127 @@ codineer skills          # 列出 Skill
 ```
 
 Skill 搜索路径：项目 `.codineer/skills/`（未初始化时退到 `~/.codineer/skills/`），以及 `$CODINEER_CONFIG_HOME/skills/` 和 `~/.codineer/skills/`。
+
+---
+
+## 会话与恢复
+
+每次对话自动保存，随时可恢复——即使跨重启也不丢失。
+
+```bash
+codineer --resume /path/to/session.jsonl     # 从 CLI 恢复会话
+```
+
+REPL 内操作：
+
+| 命令                   | 功能                           |
+| ---------------------- | ------------------------------ |
+| `/session`             | 显示当前会话路径               |
+| `/resume <路径>`       | 加载并恢复之前的会话           |
+| `/export [路径]`       | 导出会话记录                   |
+| `/compact`             | 总结压缩上下文以释放 Token     |
+| `/clear`               | 清空对话历史                   |
+
+欢迎横幅中包含 `codineer --resume …` 一键恢复命令，方便随时回到任何会话。
+
+---
+
+## 自动更新
+
+Codineer 支持自更新。后台定期检查新版本（默认每 24 小时），发现新版后显示通知。
+
+```bash
+codineer update                   # 检查更新并自动安装
+```
+
+REPL 内操作：
+
+| 命令                 | 功能                                           |
+| -------------------- | ---------------------------------------------- |
+| `/update`            | 检查新版本                                     |
+| `/update apply`      | 下载并安装最新版                               |
+| `/update dismiss`    | 忽略当前版本的更新通知                         |
+| `/update status`     | 显示当前版本、上次检查时间和已忽略的版本       |
+
+更新器自动下载当前平台（macOS、Linux、Windows）对应的预构建二进制，原子替换可执行文件并保留备份。若当前平台无预构建包，会显示手动安装指引。
+
+---
+
+## 常见问题
+
+<details><summary><strong>无 API Key / 认证错误</strong></summary>
+
+```bash
+codineer status                         # 查看检测到的凭据
+codineer status anthropic               # 查看特定 Provider
+codineer login                          # OAuth 登录
+codineer login anthropic --source claude-code   # 复用 Claude Code 凭据
+```
+
+通过 Shell export 或 `settings.json` → `"env"` 设置 API Key。详见[环境变量](#环境变量)。
+
+</details>
+
+<details><summary><strong>模型未找到 / 不支持的模型</strong></summary>
+
+```bash
+codineer models                         # 列出所有可用模型
+codineer models ollama                  # 查看 Ollama 模型
+codineer --model ollama/qwen3-coder "测试"   # 显式指定 provider/model
+```
+
+自定义 Provider 请确保 `baseUrl` 使用 OpenAI 兼容端点（如 `/v1` 或 Gemini 的 `/v1beta/openai`）。
+
+</details>
+
+<details><summary><strong>"assistant stream produced no content"</strong></summary>
+
+部分 Provider（DashScope、某些 OpenRouter 模型）使用非标准格式发送响应。Codineer 会自动解析 `reasoning_content`、`thought` 和数组格式的 `content`。如仍出现此错误，CLI 会自动以非流式请求重试一次。请确保使用最新版本：`codineer update`。
+
+</details>
+
+<details><summary><strong>编辑文件时权限被拒绝</strong></summary>
+
+默认情况下，Codineer 以 `workspace-write` 模式运行，写入工作区外的文件前会询问。修改模式：
+
+```bash
+codineer --permission-mode danger-full-access    # 完全无限制
+codineer --permission-mode read-only             # 仅只读
+```
+
+或在 `settings.json` 中永久设置：`"permissionMode": "danger-full-access"`
+
+</details>
+
+<details><summary><strong>Ollama 未被检测到</strong></summary>
+
+- 确保 Ollama 正在运行：`ollama serve`
+- 检查端点：`curl http://localhost:11434/v1/models`
+- 远程 Ollama：`export OLLAMA_HOST=http://your-server:11434`
+
+</details>
+
+<details><summary><strong>图片功能不工作（Ctrl+V）</strong></summary>
+
+- **macOS**：请用 `Ctrl+V`（而非 `Cmd+V`），Terminal.app/iTerm2 会拦截 `Cmd+V`。
+- **Windows**：请用 `/image`（Windows Terminal 拦截 `Ctrl+V` 用于文本粘贴）。
+- **Linux**：大多数终端正常。若 `Ctrl+V` 失败，尝试 `/image`。
+- 备选：`@photo.png` 直接附加图片文件。
+
+</details>
+
+<details><summary><strong>上下文溢出 / 对话过长</strong></summary>
+
+Codineer 在接近模型上下文限制时自动压缩。也可手动触发：
+
+```
+/compact                # 总结并压缩上下文
+/clear                  # 重新开始
+```
+
+在 settings 中配置 `geminiCache` 可启用 Gemini 模型的智能上下文缓存。
+
+</details>
 
 ---
 
