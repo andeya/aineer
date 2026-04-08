@@ -43,7 +43,10 @@ impl InputMessage {
     pub fn user_text(text: impl Into<String>) -> Self {
         Self {
             role: "user".to_string(),
-            content: vec![InputContentBlock::Text { text: text.into() }],
+            content: vec![InputContentBlock::Text {
+                text: text.into(),
+                cache_control: None,
+            }],
         }
     }
 
@@ -61,6 +64,7 @@ impl InputMessage {
                     text: content.into(),
                 }],
                 is_error,
+                cache_control: None,
             }],
         }
     }
@@ -71,6 +75,8 @@ impl InputMessage {
 pub enum InputContentBlock {
     Text {
         text: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_control: Option<CacheControl>,
     },
     Image {
         source: ImageSource,
@@ -85,6 +91,8 @@ pub enum InputContentBlock {
         content: Vec<ToolResultContentBlock>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         is_error: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_control: Option<CacheControl>,
     },
 }
 
@@ -311,6 +319,7 @@ mod tests {
     fn input_content_block_round_trips_all_variants() {
         let text = InputContentBlock::Text {
             text: "hello".to_string(),
+            cache_control: None,
         };
         let image = InputContentBlock::Image {
             source: ImageSource {
@@ -330,6 +339,7 @@ mod tests {
                 text: "output".to_string(),
             }],
             is_error: false,
+            cache_control: None,
         };
         for block in [text, image, tool_use, tool_result] {
             let json = serde_json::to_value(&block).expect("serialize");

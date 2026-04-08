@@ -468,6 +468,7 @@ fn sample_request(stream: bool) -> MessageRequest {
             content: vec![
                 InputContentBlock::Text {
                     text: "Say hello".to_string(),
+                    cache_control: None,
                 },
                 InputContentBlock::ToolResult {
                     tool_use_id: "toolu_prev".to_string(),
@@ -475,6 +476,7 @@ fn sample_request(stream: bool) -> MessageRequest {
                         value: json!({"forecast": "sunny"}),
                     }],
                     is_error: false,
+                    cache_control: None,
                 },
             ],
         }],

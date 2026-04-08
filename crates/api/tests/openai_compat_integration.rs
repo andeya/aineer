@@ -368,6 +368,7 @@ fn sample_request(stream: bool) -> MessageRequest {
             role: "user".to_string(),
             content: vec![InputContentBlock::Text {
                 text: "Say hello".to_string(),
+                cache_control: None,
             }],
         }],
         system: Some(SystemBlock::from_plain("Use tools when needed")),

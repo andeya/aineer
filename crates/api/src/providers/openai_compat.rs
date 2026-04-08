@@ -385,7 +385,7 @@ fn translate_message(message: &InputMessage) -> Vec<Value> {
             let mut tool_calls = Vec::new();
             for block in &message.content {
                 match block {
-                    InputContentBlock::Text { text: value } => text.push_str(value),
+                    InputContentBlock::Text { text: value, .. } => text.push_str(value),
                     InputContentBlock::ToolUse { id, name, input } => tool_calls.push(json!({
                         "id": id,
                         "type": "function",
@@ -422,7 +422,7 @@ fn translate_message(message: &InputMessage) -> Vec<Value> {
 
             for block in &message.content {
                 match block {
-                    InputContentBlock::Text { text } => {
+                    InputContentBlock::Text { text, .. } => {
                         if has_image {
                             user_parts.push(json!({ "type": "text", "text": text }));
                         } else {
@@ -440,6 +440,7 @@ fn translate_message(message: &InputMessage) -> Vec<Value> {
                         tool_use_id,
                         content,
                         is_error,
+                        ..
                     } => {
                         flush_user_parts(&mut user_parts, &mut result);
                         result.push(json!({
@@ -763,6 +764,7 @@ mod openai_compat_inner_tests {
             content: vec![
                 InputContentBlock::Text {
                     text: "describe this".to_string(),
+                    cache_control: None,
                 },
                 InputContentBlock::Image {
                     source: ImageSource {

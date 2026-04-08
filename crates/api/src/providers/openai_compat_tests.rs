@@ -21,6 +21,7 @@ fn request_translation_uses_openai_compatible_shape() {
             content: vec![
                 InputContentBlock::Text {
                     text: "hello".to_string(),
+                    cache_control: None,
                 },
                 InputContentBlock::ToolResult {
                     tool_use_id: "tool_1".to_string(),
@@ -28,6 +29,7 @@ fn request_translation_uses_openai_compatible_shape() {
                         value: json!({"ok": true}),
                     }],
                     is_error: false,
+                    cache_control: None,
                 },
             ],
         }],
@@ -59,6 +61,7 @@ fn chat_completion_strips_custom_provider_prefix_for_upstream_model() {
             role: "user".to_string(),
             content: vec![InputContentBlock::Text {
                 text: "hi".to_string(),
+                cache_control: None,
             }],
         }],
         system: None,
@@ -143,6 +146,7 @@ fn chat_completion_preserves_openrouter_model_after_provider_prefix() {
             role: "user".to_string(),
             content: vec![InputContentBlock::Text {
                 text: "hi".to_string(),
+                cache_control: None,
             }],
         }],
         system: None,

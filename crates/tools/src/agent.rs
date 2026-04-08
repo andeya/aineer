@@ -543,7 +543,10 @@ fn convert_messages(messages: &[ConversationMessage]) -> Vec<InputMessage> {
                 .blocks
                 .iter()
                 .map(|block| match block {
-                    ContentBlock::Text { text } => InputContentBlock::Text { text: text.clone() },
+                    ContentBlock::Text { text } => InputContentBlock::Text {
+                        text: text.clone(),
+                        cache_control: None,
+                    },
                     ContentBlock::Image { media_type, data } => InputContentBlock::Image {
                         source: api::ImageSource {
                             source_type: "base64".to_string(),
@@ -568,6 +571,7 @@ fn convert_messages(messages: &[ConversationMessage]) -> Vec<InputMessage> {
                             text: output.clone(),
                         }],
                         is_error: *is_error,
+                        cache_control: None,
                     },
                 })
                 .collect::<Vec<_>>();
