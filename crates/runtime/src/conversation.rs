@@ -585,7 +585,9 @@ mod tests {
         StaticToolExecutor,
     };
     use crate::compact::CompactionConfig;
+    #[cfg(unix)]
     use crate::config::RuntimeHookConfig;
+    #[cfg(unix)]
     use crate::hooks::HookDispatcher;
     use crate::permissions::{
         PermissionMode, PermissionPolicy, PermissionPromptDecision, PermissionPrompter,
