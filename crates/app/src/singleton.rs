@@ -21,29 +21,26 @@ pub enum SingletonResult {
 ///
 /// Uses `bind` as the atomic ownership test to avoid TOCTOU races.
 pub fn try_acquire(message: &str) -> io::Result<SingletonResult> {
-    let path = socket_path();
-
     #[cfg(unix)]
     {
         use std::os::unix::net::{UnixListener, UnixStream};
 
+        let path = socket_path();
+
+        // Try to connect to an existing instance first
+        if let Ok(mut stream) = UnixStream::connect(&path) {
+            stream.write_all(message.as_bytes())?;
+            stream.shutdown(std::net::Shutdown::Write)?;
+            let mut response = String::new();
+            stream.read_to_string(&mut response)?;
+            return Ok(SingletonResult::Secondary { response });
+        }
+
+        // No existing instance — remove stale socket and claim ownership
         let _ = std::fs::remove_file(&path);
         match UnixListener::bind(&path) {
-            Ok(_listener) => {
-                // We successfully bound — we are the primary instance.
-                // The listener is intentionally dropped here; start_listener
-                // will create its own.
-                Ok(SingletonResult::Primary)
-            }
-            Err(_) => {
-                // bind failed — another instance owns the socket. Talk to it.
-                let mut stream = UnixStream::connect(&path)?;
-                stream.write_all(message.as_bytes())?;
-                stream.shutdown(std::net::Shutdown::Write)?;
-                let mut response = String::new();
-                stream.read_to_string(&mut response)?;
-                Ok(SingletonResult::Secondary { response })
-            }
+            Ok(_listener) => Ok(SingletonResult::Primary),
+            Err(e) => Err(e),
         }
     }
 
@@ -51,16 +48,18 @@ pub fn try_acquire(message: &str) -> io::Result<SingletonResult> {
     {
         use std::net::{TcpListener, TcpStream};
         let addr = "127.0.0.1:18090";
+
+        if let Ok(mut stream) = TcpStream::connect(addr) {
+            stream.write_all(message.as_bytes())?;
+            stream.shutdown(std::net::Shutdown::Write)?;
+            let mut response = String::new();
+            stream.read_to_string(&mut response)?;
+            return Ok(SingletonResult::Secondary { response });
+        }
+
         match TcpListener::bind(addr) {
             Ok(_listener) => Ok(SingletonResult::Primary),
-            Err(_) => {
-                let mut stream = TcpStream::connect(addr)?;
-                stream.write_all(message.as_bytes())?;
-                stream.shutdown(std::net::Shutdown::Write)?;
-                let mut response = String::new();
-                stream.read_to_string(&mut response)?;
-                Ok(SingletonResult::Secondary { response })
-            }
+            Err(e) => Err(e),
         }
     }
 }
@@ -68,12 +67,11 @@ pub fn try_acquire(message: &str) -> io::Result<SingletonResult> {
 /// Start the IPC listener in a background thread so secondary instances
 /// can send us messages (e.g., "open <path>").
 pub fn start_listener(on_message: impl Fn(String) + Send + 'static) {
-    let path = socket_path();
-
     #[cfg(unix)]
     {
         use std::os::unix::net::UnixListener;
 
+        let path = socket_path();
         let _ = std::fs::remove_file(&path);
         let listener = match UnixListener::bind(&path) {
             Ok(l) => l,
@@ -114,13 +112,11 @@ pub fn start_listener(on_message: impl Fn(String) + Send + 'static) {
         std::thread::Builder::new()
             .name("singleton-listener".to_string())
             .spawn(move || {
-                for stream in listener.incoming() {
-                    if let Ok(mut stream) = stream {
-                        let mut msg = String::new();
-                        if stream.read_to_string(&mut msg).is_ok() {
-                            let _ = stream.write_all(b"ok");
-                            on_message(msg);
-                        }
+                for mut stream in listener.incoming().flatten() {
+                    let mut msg = String::new();
+                    if stream.read_to_string(&mut msg).is_ok() {
+                        let _ = stream.write_all(b"ok");
+                        on_message(msg);
                     }
                 }
             })
