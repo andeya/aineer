@@ -12,7 +12,8 @@ use std::path::PathBuf;
 
 use egui::{RichText, Ui};
 
-use crate::theme as t;
+use crate::icons;
+use crate::theme::{self as t, font_size, radius, spacing};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,6 +42,19 @@ impl SettingsTab {
         }
     }
 
+    pub fn icon(&self) -> &'static str {
+        match self {
+            Self::General => icons::BEHAVIOR,
+            Self::Shell => icons::SHELL,
+            Self::Model => icons::MODEL,
+            Self::Gateway => icons::GATEWAY,
+            Self::Permissions => icons::PERMISSIONS,
+            Self::Advanced => icons::ADVANCED,
+            Self::Json => icons::JSON,
+            Self::Plugins => icons::PLUGIN,
+        }
+    }
+
     pub fn all() -> &'static [SettingsTab] {
         &[
             Self::General,
@@ -63,6 +77,7 @@ pub struct SettingsPanel {
     status_msg: Option<(String, bool)>,
     json_raw: String,
     json_sync_needed: bool,
+    search_query: String,
 }
 
 /// Mutable draft of all settings being edited.
@@ -180,6 +195,7 @@ impl SettingsPanel {
             status_msg: None,
             json_raw,
             json_sync_needed: false,
+            search_query: String::new(),
         }
     }
 
@@ -188,30 +204,74 @@ impl SettingsPanel {
     }
 
     pub fn show(&mut self, ui: &mut Ui) {
-        ui.horizontal(|ui| {
+        // Search bar
+        ui.add_space(spacing::SM);
+        egui::Frame::new()
+            .fill(t::INPUT_BG())
+            .corner_radius(radius::LG)
+            .inner_margin(egui::Margin::symmetric(
+                spacing::MD as i8,
+                spacing::XS as i8,
+            ))
+            .show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(icons::SEARCH)
+                            .size(font_size::BODY)
+                            .color(t::FG_MUTED()),
+                    );
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.search_query)
+                            .desired_width(ui.available_width())
+                            .hint_text("Search settings...")
+                            .frame(false)
+                            .font(egui::FontId::proportional(font_size::BODY)),
+                    );
+                });
+            });
+
+        ui.add_space(spacing::MD);
+
+        // Tab navigation with icons
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = spacing::XXS;
             for tab in SettingsTab::all() {
                 let is_active = self.active_tab == *tab;
-                let text = RichText::new(tab.label()).size(12.0).color(if is_active {
-                    t::FG
+                let label = format!("{} {}", tab.icon(), tab.label());
+
+                let text = RichText::new(label)
+                    .size(font_size::SMALL)
+                    .color(if is_active {
+                        t::ACCENT_LIGHT()
+                    } else {
+                        t::FG_DIM()
+                    });
+
+                let fill = if is_active {
+                    t::alpha(t::ACCENT(), 20)
                 } else {
-                    t::FG_DIM
-                });
-                let btn = if is_active {
-                    egui::Button::new(text.strong())
-                        .fill(t::TAB_ACTIVE_BG)
-                        .corner_radius(t::BUTTON_CORNER_RADIUS)
-                } else {
-                    egui::Button::new(text)
-                        .fill(egui::Color32::TRANSPARENT)
-                        .corner_radius(t::BUTTON_CORNER_RADIUS)
+                    egui::Color32::TRANSPARENT
                 };
+
+                let stroke = if is_active {
+                    egui::Stroke::new(1.0, t::alpha(t::ACCENT(), 80))
+                } else {
+                    egui::Stroke::NONE
+                };
+
+                let btn = egui::Button::new(if is_active { text.strong() } else { text })
+                    .fill(fill)
+                    .stroke(stroke)
+                    .corner_radius(radius::MD);
+
                 if ui.add(btn).clicked() {
                     self.active_tab = *tab;
                 }
             }
         });
 
-        ui.separator();
+        ui.add_space(spacing::XS);
 
         // Sync JSON text when switching to JSON tab
         if self.active_tab == SettingsTab::Json && self.json_sync_needed {
@@ -239,7 +299,7 @@ impl SettingsPanel {
                 }
             });
 
-        ui.separator();
+        ui.add_space(spacing::SM);
         bar::show(ui, &mut self.dirty, &mut self.status_msg, &mut self.draft);
     }
 }

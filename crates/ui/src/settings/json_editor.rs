@@ -11,13 +11,13 @@ pub fn show(ui: &mut Ui, json_raw: &mut String, draft: &mut SettingsDraft) -> bo
         RichText::new("Raw JSON Settings")
             .strong()
             .size(13.0)
-            .color(t::FG),
+            .color(t::FG()),
     );
     ui.add_space(4.0);
     ui.label(
         RichText::new("Edit the raw JSON and click Apply to update settings.")
             .size(11.0)
-            .color(t::FG_DIM),
+            .color(t::FG_DIM()),
     );
     ui.add_space(8.0);
 
@@ -33,8 +33,8 @@ pub fn show(ui: &mut Ui, json_raw: &mut String, draft: &mut SettingsDraft) -> bo
     ui.horizontal(|ui| {
         if ui
             .add(
-                egui::Button::new(RichText::new("Apply JSON").size(12.0).color(t::FG))
-                    .fill(t::ACCENT),
+                egui::Button::new(RichText::new("Apply JSON").size(12.0).color(t::FG()))
+                    .fill(t::ACCENT()),
             )
             .clicked()
         {
@@ -48,7 +48,7 @@ pub fn show(ui: &mut Ui, json_raw: &mut String, draft: &mut SettingsDraft) -> bo
                     ui.label(
                         RichText::new(format!("Parse error: {e}"))
                             .size(11.0)
-                            .color(t::ERROR),
+                            .color(t::ERROR()),
                     );
                 }
             }
@@ -56,8 +56,8 @@ pub fn show(ui: &mut Ui, json_raw: &mut String, draft: &mut SettingsDraft) -> bo
 
         if ui
             .add(
-                egui::Button::new(RichText::new("Reformat").size(12.0).color(t::FG_SOFT))
-                    .fill(t::PANEL_BG),
+                egui::Button::new(RichText::new("Reformat").size(12.0).color(t::FG_SOFT()))
+                    .fill(t::PANEL_BG()),
             )
             .clicked()
         {

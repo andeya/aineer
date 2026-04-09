@@ -43,6 +43,9 @@ pub struct InputBar {
     show_slash_menu: bool,
     slash_filter: String,
     slash_selection: usize,
+    // Shell prompt context
+    cwd_display: String,
+    git_branch: Option<String>,
 }
 
 impl InputBar {
@@ -62,7 +65,21 @@ impl InputBar {
             show_slash_menu: false,
             slash_filter: String::new(),
             slash_selection: 0,
+            cwd_display: "~".to_string(),
+            git_branch: None,
         }
+    }
+
+    pub fn set_prompt_context(&mut self, cwd: &str, git_branch: Option<&str>) {
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .unwrap_or_default();
+        self.cwd_display = if !home.is_empty() && cwd.starts_with(&home) {
+            format!("~{}", &cwd[home.len()..])
+        } else {
+            cwd.to_string()
+        };
+        self.git_branch = git_branch.map(String::from);
     }
 
     pub fn set_shell_paused(&mut self, paused: bool) {
@@ -84,7 +101,7 @@ impl InputBar {
         let mut action = SubmitAction::None;
 
         egui::Frame::new()
-            .fill(t::BG_ELEVATED)
+            .fill(t::BG_ELEVATED())
             .inner_margin(10.0)
             .show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
@@ -99,8 +116,8 @@ impl InputBar {
                                     RichText::new(format!("@#{r} ✕"))
                                         .small()
                                         .monospace()
-                                        .color(t::ACCENT_LIGHT)
-                                        .background_color(t::alpha(t::ACCENT, 20)),
+                                        .color(t::ACCENT_LIGHT())
+                                        .background_color(t::alpha(t::ACCENT(), 20)),
                                 )
                                 .sense(Sense::click()),
                             );
@@ -116,7 +133,26 @@ impl InputBar {
                 }
 
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(">").monospace().color(t::SUCCESS).size(14.0));
+                    ui.label(
+                        RichText::new(&self.cwd_display)
+                            .monospace()
+                            .size(11.0)
+                            .color(t::ACCENT_CYAN()),
+                    );
+                    if let Some(ref branch) = self.git_branch {
+                        ui.label(
+                            RichText::new(format!("({branch})"))
+                                .monospace()
+                                .size(11.0)
+                                .color(t::ACCENT_LIGHT()),
+                        );
+                    }
+                    ui.label(
+                        RichText::new("$")
+                            .monospace()
+                            .color(t::SUCCESS())
+                            .size(13.0),
+                    );
 
                     let response = ui.add(
                         egui::TextEdit::singleline(&mut self.text)
@@ -124,22 +160,22 @@ impl InputBar {
                             .font(egui::FontId::monospace(13.0))
                             .hint_text("Type command or message…")
                             .frame(false)
-                            .text_color(t::FG),
+                            .text_color(t::FG()),
                     );
 
                     let shell_btn = ui.add_enabled(
                         !self.shell_paused,
                         egui::Button::new(RichText::new("⏎ Shell").size(11.0).color(
                             if self.shell_paused {
-                                t::FG_MUTED
+                                t::FG_MUTED()
                             } else {
-                                t::SUCCESS
+                                t::SUCCESS()
                             },
                         ))
                         .fill(if self.shell_paused {
-                            t::SURFACE
+                            t::SURFACE()
                         } else {
-                            t::blend(t::SURFACE, t::SUCCESS, 0.08)
+                            t::blend(t::SURFACE(), t::SUCCESS(), 0.08)
                         })
                         .corner_radius(t::BUTTON_CORNER_RADIUS),
                     );
@@ -151,14 +187,14 @@ impl InputBar {
                         "Ctrl+⏎ Chat"
                     };
                     let chat_btn = ui.add(
-                        egui::Button::new(
-                            RichText::new(chat_shortcut).size(11.0).color(if has_refs {
-                                t::AMBER
+                        egui::Button::new(RichText::new(chat_shortcut).size(11.0).color(
+                            if has_refs {
+                                t::AMBER()
                             } else {
-                                t::ACCENT_LIGHT
-                            }),
-                        )
-                        .fill(t::blend(t::SURFACE, t::ACCENT, 0.06))
+                                t::ACCENT_LIGHT()
+                            },
+                        ))
+                        .fill(t::blend(t::SURFACE(), t::ACCENT(), 0.06))
                         .corner_radius(t::BUTTON_CORNER_RADIUS),
                     );
 
@@ -347,7 +383,7 @@ impl InputBar {
                 {
                     ui.add_space(4.0);
                     egui::Frame::new()
-                        .fill(t::SURFACE)
+                        .fill(t::SURFACE())
                         .corner_radius(t::BUTTON_CORNER_RADIUS)
                         .inner_margin(6.0)
                         .show(ui, |ui| {
@@ -356,7 +392,7 @@ impl InputBar {
                                 let text = RichText::new(comp)
                                     .monospace()
                                     .size(12.0)
-                                    .color(if is_selected { t::FG } else { t::FG_SOFT });
+                                    .color(if is_selected { t::FG() } else { t::FG_SOFT() });
                                 let label = egui::Label::new(text).sense(Sense::click());
                                 let resp = ui.add(label);
                                 if resp.clicked() {
@@ -372,7 +408,7 @@ impl InputBar {
                     ui.label(
                         RichText::new("⚠ Interactive command running — Shell input paused")
                             .small()
-                            .color(t::WARNING),
+                            .color(t::WARNING()),
                     );
                 }
             });
@@ -422,10 +458,10 @@ where
 {
     let mut clicked_idx = None;
     egui::Frame::new()
-        .fill(t::SURFACE)
+        .fill(t::SURFACE())
         .corner_radius(t::BUTTON_CORNER_RADIUS)
         .inner_margin(6.0)
-        .stroke(egui::Stroke::new(0.5, t::BORDER_SUBTLE))
+        .stroke(egui::Stroke::new(0.5, t::BORDER_SUBTLE()))
         .show(ui, |ui| {
             for (i, item) in items.iter().enumerate() {
                 let is_selected = i == selection;
@@ -434,12 +470,12 @@ where
                     .monospace()
                     .size(12.0)
                     .color(if is_selected {
-                        t::ACCENT_LIGHT
+                        t::ACCENT_LIGHT()
                     } else {
-                        t::FG_SOFT
+                        t::FG_SOFT()
                     });
                 let bg = if is_selected {
-                    t::alpha(t::ACCENT, 25)
+                    t::alpha(t::ACCENT(), 25)
                 } else {
                     egui::Color32::TRANSPARENT
                 };

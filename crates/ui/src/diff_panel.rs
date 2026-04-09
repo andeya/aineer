@@ -47,7 +47,7 @@ impl DiffPanel {
                     ui.add_space(40.0);
                     ui.label(
                         RichText::new("No git repository detected")
-                            .color(t::FG_DIM)
+                            .color(t::FG_DIM())
                             .size(13.0),
                     );
                 });
@@ -58,7 +58,7 @@ impl DiffPanel {
         ui.horizontal(|ui| {
             if let Some(ref branch) = status.branch {
                 egui::Frame::new()
-                    .fill(t::SURFACE)
+                    .fill(t::SURFACE())
                     .corner_radius(6.0)
                     .inner_margin(egui::Margin::symmetric(6, 2))
                     .show(ui, |ui| {
@@ -67,7 +67,7 @@ impl DiffPanel {
                                 .strong()
                                 .monospace()
                                 .size(12.0)
-                                .color(t::FG_SOFT),
+                                .color(t::FG_SOFT()),
                         );
                     });
             }
@@ -78,17 +78,17 @@ impl DiffPanel {
                         status.total_insertions, status.total_deletions
                     ))
                     .size(11.0)
-                    .color(t::FG_DIM),
+                    .color(t::FG_DIM()),
                 );
                 egui::Frame::new()
-                    .fill(t::alpha(t::ACCENT, 18))
+                    .fill(t::alpha(t::ACCENT(), 18))
                     .corner_radius(4.0)
                     .inner_margin(egui::Margin::symmetric(4, 1))
                     .show(ui, |ui| {
                         ui.label(
                             RichText::new(format!("{} files", status.file_count()))
                                 .size(11.0)
-                                .color(t::ACCENT_LIGHT),
+                                .color(t::ACCENT_LIGHT()),
                         );
                     });
             });
@@ -102,7 +102,7 @@ impl DiffPanel {
                 ui.add_space(20.0);
                 ui.label(
                     RichText::new("Working tree clean")
-                        .color(t::SUCCESS)
+                        .color(t::SUCCESS())
                         .size(13.0),
                 );
             });
@@ -114,10 +114,10 @@ impl DiffPanel {
             .show(ui, |ui| {
                 for change in &status.changes {
                     let (icon, icon_color) = match change.status {
-                        FileStatus::Modified => ("M", t::WARNING),
-                        FileStatus::Added => ("A", t::SUCCESS),
-                        FileStatus::Deleted => ("D", t::ERROR),
-                        FileStatus::Renamed => ("R", t::ACCENT_CYAN),
+                        FileStatus::Modified => ("M", t::WARNING()),
+                        FileStatus::Added => ("A", t::SUCCESS()),
+                        FileStatus::Deleted => ("D", t::ERROR()),
+                        FileStatus::Renamed => ("R", t::ACCENT_CYAN()),
                     };
 
                     let short_name = std::path::Path::new(&change.path)
@@ -151,14 +151,14 @@ impl DiffPanel {
                             if change.deletions > 0 {
                                 ui.label(
                                     RichText::new(format!("−{}", change.deletions))
-                                        .color(t::DIFF_DEL_FG)
+                                        .color(t::DIFF_DEL_FG())
                                         .size(11.0),
                                 );
                             }
                             if change.insertions > 0 {
                                 ui.label(
                                     RichText::new(format!("+{}", change.insertions))
-                                        .color(t::DIFF_ADD_FG)
+                                        .color(t::DIFF_ADD_FG())
                                         .size(11.0),
                                 );
                             }
@@ -186,7 +186,7 @@ impl DiffPanel {
 
                                     ui.label(
                                         RichText::new(&hunk.header)
-                                            .color(t::DIFF_HUNK_HEADER)
+                                            .color(t::DIFF_HUNK_HEADER())
                                             .monospace()
                                             .size(11.0),
                                     );
@@ -194,7 +194,7 @@ impl DiffPanel {
                                     if reverted {
                                         ui.label(
                                             RichText::new("  (reverted)")
-                                                .color(t::FG_DIM)
+                                                .color(t::FG_DIM())
                                                 .italics()
                                                 .size(11.0),
                                         );
@@ -202,13 +202,13 @@ impl DiffPanel {
                                         for line in &hunk.lines {
                                             let (prefix, fg, bg) = match line.kind {
                                                 DiffLineKind::Add => {
-                                                    ("+", t::DIFF_ADD_FG, t::DIFF_ADD_BG)
+                                                    ("+", t::DIFF_ADD_FG(), t::DIFF_ADD_BG())
                                                 }
                                                 DiffLineKind::Delete => {
-                                                    ("-", t::DIFF_DEL_FG, t::DIFF_DEL_BG)
+                                                    ("-", t::DIFF_DEL_FG(), t::DIFF_DEL_BG())
                                                 }
                                                 DiffLineKind::Context => {
-                                                    (" ", t::FG_DIM, egui::Color32::TRANSPARENT)
+                                                    (" ", t::FG_DIM(), egui::Color32::TRANSPARENT)
                                                 }
                                             };
 
@@ -232,9 +232,9 @@ impl DiffPanel {
                                                     egui::Button::new(
                                                         RichText::new("Keep")
                                                             .size(10.0)
-                                                            .color(t::FG_DIM),
+                                                            .color(t::FG_DIM()),
                                                     )
-                                                    .fill(t::SURFACE)
+                                                    .fill(t::SURFACE())
                                                     .corner_radius(t::BUTTON_CORNER_RADIUS),
                                                 )
                                                 .clicked()
@@ -246,9 +246,9 @@ impl DiffPanel {
                                                     egui::Button::new(
                                                         RichText::new("Revert")
                                                             .size(10.0)
-                                                            .color(t::ERROR),
+                                                            .color(t::ERROR()),
                                                     )
-                                                    .fill(t::alpha(t::ERROR, 15))
+                                                    .fill(t::alpha(t::ERROR(), 15))
                                                     .corner_radius(t::BUTTON_CORNER_RADIUS),
                                                 )
                                                 .clicked()

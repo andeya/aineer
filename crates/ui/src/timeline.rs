@@ -250,13 +250,13 @@ fn truncate_str(s: &str, max_bytes: usize) -> &str {
 fn render_shell_card(ui: &mut Ui, card: &mut ShellCard) -> TimelineAction {
     let mut action = TimelineAction::None;
     let (frame_color, left_accent) = if card.running {
-        (t::SHELL_RUNNING_BG, t::ACCENT)
+        (t::SHELL_RUNNING_BG(), t::ACCENT())
     } else if card.exit_code == Some(0) {
-        (t::SHELL_SUCCESS_BG, t::SUCCESS)
+        (t::SHELL_SUCCESS_BG(), t::SUCCESS())
     } else if card.exit_code.is_some() {
-        (t::SHELL_ERROR_BG, t::ERROR)
+        (t::SHELL_ERROR_BG(), t::ERROR())
     } else {
-        (t::SHELL_RUNNING_BG, t::FG_MUTED)
+        (t::SHELL_RUNNING_BG(), t::FG_MUTED())
     };
 
     egui::Frame::new()
@@ -268,7 +268,12 @@ fn render_shell_card(ui: &mut Ui, card: &mut ShellCard) -> TimelineAction {
             ui.set_min_width(ui.available_width());
 
             ui.horizontal(|ui| {
-                ui.label(RichText::new("$").monospace().color(t::SUCCESS).size(13.0));
+                ui.label(
+                    RichText::new("$")
+                        .monospace()
+                        .color(t::SUCCESS())
+                        .size(13.0),
+                );
                 ui.label(RichText::new(&card.command).monospace().strong().size(13.0));
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -276,11 +281,11 @@ fn render_shell_card(ui: &mut Ui, card: &mut ShellCard) -> TimelineAction {
                         ui.spinner();
                     } else if let Some(code) = card.exit_code {
                         if code == 0 {
-                            ui.label(RichText::new("✓").color(t::SUCCESS).size(13.0));
+                            ui.label(RichText::new("✓").color(t::SUCCESS()).size(13.0));
                         } else {
                             ui.label(
                                 RichText::new(format!("✗ {code}"))
-                                    .color(t::ERROR)
+                                    .color(t::ERROR())
                                     .size(13.0),
                             );
                         }
@@ -290,7 +295,7 @@ fn render_shell_card(ui: &mut Ui, card: &mut ShellCard) -> TimelineAction {
                     if ui
                         .add(
                             egui::Button::new(
-                                RichText::new(collapse_label).color(t::FG_DIM).size(11.0),
+                                RichText::new(collapse_label).color(t::FG_DIM()).size(11.0),
                             )
                             .fill(egui::Color32::TRANSPARENT),
                         )
@@ -306,7 +311,7 @@ fn render_shell_card(ui: &mut Ui, card: &mut ShellCard) -> TimelineAction {
                 ui.painter().hline(
                     ui.available_rect_before_wrap().x_range(),
                     ui.cursor().top(),
-                    Stroke::new(0.5, t::BORDER_SUBTLE),
+                    Stroke::new(0.5, t::BORDER_SUBTLE()),
                 );
                 ui.add_space(4.0);
 
@@ -317,7 +322,7 @@ fn render_shell_card(ui: &mut Ui, card: &mut ShellCard) -> TimelineAction {
                             card.output_lines.len() - MAX_VISIBLE_OUTPUT_LINES
                         ))
                         .small()
-                        .color(t::FG_DIM),
+                        .color(t::FG_DIM()),
                     );
                 }
 
@@ -341,7 +346,7 @@ fn render_shell_card(ui: &mut Ui, card: &mut ShellCard) -> TimelineAction {
                                 RichText::new(&card.output_lines[i])
                                     .monospace()
                                     .size(12.0)
-                                    .color(t::FG_SOFT),
+                                    .color(t::FG_SOFT()),
                             );
                         }
                     });
@@ -354,9 +359,9 @@ fn render_shell_card(ui: &mut Ui, card: &mut ShellCard) -> TimelineAction {
                         if ui
                             .add(
                                 egui::Button::new(
-                                    RichText::new("@AI").size(10.0).color(t::ACCENT_LIGHT),
+                                    RichText::new("@AI").size(10.0).color(t::ACCENT_LIGHT()),
                                 )
-                                .fill(t::alpha(t::ACCENT, 20))
+                                .fill(t::alpha(t::ACCENT(), 20))
                                 .corner_radius(t::BUTTON_CORNER_RADIUS),
                             )
                             .on_hover_text("Reference this output in an AI chat")
@@ -367,9 +372,9 @@ fn render_shell_card(ui: &mut Ui, card: &mut ShellCard) -> TimelineAction {
                         if ui
                             .add(
                                 egui::Button::new(
-                                    RichText::new("Copy").size(10.0).color(t::FG_DIM),
+                                    RichText::new("Copy").size(10.0).color(t::FG_DIM()),
                                 )
-                                .fill(t::SURFACE)
+                                .fill(t::SURFACE())
                                 .corner_radius(t::BUTTON_CORNER_RADIUS),
                             )
                             .clicked()
@@ -393,24 +398,24 @@ fn render_chat_card(
     let card_id = card.id;
 
     egui::Frame::new()
-        .fill(t::CHAT_BG)
+        .fill(t::CHAT_BG())
         .corner_radius(t::CARD_CORNER_RADIUS)
         .inner_margin(t::CARD_INNER_MARGIN)
-        .stroke(Stroke::new(1.0, t::alpha(t::ACCENT, 30)))
+        .stroke(Stroke::new(1.0, t::alpha(t::ACCENT(), 30)))
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
 
             ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new("User").size(12.0).strong().color(t::FG));
+                ui.label(RichText::new("User").size(12.0).strong().color(t::FG()));
             });
-            ui.label(RichText::new(&card.prompt).size(13.0).color(t::FG_SOFT));
+            ui.label(RichText::new(&card.prompt).size(13.0).color(t::FG_SOFT()));
 
             if !card.context_refs.is_empty() {
                 ui.add_space(2.0);
                 ui.horizontal(|ui| {
                     for r in &card.context_refs {
                         egui::Frame::new()
-                            .fill(t::alpha(t::ACCENT, 20))
+                            .fill(t::alpha(t::ACCENT(), 20))
                             .corner_radius(4.0)
                             .inner_margin(egui::Margin::symmetric(4, 1))
                             .show(ui, |ui| {
@@ -418,7 +423,7 @@ fn render_chat_card(
                                     RichText::new(format!("@#{r}"))
                                         .small()
                                         .monospace()
-                                        .color(t::ACCENT_LIGHT),
+                                        .color(t::ACCENT_LIGHT()),
                                 );
                             });
                     }
@@ -430,7 +435,7 @@ fn render_chat_card(
                 ui.painter().hline(
                     ui.available_rect_before_wrap().x_range(),
                     ui.cursor().top(),
-                    Stroke::new(0.5, t::BORDER_SUBTLE),
+                    Stroke::new(0.5, t::BORDER_SUBTLE()),
                 );
                 ui.add_space(6.0);
 
@@ -439,7 +444,7 @@ fn render_chat_card(
                         RichText::new("Aineer")
                             .size(12.0)
                             .strong()
-                            .color(t::ACCENT_LIGHT),
+                            .color(t::ACCENT_LIGHT()),
                     );
                     if card.streaming {
                         ui.spinner();
@@ -467,24 +472,24 @@ fn render_tool_turn(ui: &mut Ui, card_id: CardId, turn: &ToolTurn) -> TimelineAc
 
     ui.add_space(4.0);
     egui::Frame::new()
-        .fill(t::alpha(t::SURFACE, 180))
+        .fill(t::alpha(t::SURFACE(), 180))
         .corner_radius(6.0)
         .inner_margin(8.0)
-        .stroke(Stroke::new(0.5, t::BORDER_SUBTLE))
+        .stroke(Stroke::new(0.5, t::BORDER_SUBTLE()))
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
 
             let (icon, icon_color) = match &turn.state {
-                ToolState::Pending => ("⏳", t::AMBER),
-                ToolState::Running => ("⚙", t::ACCENT_LIGHT),
+                ToolState::Pending => ("⏳", t::AMBER()),
+                ToolState::Running => ("⚙", t::ACCENT_LIGHT()),
                 ToolState::Completed { is_error, .. } => {
                     if *is_error {
-                        ("✗", t::ERROR)
+                        ("✗", t::ERROR())
                     } else {
-                        ("✓", t::SUCCESS)
+                        ("✓", t::SUCCESS())
                     }
                 }
-                ToolState::Denied => ("⊘", t::FG_DIM),
+                ToolState::Denied => ("⊘", t::FG_DIM()),
             };
 
             ui.horizontal(|ui| {
@@ -494,7 +499,7 @@ fn render_tool_turn(ui: &mut Ui, card_id: CardId, turn: &ToolTurn) -> TimelineAc
                         .monospace()
                         .size(12.0)
                         .strong()
-                        .color(t::FG),
+                        .color(t::FG()),
                 );
                 if matches!(turn.state, ToolState::Running) {
                     ui.spinner();
@@ -507,7 +512,7 @@ fn render_tool_turn(ui: &mut Ui, card_id: CardId, turn: &ToolTurn) -> TimelineAc
                     RichText::new(input_preview)
                         .monospace()
                         .size(11.0)
-                        .color(t::FG_DIM),
+                        .color(t::FG_DIM()),
                 );
             }
 
@@ -518,9 +523,9 @@ fn render_tool_turn(ui: &mut Ui, card_id: CardId, turn: &ToolTurn) -> TimelineAc
                         if ui
                             .add(
                                 egui::Button::new(
-                                    RichText::new("✓ Allow").size(11.0).color(t::SUCCESS),
+                                    RichText::new("✓ Allow").size(11.0).color(t::SUCCESS()),
                                 )
-                                .fill(t::blend(t::SURFACE, t::SUCCESS, 0.1))
+                                .fill(t::blend(t::SURFACE(), t::SUCCESS(), 0.1))
                                 .corner_radius(t::BUTTON_CORNER_RADIUS),
                             )
                             .clicked()
@@ -533,9 +538,9 @@ fn render_tool_turn(ui: &mut Ui, card_id: CardId, turn: &ToolTurn) -> TimelineAc
                         if ui
                             .add(
                                 egui::Button::new(
-                                    RichText::new("✗ Deny").size(11.0).color(t::ERROR),
+                                    RichText::new("✗ Deny").size(11.0).color(t::ERROR()),
                                 )
-                                .fill(t::blend(t::SURFACE, t::ERROR, 0.1))
+                                .fill(t::blend(t::SURFACE(), t::ERROR(), 0.1))
                                 .corner_radius(t::BUTTON_CORNER_RADIUS),
                             )
                             .clicked()
@@ -548,9 +553,9 @@ fn render_tool_turn(ui: &mut Ui, card_id: CardId, turn: &ToolTurn) -> TimelineAc
                         if ui
                             .add(
                                 egui::Button::new(
-                                    RichText::new("⚡ Allow All").size(11.0).color(t::AMBER),
+                                    RichText::new("⚡ Allow All").size(11.0).color(t::AMBER()),
                                 )
-                                .fill(t::blend(t::SURFACE, t::AMBER, 0.08))
+                                .fill(t::blend(t::SURFACE(), t::AMBER(), 0.08))
                                 .corner_radius(t::BUTTON_CORNER_RADIUS),
                             )
                             .clicked()
@@ -566,7 +571,7 @@ fn render_tool_turn(ui: &mut Ui, card_id: CardId, turn: &ToolTurn) -> TimelineAc
                         RichText::new(out_preview)
                             .monospace()
                             .size(11.0)
-                            .color(t::FG_SOFT),
+                            .color(t::FG_SOFT()),
                     );
                 }
                 ToolState::Denied => {
@@ -574,7 +579,7 @@ fn render_tool_turn(ui: &mut Ui, card_id: CardId, turn: &ToolTurn) -> TimelineAc
                         RichText::new("Denied by user")
                             .italics()
                             .size(11.0)
-                            .color(t::FG_DIM),
+                            .color(t::FG_DIM()),
                     );
                 }
                 _ => {}
@@ -618,7 +623,7 @@ fn styled_line_to_layout(line: &OutputLine) -> LayoutJob {
 
 fn render_system_card(ui: &mut Ui, card: &SystemCard) {
     egui::Frame::new()
-        .fill(t::SYSTEM_BG)
+        .fill(t::SYSTEM_BG())
         .corner_radius(t::CARD_CORNER_RADIUS)
         .inner_margin(egui::Margin::symmetric(t::CARD_INNER_MARGIN as i8, 8))
         .show(ui, |ui| {
@@ -627,7 +632,7 @@ fn render_system_card(ui: &mut Ui, card: &SystemCard) {
                 RichText::new(&card.message)
                     .italics()
                     .size(12.0)
-                    .color(t::FG_DIM),
+                    .color(t::FG_DIM()),
             );
         });
 }

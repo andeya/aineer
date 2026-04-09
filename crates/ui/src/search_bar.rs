@@ -48,18 +48,22 @@ impl SearchBar {
         let mut action = SearchAction::None;
 
         egui::Frame::new()
-            .fill(t::PANEL_BG)
+            .fill(t::PANEL_BG())
             .inner_margin(egui::Margin::symmetric(8, 4))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.set_min_width(ui.available_width());
 
-                    ui.label(RichText::new("Find:").size(12.0).color(t::FG_SOFT));
+                    ui.label(RichText::new("Find:").size(12.0).color(t::FG_SOFT()));
 
                     let text_edit = egui::TextEdit::singleline(&mut self.query)
                         .desired_width((ui.available_width() - 140.0).max(80.0))
                         .font(egui::TextStyle::Monospace)
-                        .text_color(if self.regex_valid { t::FG } else { t::ERROR });
+                        .text_color(if self.regex_valid {
+                            t::FG()
+                        } else {
+                            t::ERROR()
+                        });
                     let response = ui.add(text_edit);
 
                     if self.request_focus {

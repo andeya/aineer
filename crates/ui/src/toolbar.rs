@@ -56,9 +56,9 @@ impl Toolbar {
                 }
 
                 let (color, label) = match self.gateway_status {
-                    GatewayStatus::Running => (t::SUCCESS, "GW: ON"),
-                    GatewayStatus::Error => (t::ERROR, "GW: ERR"),
-                    GatewayStatus::Disabled => (t::FG_DIM, "GW: OFF"),
+                    GatewayStatus::Running => (t::SUCCESS(), "GW: ON"),
+                    GatewayStatus::Error => (t::ERROR(), "GW: ERR"),
+                    GatewayStatus::Disabled => (t::FG_DIM(), "GW: OFF"),
                 };
                 ui.colored_label(color, label);
             });

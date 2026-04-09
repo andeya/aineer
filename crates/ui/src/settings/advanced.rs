@@ -1,55 +1,46 @@
-use egui::{RichText, Ui};
+use egui::Ui;
 
-use crate::theme as t;
+use crate::icons;
+use crate::widgets::{SectionCard, SettingsRow};
 
 use super::SettingsDraft;
 
 pub fn show(ui: &mut Ui, draft: &mut SettingsDraft) -> bool {
     let mut changed = false;
 
-    ui.heading(RichText::new("Sandbox").size(14.0));
-    ui.add_space(4.0);
+    SectionCard::new("Sandbox")
+        .icon(icons::PACKAGE)
+        .description("Isolated execution environment for untrusted tool operations")
+        .show(ui, |ui| {
+            changed |= SettingsRow::new("Enable Sandbox")
+                .description("Run tools in a Docker container for safety (requires Docker)")
+                .show(ui, |ui| {
+                    ui.checkbox(&mut draft.sandbox_enabled, "").changed()
+                });
+        });
 
-    if ui
-        .checkbox(
-            &mut draft.sandbox_enabled,
-            "Enable sandbox for tool execution",
-        )
-        .changed()
-    {
-        changed = true;
-    }
+    SectionCard::new("Context Management")
+        .icon(icons::CHART)
+        .description("Control how conversation context is managed")
+        .show(ui, |ui| {
+            changed |= SettingsRow::new("Auto-Compact")
+                .description(
+                    "Automatically summarize and compact context when it approaches the limit",
+                )
+                .show(ui, |ui| ui.checkbox(&mut draft.auto_compact, "").changed());
 
-    ui.label(
-        RichText::new("Sandboxed tools run in an isolated environment (requires Docker)")
-            .size(11.0)
-            .color(t::FG_DIM),
-    );
-
-    ui.add_space(12.0);
-    ui.heading(RichText::new("Context Management").size(14.0));
-    ui.add_space(4.0);
-
-    if ui
-        .checkbox(&mut draft.auto_compact, "Auto-compact context when full")
-        .changed()
-    {
-        changed = true;
-    }
-
-    ui.horizontal(|ui| {
-        ui.label("Max context tokens");
-        if ui
-            .add(
-                egui::DragValue::new(&mut draft.max_context_tokens)
-                    .range(10_000..=1_000_000)
-                    .speed(1000),
-            )
-            .changed()
-        {
-            changed = true;
-        }
-    });
+            changed |= SettingsRow::new("Max Context Tokens")
+                .description("Maximum number of tokens before context compaction triggers")
+                .show(ui, |ui| {
+                    ui.add(
+                        egui::DragValue::new(&mut draft.max_context_tokens)
+                            .range(10_000..=1_000_000)
+                            .speed(1000)
+                            .suffix(" tokens"),
+                    )
+                    .changed()
+                });
+        });
 
     changed
 }

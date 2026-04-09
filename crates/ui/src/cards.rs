@@ -43,7 +43,7 @@ impl OutputLine {
         Self {
             segments: vec![OutputSegment {
                 text,
-                fg: crate::theme::FG_DIM,
+                fg: crate::theme::FG_DIM(),
                 bold: false,
             }],
         }
