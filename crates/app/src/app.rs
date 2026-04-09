@@ -12,6 +12,10 @@ use ui::input_bar::{CardPickerItem, InputBar, SlashMenuItem, SubmitAction};
 use ui::search_bar::{SearchAction, SearchBar};
 use ui::settings::SettingsPanel;
 use ui::timeline::{Timeline, TimelineAction};
+use ui::widgets::{
+    ActivityBar, ActivityItem, CommandPalette, PaletteItem, StatusBar, StatusSegment,
+    ACTIVITY_BAR_WIDTH,
+};
 
 use crate::agent::{AgentEvent, AgentHandle, ToolApproval};
 use crate::ssh::{SshManager, SshProfile};
@@ -98,11 +102,20 @@ pub struct AineerApp {
     show_ssh_dialog: bool,
     ssh_draft: SshProfile,
     update_status: Arc<std::sync::Mutex<crate::updater::UpdateStatus>>,
+    command_palette: CommandPalette,
+    activity_bar: ActivityBar,
 }
 
 impl AineerApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        theme::setup(&cc.egui_ctx);
+        let saved_settings = ui::settings::load_settings();
+        let theme_mode = ui::theme::ThemeMode::parse(
+            &saved_settings
+                .as_ref()
+                .map(|s| s.theme.clone())
+                .unwrap_or_else(|| "dark".to_string()),
+        );
+        theme::setup(&cc.egui_ctx, theme_mode);
 
         let (pty_sender, pty_receiver) = mpsc::channel();
 
@@ -199,10 +212,68 @@ impl AineerApp {
                 });
                 status
             },
+            command_palette: {
+                let mut cp = CommandPalette::new();
+                cp.set_items(vec![
+                    PaletteItem {
+                        id: "toggle_settings".into(),
+                        label: "Toggle Settings".into(),
+                        category: "View".into(),
+                        shortcut: Some("⌘ ,".into()),
+                    },
+                    PaletteItem {
+                        id: "toggle_diff".into(),
+                        label: "Toggle Diff Panel".into(),
+                        category: "View".into(),
+                        shortcut: None,
+                    },
+                    PaletteItem {
+                        id: "new_tab".into(),
+                        label: "New Tab".into(),
+                        category: "Tab".into(),
+                        shortcut: Some("⌘ T".into()),
+                    },
+                    PaletteItem {
+                        id: "close_tab".into(),
+                        label: "Close Tab".into(),
+                        category: "Tab".into(),
+                        shortcut: Some("⌘ W".into()),
+                    },
+                    PaletteItem {
+                        id: "toggle_theme".into(),
+                        label: "Toggle Dark/Light Theme".into(),
+                        category: "Appearance".into(),
+                        shortcut: None,
+                    },
+                    PaletteItem {
+                        id: "ssh_connect".into(),
+                        label: "SSH Remote Connection".into(),
+                        category: "Connection".into(),
+                        shortcut: None,
+                    },
+                    PaletteItem {
+                        id: "search_terminal".into(),
+                        label: "Search in Terminal".into(),
+                        category: "Search".into(),
+                        shortcut: Some("⌘⇧ F".into()),
+                    },
+                ]);
+                cp
+            },
+            activity_bar: ActivityBar::new(),
         }
     }
 
     fn poll_git_status(&mut self) {
+        if let Some(tab) = self.tab_manager.active_tab_mut() {
+            if let Some(cwd) = tab.backend.current_cwd() {
+                if let Some(watcher) = &mut self.git_watcher {
+                    if watcher.watched_path() != cwd {
+                        watcher.switch_directory(cwd.to_path_buf());
+                    }
+                }
+            }
+        }
         if let Some(watcher) = &self.git_watcher {
             if let Some(status) = watcher.try_recv() {
                 self.diff_panel.update_status(status.clone());
@@ -560,53 +631,139 @@ impl AineerApp {
         use ui::theme as t;
 
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 3.0;
+            ui.spacing_mut().item_spacing.x = 2.0;
 
             ui.label(
                 RichText::new(crate::branding::APP_NAME)
-                    .color(t::ACCENT_LIGHT)
+                    .color(t::ACCENT_LIGHT())
                     .size(13.0)
                     .strong(),
             );
-            ui.add_space(6.0);
+            ui.add_space(8.0);
 
             let tabs = self.tab_manager.tab_ids_and_titles();
             let active_id = self.tab_manager.active_tab_id();
+            let mut tab_to_close: Option<u64> = None;
+            let mut close_others_of: Option<u64> = None;
+            let mut close_right_of: Option<(u64, usize)> = None;
+            let mut duplicate_tab: Option<u64> = None;
 
-            for (id, title) in &tabs {
+            for (idx, (id, title)) in tabs.iter().enumerate() {
                 let is_active = active_id == Some(*id);
-                let btn = egui::Button::new(RichText::new(title).size(12.0).color(if is_active {
-                    t::FG
+                let fill = if is_active {
+                    t::TAB_ACTIVE_BG()
                 } else {
-                    t::FG_DIM
-                }))
-                .fill(if is_active {
-                    t::TAB_ACTIVE_BG
+                    egui::Color32::TRANSPARENT
+                };
+                let stroke = if is_active {
+                    egui::Stroke::new(1.0, t::alpha(t::ACCENT(), 60))
                 } else {
-                    t::TAB_INACTIVE_BG
-                })
-                .corner_radius(t::BUTTON_CORNER_RADIUS);
+                    egui::Stroke::NONE
+                };
 
-                let resp = ui.add(btn);
+                let resp = egui::Frame::new()
+                    .fill(fill)
+                    .stroke(stroke)
+                    .corner_radius(ui::theme::radius::MD)
+                    .inner_margin(egui::Margin::symmetric(8, 3))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 4.0;
+                            ui.label(RichText::new(title).size(12.0).color(if is_active {
+                                t::FG()
+                            } else {
+                                t::FG_DIM()
+                            }));
+                            if tabs.len() > 1 {
+                                let close_resp = ui.add(
+                                    egui::Button::new(
+                                        RichText::new("×").size(11.0).color(t::FG_MUTED()),
+                                    )
+                                    .fill(egui::Color32::TRANSPARENT)
+                                    .frame(false),
+                                );
+                                if close_resp.clicked() {
+                                    tab_to_close = Some(*id);
+                                }
+                            }
+                        });
+                    })
+                    .response;
+
                 if resp.clicked() {
                     self.tab_manager.set_active(*id);
                 }
                 if resp.middle_clicked() {
-                    self.tab_manager.remove_tab(*id);
-                    self.tab_states.retain(|(tid, _)| tid != id);
-                    if self.tab_manager.is_empty() {
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                    }
-                    return;
+                    tab_to_close = Some(*id);
                 }
+
+                let tab_id_copy = *id;
+                resp.context_menu(|ui| {
+                    if ui.button("Close Tab").clicked() {
+                        tab_to_close = Some(tab_id_copy);
+                        ui.close();
+                    }
+                    if tabs.len() > 1 && ui.button("Close Other Tabs").clicked() {
+                        close_others_of = Some(tab_id_copy);
+                        ui.close();
+                    }
+                    if idx + 1 < tabs.len() && ui.button("Close Tabs to the Right").clicked() {
+                        close_right_of = Some((tab_id_copy, idx));
+                        ui.close();
+                    }
+                    ui.separator();
+                    if ui.button("Duplicate Tab").clicked() {
+                        duplicate_tab = Some(tab_id_copy);
+                        ui.close();
+                    }
+                });
+            }
+
+            // Handle context menu actions
+            if let Some(close_id) = tab_to_close {
+                self.tab_manager.remove_tab(close_id);
+                self.tab_states.retain(|(tid, _)| *tid != close_id);
+                if self.tab_manager.is_empty() {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+                return;
+            }
+            if let Some(keep_id) = close_others_of {
+                let ids_to_remove: Vec<u64> = tabs
+                    .iter()
+                    .map(|(id, _)| *id)
+                    .filter(|id| *id != keep_id)
+                    .collect();
+                for id in ids_to_remove {
+                    self.tab_manager.remove_tab(id);
+                    self.tab_states.retain(|(tid, _)| *tid != id);
+                }
+                self.tab_manager.set_active(keep_id);
+                return;
+            }
+            if let Some((_, from_idx)) = close_right_of {
+                let ids_to_remove: Vec<u64> =
+                    tabs.iter().skip(from_idx + 1).map(|(id, _)| *id).collect();
+                for id in ids_to_remove {
+                    self.tab_manager.remove_tab(id);
+                    self.tab_states.retain(|(tid, _)| *tid != id);
+                }
+                return;
+            }
+            if duplicate_tab.is_some() {
+                self.tab_manager
+                    .create_tab(ctx.clone(), self.pty_sender.clone());
+                let new_id = self.tab_manager.active_tab_id().unwrap();
+                self.ensure_tab_state(new_id);
             }
 
             if ui
                 .add(
-                    egui::Button::new(RichText::new("+").color(t::FG_DIM))
-                        .fill(t::TAB_INACTIVE_BG)
-                        .corner_radius(t::BUTTON_CORNER_RADIUS),
+                    egui::Button::new(RichText::new("+").size(12.0).color(t::FG_DIM()))
+                        .fill(egui::Color32::TRANSPARENT)
+                        .corner_radius(ui::theme::radius::SM),
                 )
+                .on_hover_text("New tab (⌘T)")
                 .clicked()
             {
                 self.tab_manager
@@ -616,12 +773,14 @@ impl AineerApp {
             }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
+
                 if ui
                     .add(
-                        egui::Button::new(RichText::new("⚙").size(13.0).color(t::FG_SOFT))
-                            .fill(t::BUTTON_BG)
-                            .corner_radius(t::BUTTON_CORNER_RADIUS),
+                        egui::Button::new(RichText::new("⚙").size(14.0).color(t::FG_SOFT()))
+                            .fill(egui::Color32::TRANSPARENT),
                     )
+                    .on_hover_text("Settings")
                     .clicked()
                 {
                     self.settings_panel.toggle();
@@ -629,9 +788,8 @@ impl AineerApp {
 
                 if ui
                     .add(
-                        egui::Button::new(RichText::new("SSH").size(11.0).color(t::FG_SOFT))
-                            .fill(t::BUTTON_BG)
-                            .corner_radius(t::BUTTON_CORNER_RADIUS),
+                        egui::Button::new(RichText::new("SSH").size(10.0).color(t::FG_SOFT()))
+                            .fill(egui::Color32::TRANSPARENT),
                     )
                     .on_hover_text("SSH Remote Connection")
                     .clicked()
@@ -639,93 +797,152 @@ impl AineerApp {
                     self.show_ssh_dialog = true;
                 }
 
-                let diff_label = if self.diff_panel.visible {
-                    "◀ Diff"
+                let diff_icon = if self.diff_panel.visible {
+                    "◁"
                 } else {
-                    "Diff ▶"
+                    "▷"
                 };
                 if ui
                     .add(
-                        egui::Button::new(RichText::new(diff_label).size(11.0).color(t::FG_SOFT))
-                            .fill(t::BUTTON_BG)
-                            .corner_radius(t::BUTTON_CORNER_RADIUS),
+                        egui::Button::new(
+                            RichText::new(format!("{diff_icon} Diff"))
+                                .size(10.0)
+                                .color(t::FG_SOFT()),
+                        )
+                        .fill(egui::Color32::TRANSPARENT),
                     )
+                    .on_hover_text("Toggle diff panel")
                     .clicked()
                 {
                     self.diff_panel.toggle();
                 }
-
-                if let Some(ref status) = self.git_status {
-                    if let Some(ref branch) = status.branch {
-                        ui.add_space(4.0);
-                        egui::Frame::new()
-                            .fill(t::SURFACE)
-                            .corner_radius(6.0)
-                            .inner_margin(egui::Margin::symmetric(6, 2))
-                            .show(ui, |ui| {
-                                ui.label(
-                                    RichText::new(format!("⎇ {branch}"))
-                                        .size(11.0)
-                                        .monospace()
-                                        .color(t::FG_SOFT),
-                                );
-                            });
-                    }
-                }
-
-                if let Ok(status) = self.update_status.lock() {
-                    match &*status {
-                        crate::updater::UpdateStatus::Available { tag, url, body } => {
-                            let tag = tag.clone();
-                            let url = url.clone();
-                            let hover = if body.is_empty() {
-                                format!("{tag} available — click to open")
-                            } else {
-                                let truncated = if body.len() > 200 {
-                                    format!("{}…", &body[..200])
-                                } else {
-                                    body.clone()
-                                };
-                                format!("{tag} available\n\n{truncated}")
-                            };
-                            let resp = ui
-                                .add(
-                                    egui::Button::new(
-                                        RichText::new(format!("⬆ {tag}"))
-                                            .size(10.0)
-                                            .color(t::SUCCESS),
-                                    )
-                                    .fill(t::SURFACE)
-                                    .corner_radius(4.0),
-                                )
-                                .on_hover_text(hover);
-                            if resp.clicked() {
-                                ui.ctx().open_url(egui::OpenUrl::new_tab(url));
-                            }
-                        }
-                        crate::updater::UpdateStatus::Checking => {
-                            ui.label(RichText::new("⟳").size(10.0).color(t::FG_MUTED))
-                                .on_hover_text("Checking for updates...");
-                        }
-                        crate::updater::UpdateStatus::Error(msg) => {
-                            ui.label(RichText::new("⚠").size(10.0).color(t::FG_MUTED))
-                                .on_hover_text(format!("Update check failed: {msg}"));
-                        }
-                        _ => {}
-                    }
-                }
-
-                let gw_status = *self.gateway_status.borrow();
-                let (gw_color, gw_tip) = match gw_status {
-                    gateway::GatewayStatus::Running => (t::SUCCESS, "Gateway: Running"),
-                    gateway::GatewayStatus::Starting => (t::WARNING, "Gateway: Starting"),
-                    gateway::GatewayStatus::Error => (t::ERROR, "Gateway: Error"),
-                    gateway::GatewayStatus::Stopped => (t::FG_MUTED, "Gateway: Stopped"),
-                };
-                ui.label(RichText::new("●").color(gw_color).size(10.0))
-                    .on_hover_text(gw_tip);
             });
         });
+    }
+
+    fn show_status_bar(&self, ui: &mut egui::Ui) {
+        use ui::theme as t;
+
+        let mut bar = StatusBar::new();
+
+        // Git branch
+        if let Some(ref status) = self.git_status {
+            if let Some(ref branch) = status.branch {
+                bar = bar.left(
+                    StatusSegment::new(format!("⎇ {branch}"), t::ACCENT_LIGHT())
+                        .tooltip("Current git branch"),
+                );
+            }
+            let changed = status.diffs.len();
+            if changed > 0 {
+                bar = bar.left(
+                    StatusSegment::new(format!("△ {changed}"), t::WARNING())
+                        .tooltip(format!("{changed} file(s) changed")),
+                );
+            }
+        }
+
+        // CWD
+        let cwd = self
+            .tab_manager
+            .active_tab()
+            .and_then(|t| t.backend.current_cwd())
+            .map(|p| {
+                let s = p.to_string_lossy().to_string();
+                if let Ok(home) = std::env::var("HOME") {
+                    if let Some(rest) = s.strip_prefix(&home) {
+                        return format!("~{rest}");
+                    }
+                }
+                s
+            })
+            .unwrap_or_else(|| "~".into());
+        bar = bar.left(StatusSegment::new(cwd, t::FG_DIM()).tooltip("Working directory"));
+
+        // Update status
+        if let Ok(status) = self.update_status.lock() {
+            match &*status {
+                crate::updater::UpdateStatus::Available { tag, url, body } => {
+                    let tip = if body.is_empty() {
+                        format!("{tag} available")
+                    } else {
+                        let truncated = if body.len() > 200 {
+                            format!("{}…", &body[..200])
+                        } else {
+                            body.clone()
+                        };
+                        format!("{tag} available\n\n{truncated}")
+                    };
+                    bar = bar.right(
+                        StatusSegment::new(format!("⬆ {tag}"), t::SUCCESS())
+                            .tooltip(tip)
+                            .url(url.clone()),
+                    );
+                }
+                crate::updater::UpdateStatus::Checking => {
+                    bar = bar.right(
+                        StatusSegment::new("⟳", t::FG_MUTED()).tooltip("Checking for updates..."),
+                    );
+                }
+                crate::updater::UpdateStatus::Error(msg) => {
+                    bar = bar.right(
+                        StatusSegment::new("⚠", t::FG_MUTED())
+                            .tooltip(format!("Update check failed: {msg}")),
+                    );
+                }
+                _ => {}
+            }
+        }
+
+        // Gateway status
+        let gw_status = *self.gateway_status.borrow();
+        let (gw_text, gw_color, gw_tip) = match gw_status {
+            gateway::GatewayStatus::Running => ("● GW", t::SUCCESS(), "Gateway: Running"),
+            gateway::GatewayStatus::Starting => ("◐ GW", t::WARNING(), "Gateway: Starting"),
+            gateway::GatewayStatus::Error => ("● GW", t::ERROR(), "Gateway: Error"),
+            gateway::GatewayStatus::Stopped => ("○ GW", t::FG_MUTED(), "Gateway: Stopped"),
+        };
+        bar = bar.right(StatusSegment::new(gw_text, gw_color).tooltip(gw_tip));
+
+        bar.show(ui);
+    }
+
+    fn handle_palette_action(&mut self, ctx: &egui::Context, action: &str) {
+        match action {
+            "toggle_settings" => self.settings_panel.toggle(),
+            "toggle_diff" => self.diff_panel.toggle(),
+            "new_tab" => {
+                self.tab_manager
+                    .create_tab(ctx.clone(), self.pty_sender.clone());
+                let new_id = self.tab_manager.active_tab_id().unwrap();
+                self.ensure_tab_state(new_id);
+            }
+            "close_tab" => {
+                if let Some(id) = self.tab_manager.active_tab_id() {
+                    self.tab_manager.remove_tab(id);
+                    self.tab_states.retain(|(tid, _)| *tid != id);
+                }
+            }
+            "toggle_theme" => {
+                let mode = ui::theme::current_mode();
+                let new_mode = match mode {
+                    ui::theme::ThemeMode::Dark => ui::theme::ThemeMode::Light,
+                    ui::theme::ThemeMode::Light => ui::theme::ThemeMode::Dark,
+                };
+                ui::theme::apply(ctx, new_mode);
+                self.settings_panel.draft.theme = new_mode.as_str().to_string();
+            }
+            "ssh_connect" => self.show_ssh_dialog = true,
+            "search_terminal" => {
+                if let Some(id) = self.tab_manager.active_tab_id() {
+                    if let Some((_, state)) = self.tab_states.iter_mut().find(|(tid, _)| *tid == id)
+                    {
+                        state.search_bar.toggle();
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 
     fn show_ssh_popup(&mut self, ctx: &egui::Context) {
@@ -750,7 +967,7 @@ impl AineerApp {
                         RichText::new("Saved Profiles")
                             .strong()
                             .size(12.0)
-                            .color(t::FG),
+                            .color(t::FG()),
                     );
                     ui.add_space(4.0);
 
@@ -764,9 +981,9 @@ impl AineerApp {
                             if ui
                                 .add(
                                     egui::Button::new(
-                                        RichText::new(&label).size(12.0).color(t::FG),
+                                        RichText::new(&label).size(12.0).color(t::FG()),
                                     )
-                                    .fill(t::SURFACE)
+                                    .fill(t::SURFACE())
                                     .corner_radius(4.0),
                                 )
                                 .clicked()
@@ -776,7 +993,7 @@ impl AineerApp {
                             if ui
                                 .add(
                                     egui::Button::new(
-                                        RichText::new("✕").size(11.0).color(t::FG_DIM),
+                                        RichText::new("✕").size(11.0).color(t::FG_DIM()),
                                     )
                                     .fill(egui::Color32::TRANSPARENT),
                                 )
@@ -794,7 +1011,7 @@ impl AineerApp {
                     RichText::new("New Connection")
                         .strong()
                         .size(12.0)
-                        .color(t::FG),
+                        .color(t::FG()),
                 );
                 ui.add_space(4.0);
 
@@ -802,7 +1019,7 @@ impl AineerApp {
                     .num_columns(2)
                     .spacing([8.0, 4.0])
                     .show(ui, |ui| {
-                        ui.label(RichText::new("Name:").size(11.0).color(t::FG_SOFT));
+                        ui.label(RichText::new("Name:").size(11.0).color(t::FG_SOFT()));
                         ui.add(
                             egui::TextEdit::singleline(&mut self.ssh_draft.name)
                                 .desired_width(200.0)
@@ -810,14 +1027,14 @@ impl AineerApp {
                         );
                         ui.end_row();
 
-                        ui.label(RichText::new("Host:").size(11.0).color(t::FG_SOFT));
+                        ui.label(RichText::new("Host:").size(11.0).color(t::FG_SOFT()));
                         ui.add(
                             egui::TextEdit::singleline(&mut self.ssh_draft.host)
                                 .desired_width(200.0),
                         );
                         ui.end_row();
 
-                        ui.label(RichText::new("Port:").size(11.0).color(t::FG_SOFT));
+                        ui.label(RichText::new("Port:").size(11.0).color(t::FG_SOFT()));
                         let mut port_str = self.ssh_draft.port.to_string();
                         if ui
                             .add(egui::TextEdit::singleline(&mut port_str).desired_width(60.0))
@@ -829,14 +1046,18 @@ impl AineerApp {
                         }
                         ui.end_row();
 
-                        ui.label(RichText::new("User:").size(11.0).color(t::FG_SOFT));
+                        ui.label(RichText::new("User:").size(11.0).color(t::FG_SOFT()));
                         ui.add(
                             egui::TextEdit::singleline(&mut self.ssh_draft.user)
                                 .desired_width(200.0),
                         );
                         ui.end_row();
 
-                        ui.label(RichText::new("Identity file:").size(11.0).color(t::FG_SOFT));
+                        ui.label(
+                            RichText::new("Identity file:")
+                                .size(11.0)
+                                .color(t::FG_SOFT()),
+                        );
                         let mut key_path = self.ssh_draft.identity_file.clone().unwrap_or_default();
                         if ui
                             .add(
@@ -863,8 +1084,8 @@ impl AineerApp {
                     if ui
                         .add_enabled(
                             can_connect,
-                            egui::Button::new(RichText::new("Connect").size(12.0).color(t::FG))
-                                .fill(t::ACCENT),
+                            egui::Button::new(RichText::new("Connect").size(12.0).color(t::FG()))
+                                .fill(t::ACCENT()),
                         )
                         .clicked()
                     {
@@ -875,9 +1096,9 @@ impl AineerApp {
                         .add_enabled(
                             can_connect,
                             egui::Button::new(
-                                RichText::new("Save & Connect").size(12.0).color(t::FG),
+                                RichText::new("Save & Connect").size(12.0).color(t::FG()),
                             )
-                            .fill(t::ACCENT),
+                            .fill(t::ACCENT()),
                         )
                         .clicked()
                     {
@@ -1004,6 +1225,12 @@ impl eframe::App for AineerApp {
                 }
             }
         });
+
+        // Ctrl+Shift+P / Cmd+Shift+P: command palette
+        if ctx.input(|i| i.modifiers.command && i.modifiers.shift && i.key_pressed(Key::P)) {
+            self.command_palette.toggle();
+        }
+
         // Ctrl+Shift+F / Cmd+Shift+F: toggle terminal search
         {
             let toggle_search =
@@ -1026,6 +1253,21 @@ impl eframe::App for AineerApp {
         self.process_pty_events(ctx);
         self.poll_git_status();
         self.poll_agent_streams();
+
+        // Re-sync terminal theme if the UI theme mode changed
+        {
+            let current_mode = ui::theme::current_mode();
+            let need_refresh = ctx.memory_mut(|m| {
+                let prev: Option<String> = m.data.get_temp(egui::Id::new("__last_theme_mode"));
+                let cur = current_mode.as_str().to_string();
+                let changed = prev.as_deref() != Some(current_mode.as_str());
+                m.data.insert_temp(egui::Id::new("__last_theme_mode"), cur);
+                changed
+            });
+            if need_refresh {
+                self.terminal_theme = theme::aineer_terminal_theme();
+            }
+        }
 
         if self.tab_manager.is_empty() {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -1065,13 +1307,18 @@ impl eframe::App for AineerApp {
             .exact_height(t::TOOLBAR_HEIGHT)
             .frame(
                 egui::Frame::new()
-                    .fill(t::BG_ELEVATED)
-                    .stroke(egui::Stroke::new(1.0, t::BORDER_SUBTLE))
+                    .fill(t::BG_ELEVATED())
+                    .stroke(egui::Stroke::new(1.0, t::BORDER_SUBTLE()))
                     .inner_margin(egui::Margin::symmetric(8, 4)),
             )
             .show(ctx, |ui| {
                 self.show_tab_bar(ui, ctx);
             });
+
+        // Command palette overlay
+        if let Some(action) = self.command_palette.show(ctx) {
+            self.handle_palette_action(ctx, &action);
+        }
 
         if fullscreen_overlay {
             // Fullscreen terminal overlay for interactive commands (vim, htop, etc.)
@@ -1079,10 +1326,10 @@ impl eframe::App for AineerApp {
                 .exact_height(28.0)
                 .frame(
                     egui::Frame::new()
-                        .fill(t::blend(t::BG, t::WARNING, 0.08))
+                        .fill(t::blend(t::BG(), t::WARNING(), 0.08))
                         .stroke(egui::Stroke::new(
                             1.0,
-                            t::blend(t::BORDER_SUBTLE, t::WARNING, 0.3),
+                            t::blend(t::BORDER_SUBTLE(), t::WARNING(), 0.3),
                         )),
                 )
                 .show(ctx, |ui| {
@@ -1090,13 +1337,13 @@ impl eframe::App for AineerApp {
                         ui.label(
                             RichText::new("Interactive mode — exit the program to return to cards")
                                 .small()
-                                .color(t::WARNING),
+                                .color(t::WARNING()),
                         );
                     });
                 });
 
             egui::CentralPanel::default()
-                .frame(egui::Frame::new().fill(t::BG))
+                .frame(egui::Frame::new().fill(t::BG()))
                 .show(ctx, |ui| {
                     if let Some(tab) = self.tab_manager.active_tab_mut() {
                         let terminal = TerminalView::new(ui, &mut tab.backend)
@@ -1110,6 +1357,49 @@ impl eframe::App for AineerApp {
                     }
                 });
         } else {
+            // Activity bar (leftmost)
+            {
+                let mut active_item = None;
+                if self.diff_panel.visible {
+                    active_item = Some(ActivityItem::Diff);
+                } else if self.settings_panel.open {
+                    active_item = Some(ActivityItem::Settings);
+                } else if self.show_ssh_dialog {
+                    active_item = Some(ActivityItem::Ssh);
+                }
+                self.activity_bar.set_active(active_item);
+
+                egui::SidePanel::left("activity_bar")
+                    .exact_width(ACTIVITY_BAR_WIDTH)
+                    .frame(
+                        egui::Frame::new()
+                            .fill(t::BG_ELEVATED())
+                            .stroke(egui::Stroke::new(1.0, t::BORDER_SUBTLE()))
+                            .inner_margin(egui::Margin::same(0)),
+                    )
+                    .show(ctx, |ui| {
+                        if let Some(item) = self.activity_bar.show(ui) {
+                            match item {
+                                ActivityItem::Terminal => {
+                                    self.settings_panel.open = false;
+                                    self.diff_panel.visible = false;
+                                }
+                                ActivityItem::Diff => {
+                                    self.diff_panel.toggle();
+                                    self.settings_panel.open = false;
+                                }
+                                ActivityItem::Settings => {
+                                    self.settings_panel.toggle();
+                                    self.diff_panel.visible = false;
+                                }
+                                ActivityItem::Ssh => {
+                                    self.show_ssh_dialog = !self.show_ssh_dialog;
+                                }
+                            }
+                        }
+                    });
+            }
+
             // Settings panel (rightmost)
             if self.settings_panel.open {
                 egui::SidePanel::right("settings_panel")
@@ -1118,8 +1408,8 @@ impl eframe::App for AineerApp {
                     .max_width(600.0)
                     .frame(
                         egui::Frame::new()
-                            .fill(t::PANEL_BG)
-                            .stroke(egui::Stroke::new(1.0, t::BORDER_SUBTLE))
+                            .fill(t::PANEL_BG())
+                            .stroke(egui::Stroke::new(1.0, t::BORDER_SUBTLE()))
                             .inner_margin(egui::Margin::same(12)),
                     )
                     .show(ctx, |ui| {
@@ -1130,9 +1420,11 @@ impl eframe::App for AineerApp {
                                 |ui| {
                                     if ui
                                         .add(
-                                            egui::Button::new(RichText::new("✕").color(t::FG_DIM))
-                                                .fill(t::SURFACE)
-                                                .corner_radius(t::BUTTON_CORNER_RADIUS),
+                                            egui::Button::new(
+                                                RichText::new("✕").color(t::FG_DIM()),
+                                            )
+                                            .fill(t::SURFACE())
+                                            .corner_radius(t::BUTTON_CORNER_RADIUS),
                                         )
                                         .clicked()
                                     {
@@ -1154,8 +1446,8 @@ impl eframe::App for AineerApp {
                     .max_width(600.0)
                     .frame(
                         egui::Frame::new()
-                            .fill(t::PANEL_BG)
-                            .stroke(egui::Stroke::new(1.0, t::BORDER_SUBTLE))
+                            .fill(t::PANEL_BG())
+                            .stroke(egui::Stroke::new(1.0, t::BORDER_SUBTLE()))
                             .inner_margin(egui::Margin::same(10)),
                     )
                     .show(ctx, |ui| {
@@ -1182,22 +1474,45 @@ impl eframe::App for AineerApp {
                     });
             }
 
-            // Input bar at bottom
+            // Status bar (very bottom)
+            egui::TopBottomPanel::bottom("status_bar")
+                .exact_height(t::STATUS_BAR_HEIGHT)
+                .frame(
+                    egui::Frame::new()
+                        .fill(t::BG_ELEVATED())
+                        .stroke(egui::Stroke::new(1.0, t::BORDER_SUBTLE()))
+                        .inner_margin(egui::Margin::symmetric(4, 0)),
+                )
+                .show(ctx, |ui| {
+                    self.show_status_bar(ui);
+                });
+
+            // Input bar at bottom (above status bar)
             egui::TopBottomPanel::bottom("input_bar")
                 .frame(
                     egui::Frame::new()
-                        .fill(t::BG_ELEVATED)
-                        .stroke(egui::Stroke::new(1.0, t::BORDER_SUBTLE)),
+                        .fill(t::BG_ELEVATED())
+                        .stroke(egui::Stroke::new(1.0, t::BORDER_SUBTLE())),
                 )
                 .show(ctx, |ui| {
                     let tab_id = active_tab_id;
                     let settings_open = self.settings_panel.open;
+                    let cwd_str = self
+                        .tab_manager
+                        .active_tab_mut()
+                        .and_then(|t| t.backend.current_cwd())
+                        .map(|p| p.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "~".to_string());
+                    let git_branch = self.git_status.as_ref().and_then(|s| s.branch.clone());
                     if let Some(state) = self
                         .tab_states
                         .iter_mut()
                         .find(|(id, _)| *id == tab_id)
                         .map(|(_, s)| s)
                     {
+                        state
+                            .input_bar
+                            .set_prompt_context(&cwd_str, git_branch.as_deref());
                         let card_items = build_card_picker_items(&state.timeline);
                         state.input_bar.focus_enabled = !settings_open;
                         let action = state.input_bar.show(ui, &card_items, &self.slash_items);
@@ -1253,7 +1568,7 @@ impl eframe::App for AineerApp {
             // Main content: timeline + live terminal
             let split_frac = self.split_fraction;
             egui::CentralPanel::default()
-                .frame(egui::Frame::new().fill(t::BG))
+                .frame(egui::Frame::new().fill(t::BG()))
                 .show(ctx, |ui| {
                     let available_height = ui.available_height();
                     let splitter_h = 6.0;
@@ -1289,9 +1604,9 @@ impl eframe::App for AineerApp {
                         egui::Stroke::new(
                             1.0,
                             if splitter_resp.hovered() || splitter_resp.dragged() {
-                                t::ACCENT
+                                t::ACCENT()
                             } else {
-                                t::BORDER_SUBTLE
+                                t::BORDER_SUBTLE()
                             },
                         ),
                     );

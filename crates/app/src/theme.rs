@@ -14,9 +14,9 @@ const FONT_CJK_BYTES: &[u8] = include_bytes!("../assets/fonts/LXGWWenKaiMonoTC-R
 const FONT_SYMBOLS: &str = "Noto Symbols";
 const FONT_SYMBOLS_BYTES: &[u8] = include_bytes!("../assets/fonts/NotoSansSymbols2-Regular.ttf");
 
-pub fn setup(ctx: &egui::Context) {
+pub fn setup(ctx: &egui::Context, mode: ui::theme::ThemeMode) {
     setup_fonts(ctx);
-    ui::theme::apply(ctx);
+    ui::theme::apply(ctx, mode);
 }
 
 fn setup_fonts(ctx: &egui::Context) {
@@ -50,15 +50,15 @@ pub fn aineer_terminal_theme() -> terminal::TerminalTheme {
     terminal::TerminalTheme::new(Box::new(terminal::ColorPalette {
         background: format!(
             "#{:02X}{:02X}{:02X}",
-            theme::PANEL_BG.r(),
-            theme::PANEL_BG.g(),
-            theme::PANEL_BG.b()
+            theme::PANEL_BG().r(),
+            theme::PANEL_BG().g(),
+            theme::PANEL_BG().b()
         ),
         foreground: format!(
             "#{:02X}{:02X}{:02X}",
-            theme::FG.r(),
-            theme::FG.g(),
-            theme::FG.b()
+            theme::FG().r(),
+            theme::FG().g(),
+            theme::FG().b()
         ),
         black: String::from("#1A1A2E"),
         red: String::from("#F38BA8"),

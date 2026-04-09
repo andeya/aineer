@@ -94,6 +94,11 @@ impl TabManager {
         }
     }
 
+    pub fn active_tab(&self) -> Option<&Tab> {
+        let id = self.active_tab_id?;
+        self.tabs.get(&id)
+    }
+
     pub fn active_tab_mut(&mut self) -> Option<&mut Tab> {
         let id = self.active_tab_id?;
         self.tabs.get_mut(&id)
