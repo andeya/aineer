@@ -6,6 +6,7 @@ use crate::theme::{self as t, font_size, radius, spacing};
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum ActivityItem {
     Terminal,
+    Explorer,
     Diff,
     Settings,
     Ssh,
@@ -15,6 +16,7 @@ impl ActivityItem {
     pub fn icon(&self) -> &'static str {
         match self {
             Self::Terminal => icons::TERMINAL,
+            Self::Explorer => icons::EXPLORER,
             Self::Diff => icons::SOURCE_CONTROL,
             Self::Settings => icons::SETTINGS,
             Self::Ssh => icons::SSH,
@@ -24,6 +26,7 @@ impl ActivityItem {
     pub fn tooltip(&self) -> &'static str {
         match self {
             Self::Terminal => "Terminal",
+            Self::Explorer => "Explorer",
             Self::Diff => "Source Control",
             Self::Settings => "Settings",
             Self::Ssh => "SSH Connections",
@@ -55,6 +58,7 @@ impl ActivityBar {
 
             let items = [
                 ActivityItem::Terminal,
+                ActivityItem::Explorer,
                 ActivityItem::Diff,
                 ActivityItem::Settings,
                 ActivityItem::Ssh,
@@ -72,29 +76,28 @@ impl ActivityBar {
 
                 // Each item needs its own ID scope to prevent collisions
                 // between the sibling label widgets inside the frames.
-                let resp = ui.push_id(*item, |ui| {
-                    egui::Frame::new()
-                        .fill(if is_active {
-                            t::alpha(t::ACCENT(), 15)
-                        } else {
-                            egui::Color32::TRANSPARENT
-                        })
-                        .corner_radius(radius::MD)
-                        .inner_margin(egui::Margin::same(spacing::SM as i8))
-                        .show(ui, |ui| {
-                            ui.set_min_width(28.0);
-                            ui.set_min_height(28.0);
-                            ui.vertical_centered(|ui| {
-                                ui.label(
-                                    RichText::new(item.icon())
-                                        .size(font_size::TITLE)
-                                        .color(fg),
-                                );
-                            });
-                        })
-                        .response
-                })
-                .inner;
+                let resp = ui
+                    .push_id(*item, |ui| {
+                        egui::Frame::new()
+                            .fill(if is_active {
+                                t::alpha(t::ACCENT(), 15)
+                            } else {
+                                egui::Color32::TRANSPARENT
+                            })
+                            .corner_radius(radius::MD)
+                            .inner_margin(egui::Margin::same(spacing::SM as i8))
+                            .show(ui, |ui| {
+                                ui.set_min_width(28.0);
+                                ui.set_min_height(28.0);
+                                ui.vertical_centered(|ui| {
+                                    ui.label(
+                                        RichText::new(item.icon()).size(font_size::TITLE).color(fg),
+                                    );
+                                });
+                            })
+                            .response
+                    })
+                    .inner;
 
                 if is_active {
                     ui.painter().vline(

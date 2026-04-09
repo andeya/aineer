@@ -298,6 +298,11 @@ pub fn alpha(color: Color32, a: u8) -> Color32 {
     Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), a)
 }
 
+/// Like `alpha` but takes the alpha from an existing color (for animation).
+pub fn alpha_color(color: Color32, a: u8) -> Color32 {
+    Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), a)
+}
+
 pub fn panel_border(accent: Color32, focused: bool) -> Color32 {
     if focused {
         blend(BORDER_STRONG(), accent, 0.7)

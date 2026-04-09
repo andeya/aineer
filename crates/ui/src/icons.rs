@@ -57,7 +57,16 @@ pub const CLIPBOARD: &str = "📋";
 pub const RULER: &str = "📐";
 pub const CHART: &str = "📊";
 
+// ── File system ──────────────────────────────────────────────────
+pub const FOLDER: &str = "📁";
+pub const FOLDER_OPEN: &str = "📂";
+pub const FILE: &str = "📄";
+pub const EXPLORER: &str = "📁";
+
 // ── UI chrome ────────────────────────────────────────────────────
 pub const UNSAVED: &str = "●";
 pub const THEME_DARK: &str = "🌙";
 pub const THEME_LIGHT: &str = "☀";
+
+// ── Notifications ────────────────────────────────────────────────
+pub const BELL: &str = "🔔";
