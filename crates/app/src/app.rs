@@ -13,8 +13,8 @@ use ui::search_bar::{SearchAction, SearchBar};
 use ui::settings::SettingsPanel;
 use ui::timeline::{Timeline, TimelineAction};
 use ui::widgets::{
-    ActivityBar, ActivityItem, CommandPalette, PaletteItem, StatusBar, StatusSegment,
-    ACTIVITY_BAR_WIDTH,
+    ActivityBar, ActivityItem, CommandPalette, ExplorerAction, ExplorerPanel, PaletteItem,
+    StatusBar, StatusSegment, ToastManager, ACTIVITY_BAR_WIDTH,
 };
 
 use crate::agent::{AgentEvent, AgentHandle, ToolApproval};
@@ -104,6 +104,8 @@ pub struct AineerApp {
     update_status: Arc<std::sync::Mutex<crate::updater::UpdateStatus>>,
     command_palette: CommandPalette,
     activity_bar: ActivityBar,
+    explorer: ExplorerPanel,
+    toasts: ToastManager,
 }
 
 impl AineerApp {
@@ -261,6 +263,8 @@ impl AineerApp {
                 cp
             },
             activity_bar: ActivityBar::new(),
+            explorer: ExplorerPanel::new(),
+            toasts: ToastManager::default(),
         }
     }
 
@@ -648,7 +652,17 @@ impl AineerApp {
             let mut close_right_of: Option<(u64, usize)> = None;
             let mut duplicate_tab: Option<u64> = None;
 
-            for (idx, (id, title)) in tabs.iter().enumerate() {
+            // Tab overflow: only show up to N tabs; show "▾ N more" button for the rest
+            const MAX_VISIBLE_TABS: usize = 8;
+            let overflow_count = tabs.len().saturating_sub(MAX_VISIBLE_TABS);
+            let visible_tabs = &tabs[..tabs.len().min(MAX_VISIBLE_TABS)];
+            let hidden_tabs = if overflow_count > 0 {
+                &tabs[MAX_VISIBLE_TABS..]
+            } else {
+                &[]
+            };
+
+            for (idx, (id, title)) in visible_tabs.iter().enumerate() {
                 let is_active = active_id == Some(*id);
                 let fill = if is_active {
                     t::TAB_ACTIVE_BG()
@@ -661,34 +675,57 @@ impl AineerApp {
                     egui::Stroke::NONE
                 };
 
-                let resp = egui::Frame::new()
-                    .fill(fill)
-                    .stroke(stroke)
-                    .corner_radius(ui::theme::radius::MD)
-                    .inner_margin(egui::Margin::symmetric(8, 3))
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 4.0;
-                            ui.label(RichText::new(title).size(12.0).color(if is_active {
-                                t::FG()
+                // Check if this tab has a running shell command (spinner indicator)
+                let has_running = self
+                    .tab_states
+                    .iter()
+                    .find(|(tid, _)| tid == id)
+                    .and_then(|(_, state)| {
+                        state.timeline.cards.iter().rev().find_map(|c| {
+                            if let ui::cards::Card::Shell(sc) = c {
+                                Some(sc.running)
                             } else {
-                                t::FG_DIM()
-                            }));
-                            if tabs.len() > 1 {
-                                let close_resp = ui.add(
-                                    egui::Button::new(
-                                        RichText::new("×").size(11.0).color(t::FG_MUTED()),
-                                    )
-                                    .fill(egui::Color32::TRANSPARENT)
-                                    .frame(false),
-                                );
-                                if close_resp.clicked() {
-                                    tab_to_close = Some(*id);
-                                }
+                                None
                             }
-                        });
+                        })
                     })
-                    .response;
+                    .unwrap_or(false);
+
+                let resp = ui
+                    .push_id(id, |ui| {
+                        egui::Frame::new()
+                            .fill(fill)
+                            .stroke(stroke)
+                            .corner_radius(ui::theme::radius::MD)
+                            .inner_margin(egui::Margin::symmetric(8, 3))
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 4.0;
+                                    if has_running {
+                                        ui.spinner();
+                                    }
+                                    ui.label(RichText::new(title).size(12.0).color(if is_active {
+                                        t::FG()
+                                    } else {
+                                        t::FG_DIM()
+                                    }));
+                                    if tabs.len() > 1 {
+                                        let close_resp = ui.add(
+                                            egui::Button::new(
+                                                RichText::new("×").size(11.0).color(t::FG_MUTED()),
+                                            )
+                                            .fill(egui::Color32::TRANSPARENT)
+                                            .frame(false),
+                                        );
+                                        if close_resp.clicked() {
+                                            tab_to_close = Some(*id);
+                                        }
+                                    }
+                                });
+                            })
+                            .response
+                    })
+                    .inner;
 
                 if resp.clicked() {
                     self.tab_manager.set_active(*id);
@@ -717,6 +754,30 @@ impl AineerApp {
                         ui.close();
                     }
                 });
+            }
+
+            // Tab overflow dropdown: "▾ N more"
+            if !hidden_tabs.is_empty() {
+                let btn = ui.add(
+                    egui::Button::new(
+                        RichText::new(format!("▾ {} more", hidden_tabs.len()))
+                            .size(11.0)
+                            .color(t::FG_DIM()),
+                    )
+                    .fill(egui::Color32::TRANSPARENT),
+                );
+                btn.context_menu(|ui| {
+                    for (hid, htitle) in hidden_tabs {
+                        if ui.button(htitle).clicked() {
+                            self.tab_manager.set_active(*hid);
+                            ui.close();
+                        }
+                    }
+                });
+                if btn.clicked() {
+                    // On regular click, also open the popup via context_menu simulation
+                    // (egui doesn't support this directly; the context_menu handles it)
+                }
             }
 
             // Handle context menu actions
@@ -1359,8 +1420,13 @@ impl eframe::App for AineerApp {
         } else {
             // Activity bar (leftmost)
             {
+                let show_explorer = ctx
+                    .data(|d| d.get_temp::<bool>(egui::Id::new("show_explorer")))
+                    .unwrap_or(false);
                 let mut active_item = None;
-                if self.diff_panel.visible {
+                if show_explorer {
+                    active_item = Some(ActivityItem::Explorer);
+                } else if self.diff_panel.visible {
                     active_item = Some(ActivityItem::Diff);
                 } else if self.settings_panel.open {
                     active_item = Some(ActivityItem::Settings);
@@ -1383,14 +1449,35 @@ impl eframe::App for AineerApp {
                                 ActivityItem::Terminal => {
                                     self.settings_panel.open = false;
                                     self.diff_panel.visible = false;
+                                    ctx.data_mut(|d| {
+                                        d.insert_temp(egui::Id::new("show_explorer"), false)
+                                    });
+                                }
+                                ActivityItem::Explorer => {
+                                    let cur = ctx
+                                        .data(|d| {
+                                            d.get_temp::<bool>(egui::Id::new("show_explorer"))
+                                        })
+                                        .unwrap_or(false);
+                                    ctx.data_mut(|d| {
+                                        d.insert_temp(egui::Id::new("show_explorer"), !cur)
+                                    });
+                                    self.settings_panel.open = false;
+                                    self.diff_panel.visible = false;
                                 }
                                 ActivityItem::Diff => {
                                     self.diff_panel.toggle();
                                     self.settings_panel.open = false;
+                                    ctx.data_mut(|d| {
+                                        d.insert_temp(egui::Id::new("show_explorer"), false)
+                                    });
                                 }
                                 ActivityItem::Settings => {
                                     self.settings_panel.toggle();
                                     self.diff_panel.visible = false;
+                                    ctx.data_mut(|d| {
+                                        d.insert_temp(egui::Id::new("show_explorer"), false)
+                                    });
                                 }
                                 ActivityItem::Ssh => {
                                     self.show_ssh_dialog = !self.show_ssh_dialog;
@@ -1398,6 +1485,42 @@ impl eframe::App for AineerApp {
                             }
                         }
                     });
+            }
+
+            // Explorer panel (left side drawer)
+            {
+                let show_explorer = ctx
+                    .data(|d| d.get_temp::<bool>(egui::Id::new("show_explorer")))
+                    .unwrap_or(false);
+                if show_explorer {
+                    // Sync root with active terminal's CWD
+                    if let Some(tab) = self.tab_manager.active_tab_mut() {
+                        if let Some(cwd) = tab.backend.current_cwd() {
+                            self.explorer.set_root(cwd);
+                        }
+                    }
+                    egui::SidePanel::left("explorer_panel")
+                        .default_width(220.0)
+                        .min_width(160.0)
+                        .max_width(400.0)
+                        .frame(
+                            egui::Frame::new()
+                                .fill(t::PANEL_BG())
+                                .stroke(egui::Stroke::new(1.0, t::BORDER_SUBTLE()))
+                                .inner_margin(egui::Margin::same(8)),
+                        )
+                        .show(ctx, |ui| {
+                            let action = self.explorer.show(ui);
+                            if let ExplorerAction::ChangeDir(path) = action {
+                                if let Some(tab) = self.tab_manager.active_tab_mut() {
+                                    let cmd =
+                                        format!("cd {}\n", shell_escape(&path.to_string_lossy()));
+                                    tab.backend
+                                        .process_command(BackendCommand::Write(cmd.into_bytes()));
+                                }
+                            }
+                        });
+                }
             }
 
             // Settings panel (rightmost)
@@ -1434,7 +1557,14 @@ impl eframe::App for AineerApp {
                             );
                         });
                         ui.separator();
-                        self.settings_panel.show(ui);
+                        let save_result = self.settings_panel.show(ui);
+                        if let Some(ok) = save_result {
+                            if ok {
+                                self.toasts.success("Settings saved");
+                            } else {
+                                self.toasts.error("Failed to save settings");
+                            }
+                        }
                     });
             }
 
@@ -1665,5 +1795,13 @@ impl eframe::App for AineerApp {
         }
 
         self.show_ssh_popup(ctx);
+
+        // Toast notifications — rendered on top of all other UI
+        self.toasts.show(ctx);
     }
+}
+
+/// Escape a path for safe use in a shell `cd` command.
+fn shell_escape(s: &str) -> String {
+    format!("\"{}\"", s.replace('"', "\\\""))
 }
