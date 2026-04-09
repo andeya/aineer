@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
-pub use codineer_core::OAuthTokenSet;
-use codineer_core::{
+pub use protocol::OAuthTokenSet;
+use protocol::{
     load_oauth_credentials, save_oauth_credentials, OAuthConfig, OAuthRefreshRequest,
     OAuthTokenExchangeRequest,
 };
@@ -105,12 +105,12 @@ impl From<OAuthTokenSet> for AuthSource {
     }
 }
 
-impl From<codineer_core::ResolvedCredential> for AuthSource {
-    fn from(value: codineer_core::ResolvedCredential) -> Self {
+impl From<protocol::ResolvedCredential> for AuthSource {
+    fn from(value: protocol::ResolvedCredential) -> Self {
         match value {
-            codineer_core::ResolvedCredential::ApiKey(key) => Self::ApiKey(key),
-            codineer_core::ResolvedCredential::BearerToken(token) => Self::BearerToken(token),
-            codineer_core::ResolvedCredential::ApiKeyAndBearer {
+            protocol::ResolvedCredential::ApiKey(key) => Self::ApiKey(key),
+            protocol::ResolvedCredential::BearerToken(token) => Self::BearerToken(token),
+            protocol::ResolvedCredential::ApiKeyAndBearer {
                 api_key,
                 bearer_token,
             } => Self::ApiKeyAndBearer {
@@ -123,23 +123,23 @@ impl From<codineer_core::ResolvedCredential> for AuthSource {
 }
 
 #[derive(Clone)]
-pub struct CodineerApiClient {
+pub struct AineerApiClient {
     http: reqwest::Client,
     auth: AuthSource,
     base_url: String,
     retry: RetryPolicy,
 }
 
-impl std::fmt::Debug for CodineerApiClient {
+impl std::fmt::Debug for AineerApiClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CodineerApiClient")
+        f.debug_struct("AineerApiClient")
             .field("base_url", &self.base_url)
             .field("auth", &self.auth)
             .finish()
     }
 }
 
-impl CodineerApiClient {
+impl AineerApiClient {
     #[must_use]
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
@@ -443,7 +443,7 @@ fn resolve_saved_oauth_token_set(
     let Some(refresh_token) = token_set.refresh_token.clone() else {
         return Err(ApiError::ExpiredOAuthToken);
     };
-    let client = CodineerApiClient::from_auth(AuthSource::None).with_base_url(read_base_url());
+    let client = AineerApiClient::from_auth(AuthSource::None).with_base_url(read_base_url());
     let refreshed = client_runtime_block_on(async {
         client
             .refresh_oauth_token(
@@ -586,5 +586,5 @@ struct ApiErrorBody {
 }
 
 #[cfg(test)]
-#[path = "codineer_provider_tests.rs"]
+#[path = "aineer_provider_tests.rs"]
 mod tests;

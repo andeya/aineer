@@ -19,7 +19,7 @@ use crate::types::{
     InputContentBlock, InputMessage, MessageRequest, MessageResponse, OutputContentBlock,
     ToolChoice, ToolDefinition, ToolResultContentBlock, Usage,
 };
-use codineer_core::GeminiCacheConfig;
+use protocol::GeminiCacheConfig;
 
 use openai_compat_sse::{first_non_empty_field, OpenAiSseParser};
 use openai_compat_stream::StreamState;

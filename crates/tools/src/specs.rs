@@ -1,4 +1,4 @@
-use runtime::PermissionMode;
+use engine::PermissionMode;
 use serde_json::json;
 
 use crate::registry::{ToolSpec, ToolTier};
@@ -351,7 +351,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "Config",
-            description: "Get or set Codineer settings.",
+            description: "Get or set Aineer settings.",
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -485,7 +485,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
             description: "Query language intelligence via an LSP server: hover info, code \
                 completions, go-to-definition, find references, document/workspace symbol \
                 outlines, rename edits, formatting edits, and workspace diagnostics. \
-                The LSP server must be configured via the CODINEER_LSP_SERVERS environment \
+                The LSP server must be configured via the AINEER_LSP_SERVERS environment \
                 variable (JSON array of LspServerConfig objects).",
             input_schema: json!({
                 "type": "object",
@@ -831,7 +831,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "CronDelete",
-            description: "Remove a codineer-managed cron job by its ID.",
+            description: "Remove a aineer-managed cron job by its ID.",
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -848,7 +848,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "CronList",
-            description: "List all codineer-managed cron jobs, optionally filtered by label.",
+            description: "List all aineer-managed cron jobs, optionally filtered by label.",
             input_schema: json!({
                 "type": "object",
                 "properties": {

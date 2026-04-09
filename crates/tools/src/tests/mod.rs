@@ -15,7 +15,7 @@ use super::{
     AgentInput, AgentJob, SubagentToolExecutor,
 };
 use api::OutputContentBlock;
-use runtime::{ApiRequest, AssistantEvent, ConversationRuntime, RuntimeError, Session};
+use engine::{ApiRequest, AssistantEvent, ConversationRuntime, RuntimeError, Session};
 use serde_json::json;
 use serde_json::Value;
 

@@ -1,12 +1,12 @@
-# codineer-lsp
+# aineer-lsp
 
-[Codineer](https://github.com/andeya/codineer) 的语言服务器协议（LSP）客户端集成。
+[Aineer](https://github.com/andeya/aineer) 的语言服务器协议（LSP）客户端集成。
 
 [English](README.md)
 
 ---
 
-本 crate 提供 Codineer 与语言服务器通信的 LSP 传输层，管理服务器生命周期（启动、初始化、关闭）、JSON-RPC 消息帧处理，以及通过 `tokio::sync::watch` 实现的异步诊断轮询。
+本 crate 提供 Aineer 与语言服务器通信的 LSP 传输层，管理服务器生命周期（启动、初始化、关闭）、JSON-RPC 消息帧处理，以及通过 `tokio::sync::watch` 实现的异步诊断轮询。
 
 ### 支持的操作
 
@@ -30,8 +30,8 @@
 
 ## 说明
 
-本 crate 是 Codineer 项目的内部组件，作为 `codineer-cli` 的依赖发布到 crates.io，不用于独立使用。在 Codineer 工作区之外不保证 API 稳定性。
+本 crate 是 Aineer 项目的内部组件，作为 `aineer-cli` 的依赖发布到 crates.io，不用于独立使用。在 Aineer 工作区之外不保证 API 稳定性。
 
 ## 许可证
 
-MIT — 详见 [LICENSE](https://github.com/andeya/codineer/blob/main/LICENSE)。
+MIT — 详见 [LICENSE](https://github.com/andeya/aineer/blob/main/LICENSE)。

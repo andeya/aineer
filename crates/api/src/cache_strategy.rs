@@ -12,7 +12,7 @@ use crate::providers::{is_retryable_status, parse_custom_provider_prefix};
 use crate::types::{
     gemini_cache_key_hash, GeminiCachedContent, MessageRequest, SystemBlock, ToolDefinition,
 };
-use codineer_core::GeminiCacheConfig;
+use protocol::GeminiCacheConfig;
 
 /// Strategy for provider-level context caching (e.g. Gemini's cachedContents API).
 /// Providers that don't support explicit caching simply use [`NoCacheStrategy`].
@@ -99,7 +99,7 @@ impl GeminiCacheStrategy {
         let mut body = json!({
             "model": gemini_model_resource_name(model),
             "displayName": format!(
-                "codineer-cache-{:x}",
+                "aineer-cache-{:x}",
                 gemini_cache_key_hash(
                     if system_blocks.is_empty() {
                         None

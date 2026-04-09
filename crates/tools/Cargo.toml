@@ -1,6 +1,6 @@
 [package]
-name = "codineer-tools"
-description = "AI-callable tool definitions and execution for Codineer"
+name = "aineer-tools"
+description = "AI-callable tool definitions and execution for Aineer"
 readme = "README.md"
 version.workspace = true
 edition.workspace = true
@@ -17,7 +17,7 @@ git2.workspace = true
 lsp.workspace = true
 lsp-types.workspace = true
 plugins.workspace = true
-runtime.workspace = true
+engine.workspace = true
 reqwest = { version = "0.12", default-features = false, features = [
     "json",
     "rustls-tls",

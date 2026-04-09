@@ -1,6 +1,6 @@
-# codineer-plugins
+# aineer-plugins
 
-[Codineer](https://github.com/andeya/codineer) 的插件系统与 Hook 框架。
+[Aineer](https://github.com/andeya/aineer) 的插件系统与 Hook 框架。
 
 [English](README.md)
 
@@ -136,8 +136,8 @@ my-plugin/
 
 | 变量                 | 说明                                   |
 | -------------------- | -------------------------------------- |
-| `CODINEER_PLUGIN_ID` | 完整插件 ID（如 `my-plugin@external`） |
-| `CODINEER_TOOL_NAME` | 当前被调用的工具名称                   |
+| `AINEER_PLUGIN_ID` | 完整插件 ID（如 `my-plugin@external`） |
+| `AINEER_TOOL_NAME` | 当前被调用的工具名称                   |
 
 ### 工具脚本示例
 
@@ -210,7 +210,7 @@ sqlite3 project.db "$SQL" --json
 }
 ```
 
-- **Init**：Codineer 会话启动时运行（插件加载完成后）。
+- **Init**：Aineer 会话启动时运行（插件加载完成后）。
 - **Shutdown**：会话结束时运行。
 
 ---
@@ -223,14 +223,14 @@ sqlite3 project.db "$SQL" --json
 
 | 位置                                           | 来源类型 | 说明                                |
 | ---------------------------------------------- | -------- | ----------------------------------- |
-| `~/.codineer/plugins/*/`                       | 已安装   | 默认安装位置                        |
+| `~/.aineer/plugins/*/`                       | 已安装   | 默认安装位置                        |
 | `settings.json` 中的 `plugins.installRoot`     | 已安装   | 自定义安装根目录（覆盖默认值）      |
-| `plugins.externalDirectories` 中的条目         | 外部     | 额外目录（如 `<项目>/.codineer/plugins`）|
-| 嵌入 Codineer 二进制                           | 内置     | 随 Codineer 分发                    |
+| `plugins.externalDirectories` 中的条目         | 外部     | 额外目录（如 `<项目>/.aineer/plugins`）|
+| 嵌入 Aineer 二进制                           | 内置     | 随 Aineer 分发                    |
 
 每个插件子目录的根目录下必须包含 `plugin.json`。
 
-> **注意**：项目内的 `.codineer/plugins/` **不会被自动发现**。如需使用项目本地插件，请在 `.codineer/settings.json` 的 `plugins.externalDirectories` 中添加该路径。
+> **注意**：项目内的 `.aineer/plugins/` **不会被自动发现**。如需使用项目本地插件，请在 `.aineer/settings.json` 的 `plugins.externalDirectories` 中添加该路径。
 
 ### 管理插件
 
@@ -249,8 +249,8 @@ sqlite3 project.db "$SQL" --json
 也可直接通过 CLI 管理：
 
 ```bash
-codineer plugins list
-codineer plugins install ./my-plugin
+aineer plugins list
+aineer plugins install ./my-plugin
 ```
 
 ### 配置
@@ -345,14 +345,14 @@ echo "完成。"
 
 ```bash
 #!/bin/sh
-echo "[$(date -u +%FT%TZ)] tool_call plugin=$CODINEER_PLUGIN_ID tool=$CODINEER_TOOL_NAME" >> .codineer/audit.log
+echo "[$(date -u +%FT%TZ)] tool_call plugin=$AINEER_PLUGIN_ID tool=$AINEER_TOOL_NAME" >> .aineer/audit.log
 ```
 
 ### 安装和使用
 
 ```bash
 # 将插件复制到项目插件目录
-cp -r devops-toolkit .codineer/plugins/
+cp -r devops-toolkit .aineer/plugins/
 
 # 或通过斜杠命令安装
 /plugin install ./devops-toolkit
@@ -367,8 +367,8 @@ cp -r devops-toolkit .codineer/plugins/
 
 ## 说明
 
-本 crate 是 Codineer 项目的内部组件，作为 `codineer-cli` 的依赖发布到 crates.io，不用于独立使用。在 Codineer 工作区之外不保证 API 稳定性。
+本 crate 是 Aineer 项目的内部组件，作为 `aineer-cli` 的依赖发布到 crates.io，不用于独立使用。在 Aineer 工作区之外不保证 API 稳定性。
 
 ## 许可证
 
-MIT — 详见 [LICENSE](https://github.com/andeya/codineer/blob/main/LICENSE)。
+MIT — 详见 [LICENSE](https://github.com/andeya/aineer/blob/main/LICENSE)。

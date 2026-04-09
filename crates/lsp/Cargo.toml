@@ -1,6 +1,6 @@
 [package]
-name = "codineer-lsp"
-description = "Language Server Protocol client integration for Codineer"
+name = "aineer-lsp"
+description = "Language Server Protocol client integration for Aineer"
 readme = "README.md"
 version.workspace = true
 edition.workspace = true

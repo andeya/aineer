@@ -10,7 +10,7 @@ use api::{
     MessageResponse, OutputContentBlock, ProviderClient, StreamEvent as ApiStreamEvent,
     SystemBlock, ToolChoice, ToolDefinition, ToolResultContentBlock,
 };
-use runtime::{
+use engine::{
     load_system_prompt, ApiClient, ApiRequest, AssistantEvent, ContentBlock, ConversationMessage,
     ConversationRuntime, MessageRole, PermissionMode, PermissionPolicy, RuntimeError, Session,
     TokenUsage, ToolError, ToolExecutor,
@@ -29,7 +29,7 @@ pub(crate) enum SubagentKind {
     Explore,
     Plan,
     Verification,
-    CodineerGuide,
+    AineerGuide,
     StatuslineSetup,
     General,
 }
@@ -40,7 +40,7 @@ impl SubagentKind {
             "Explore" => Self::Explore,
             "Plan" => Self::Plan,
             "Verification" => Self::Verification,
-            "codineer-guide" => Self::CodineerGuide,
+            "aineer-guide" => Self::AineerGuide,
             "statusline-setup" => Self::StatuslineSetup,
             _ => Self::General,
         }
@@ -83,7 +83,7 @@ impl SubagentKind {
                 "SendUserMessage",
                 "PowerShell",
             ],
-            Self::CodineerGuide => &[
+            Self::AineerGuide => &[
                 "read_file",
                 "glob_search",
                 "grep_search",
@@ -220,7 +220,7 @@ where
 }
 
 fn spawn_agent_job(job: AgentJob) -> Result<(), String> {
-    let thread_name = format!("codineer-agent-{}", job.manifest.agent_id);
+    let thread_name = format!("aineer-agent-{}", job.manifest.agent_id);
     std::thread::Builder::new()
         .name(thread_name)
         .spawn(move || {
@@ -386,7 +386,7 @@ fn format_agent_terminal_output(
 }
 
 /// Builds a structured summary after a sub-agent turn, including paths touched by file tools.
-pub(crate) fn build_agent_result(summary: &runtime::TurnSummary, success: bool) -> AgentResult {
+pub(crate) fn build_agent_result(summary: &engine::TurnSummary, success: bool) -> AgentResult {
     AgentResult {
         summary: final_assistant_text(summary),
         files_modified: collect_files_modified_from_turn(summary),
@@ -394,8 +394,8 @@ pub(crate) fn build_agent_result(summary: &runtime::TurnSummary, success: bool) 
     }
 }
 
-fn collect_files_modified_from_turn(summary: &runtime::TurnSummary) -> Vec<String> {
-    use runtime::ContentBlock;
+fn collect_files_modified_from_turn(summary: &engine::TurnSummary) -> Vec<String> {
+    use engine::ContentBlock;
 
     let mut paths = BTreeSet::new();
     for message in &summary.assistant_messages {
@@ -706,7 +706,7 @@ fn response_to_events(response: MessageResponse) -> Vec<AssistantEvent> {
     events
 }
 
-pub(crate) fn final_assistant_text(summary: &runtime::TurnSummary) -> String {
+pub(crate) fn final_assistant_text(summary: &engine::TurnSummary) -> String {
     summary
         .assistant_messages
         .last()
@@ -724,11 +724,11 @@ pub(crate) fn final_assistant_text(summary: &runtime::TurnSummary) -> String {
         .unwrap_or_default()
 }
 fn agent_store_dir() -> Result<std::path::PathBuf, String> {
-    if let Ok(path) = std::env::var("CODINEER_AGENT_STORE") {
+    if let Ok(path) = std::env::var("AINEER_AGENT_STORE") {
         return Ok(std::path::PathBuf::from(path));
     }
     let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
-    Ok(runtime::codineer_runtime_dir(&cwd).join("agents"))
+    Ok(engine::aineer_runtime_dir(&cwd).join("agents"))
 }
 
 fn make_agent_id() -> String {
@@ -769,7 +769,7 @@ fn normalize_subagent_type(subagent_type: Option<&str>) -> String {
         "verification" | "verificationagent" | "verify" | "verifier" => {
             String::from("Verification")
         }
-        "codineerguide" | "codineerguideagent" | "guide" => String::from("codineer-guide"),
+        "aineerguide" | "aineerguideagent" | "guide" => String::from("aineer-guide"),
         "statusline" | "statuslinesetup" => String::from("statusline-setup"),
         _ => trimmed.to_string(),
     }
@@ -808,7 +808,7 @@ fn civil_from_days(days: i64) -> (i32, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::build_agent_result;
-    use runtime::{ContentBlock, ConversationMessage, MessageRole, TokenUsage, TurnSummary};
+    use engine::{ContentBlock, ConversationMessage, MessageRole, TokenUsage, TurnSummary};
 
     #[test]
     fn agent_result_includes_summary_and_file_paths() {

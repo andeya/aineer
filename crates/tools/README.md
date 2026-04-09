@@ -1,6 +1,6 @@
-# codineer-tools
+# aineer-tools
 
-AI-callable tool definitions and execution for [Codineer](https://github.com/andeya/codineer).
+AI-callable tool definitions and execution for [Aineer](https://github.com/andeya/aineer).
 
 [中文文档](README_CN.md)
 
@@ -28,8 +28,8 @@ Not all tools are sent to the model in the initial prompt. Core tools are loaded
 
 ## Note
 
-This is an internal crate of the Codineer project. It is published to crates.io as a dependency of `codineer-cli` and is not intended for standalone use. API stability is not guaranteed outside the Codineer workspace.
+This is an internal crate of the Aineer project. It is published to crates.io as a dependency of `aineer-cli` and is not intended for standalone use. API stability is not guaranteed outside the Aineer workspace.
 
 ## License
 
-MIT — see [LICENSE](https://github.com/andeya/codineer/blob/main/LICENSE) for details.
+MIT — see [LICENSE](https://github.com/andeya/aineer/blob/main/LICENSE) for details.

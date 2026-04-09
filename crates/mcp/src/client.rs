@@ -152,7 +152,7 @@ impl McpClientAuth {
         let Self::OAuth(oauth) = self else {
             return None;
         };
-        let client_id = oauth.client_id.as_deref().unwrap_or("codineer-mcp");
+        let client_id = oauth.client_id.as_deref().unwrap_or("aineer-mcp");
         let state = format!("{:016x}", rand_u64());
         let code_verifier = format!("{:032x}{:032x}", rand_u64(), rand_u64());
         let authorize_url = format!(

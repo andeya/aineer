@@ -2,8 +2,8 @@
 //!
 //! Provides `TaskCreate`, `TaskGet`, `TaskList`, `TaskUpdate`, and `TaskStop`
 //! for spawning, monitoring, and controlling long-running shell commands.
-//! Task metadata is persisted in `.codineer/tasks.json`; command output and
-//! exit codes are captured in `.codineer/task-outputs/`.
+//! Task metadata is persisted in `.aineer/tasks.json`; command output and
+//! exit codes are captured in `.aineer/task-outputs/`.
 
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -45,12 +45,12 @@ pub(crate) struct Task {
 
 fn task_store_path() -> Result<PathBuf, String> {
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
-    Ok(runtime::codineer_runtime_dir(&cwd).join("tasks.json"))
+    Ok(engine::aineer_runtime_dir(&cwd).join("tasks.json"))
 }
 
 fn task_output_dir() -> Result<PathBuf, String> {
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
-    Ok(runtime::codineer_runtime_dir(&cwd).join("task-outputs"))
+    Ok(engine::aineer_runtime_dir(&cwd).join("task-outputs"))
 }
 
 fn read_tasks() -> Result<Vec<Task>, String> {
@@ -459,7 +459,7 @@ mod tests {
     #[test]
     fn create_get_list_update_lifecycle() {
         let _g = task_test_lock().lock().unwrap();
-        let dir = std::env::temp_dir().join(format!("codineer-task-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("aineer-task-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let orig = std::env::current_dir().unwrap();
         std::env::set_current_dir(&dir).unwrap();
@@ -504,7 +504,7 @@ mod tests {
     #[test]
     fn get_missing_task_returns_error() {
         let _g = task_test_lock().lock().unwrap();
-        let dir = std::env::temp_dir().join(format!("codineer-task-miss-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("aineer-task-miss-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let orig = std::env::current_dir().unwrap();
         std::env::set_current_dir(&dir).unwrap();
@@ -523,7 +523,7 @@ mod tests {
     #[test]
     fn update_invalid_status_fails_deserialization() {
         let _g = task_test_lock().lock().unwrap();
-        let dir = std::env::temp_dir().join(format!("codineer-task-stat-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("aineer-task-stat-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let orig = std::env::current_dir().unwrap();
         std::env::set_current_dir(&dir).unwrap();
@@ -561,7 +561,7 @@ mod tests {
     #[cfg(unix)]
     fn create_with_command_starts_background_process() {
         let _g = task_test_lock().lock().unwrap();
-        let dir = std::env::temp_dir().join(format!("codineer-task-bg-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("aineer-task-bg-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let orig = std::env::current_dir().unwrap();
         std::env::set_current_dir(&dir).unwrap();

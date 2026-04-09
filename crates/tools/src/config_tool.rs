@@ -195,16 +195,16 @@ pub(crate) fn config_file_for_scope(scope: ConfigScope) -> Result<PathBuf, Strin
     let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
     Ok(match scope {
         ConfigScope::Global => config_home_dir()?.join("settings.json"),
-        ConfigScope::Settings => cwd.join(".codineer").join("settings.local.json"),
+        ConfigScope::Settings => cwd.join(".aineer").join("settings.local.json"),
     })
 }
 
 pub(crate) fn config_home_dir() -> Result<PathBuf, String> {
-    if let Ok(path) = std::env::var("CODINEER_CONFIG_HOME") {
+    if let Ok(path) = std::env::var("AINEER_CONFIG_HOME") {
         return Ok(PathBuf::from(path));
     }
-    let home = runtime::home_dir().ok_or_else(|| String::from("HOME / USERPROFILE is not set"))?;
-    Ok(home.join(".codineer"))
+    let home = engine::home_dir().ok_or_else(|| String::from("HOME / USERPROFILE is not set"))?;
+    Ok(home.join(".aineer"))
 }
 
 pub(crate) fn read_json_object(path: &Path) -> Result<serde_json::Map<String, Value>, String> {

@@ -126,7 +126,7 @@ fn write_tool_plugin_with_name(root: &Path, name: &str, version: &str, tool_name
     let script_path = root.join("tools").join("echo-json.sh");
     write_file(
         &script_path,
-        "#!/bin/sh\nINPUT=$(cat)\nprintf '{\"plugin\":\"%s\",\"tool\":\"%s\",\"input\":%s}\\n' \"$CODINEER_PLUGIN_ID\" \"$CODINEER_TOOL_NAME\" \"$INPUT\"\n",
+        "#!/bin/sh\nINPUT=$(cat)\nprintf '{\"plugin\":\"%s\",\"tool\":\"%s\",\"input\":%s}\\n' \"$AINEER_PLUGIN_ID\" \"$AINEER_TOOL_NAME\" \"$INPUT\"\n",
     );
     #[cfg(unix)]
     {
@@ -996,9 +996,9 @@ fn session_plugin_dir_is_discovered_and_not_installed() {
 #[cfg(unix)]
 mod hook_integration {
     use crate::{PluginHooks, PluginManager, PluginManagerConfig};
-    use codineer_core::events::RuntimeEvent;
-    use codineer_core::observer::RuntimeObserver;
-    use runtime::HookDispatcher;
+    use engine::HookDispatcher;
+    use protocol::events::RuntimeEvent;
+    use protocol::observer::RuntimeObserver;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};

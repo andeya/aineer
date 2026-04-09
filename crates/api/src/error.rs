@@ -113,9 +113,9 @@ impl ApiError {
     /// Convert to a [`RuntimeError::Api`] preserving structured HTTP status and
     /// error classification fields for the recovery engine.
     #[must_use]
-    pub fn into_runtime_error(self) -> codineer_core::error::RuntimeError {
+    pub fn into_runtime_error(self) -> protocol::error::RuntimeError {
         let (status_code, error_type) = self.extract_classification();
-        codineer_core::error::RuntimeError::api(status_code, error_type, self.to_string())
+        protocol::error::RuntimeError::api(status_code, error_type, self.to_string())
     }
 
     fn extract_classification(&self) -> (u16, Option<String>) {

@@ -1,6 +1,6 @@
-# codineer-api
+# aineer-api
 
-AI provider API clients and streaming for [Codineer](https://github.com/andeya/codineer).
+AI provider API clients and streaming for [Aineer](https://github.com/andeya/aineer).
 
 [中文文档](README_CN.md)
 
@@ -12,7 +12,7 @@ This crate handles communication with AI model providers (Anthropic, OpenAI-comp
 | -------------------- | ------------------------------------------------------------ |
 | `AnthropicClient`    | Anthropic native API (Claude models)                         |
 | `OpenAiCompatClient` | Any OpenAI-compatible endpoint (OpenAI, Gemini, Ollama, …)  |
-| `CodineerProvider`   | Codineer's own OAuth-based provider                          |
+| `AineerProvider`   | Aineer's own OAuth-based provider                          |
 
 ### Cache strategy
 
@@ -32,8 +32,8 @@ New provider-specific cache strategies can be added by implementing the trait.
 
 ## Note
 
-This is an internal crate of the Codineer project. It is published to crates.io as a dependency of `codineer-cli` and is not intended for standalone use. API stability is not guaranteed outside the Codineer workspace.
+This is an internal crate of the Aineer project. It is published to crates.io as a dependency of `aineer-cli` and is not intended for standalone use. API stability is not guaranteed outside the Aineer workspace.
 
 ## License
 
-MIT — see [LICENSE](https://github.com/andeya/codineer/blob/main/LICENSE) for details.
+MIT — see [LICENSE](https://github.com/andeya/aineer/blob/main/LICENSE) for details.

@@ -1,10 +1,10 @@
-# codineer-lsp
+# aineer-lsp
 
-Language Server Protocol (LSP) client integration for [Codineer](https://github.com/andeya/codineer).
+Language Server Protocol (LSP) client integration for [Aineer](https://github.com/andeya/aineer).
 
 [中文文档](README_CN.md)
 
-This crate provides the LSP transport layer used by Codineer to communicate with language servers. It manages server lifecycle (spawn, initialize, shutdown), JSON-RPC message framing, and async diagnostics polling via `tokio::sync::watch`.
+This crate provides the LSP transport layer used by Aineer to communicate with language servers. It manages server lifecycle (spawn, initialize, shutdown), JSON-RPC message framing, and async diagnostics polling via `tokio::sync::watch`.
 
 ### Supported operations
 
@@ -28,8 +28,8 @@ This crate provides the LSP transport layer used by Codineer to communicate with
 
 ## Note
 
-This is an internal crate of the Codineer project. It is published to crates.io as a dependency of `codineer-cli` and is not intended for standalone use. API stability is not guaranteed outside the Codineer workspace.
+This is an internal crate of the Aineer project. It is published to crates.io as a dependency of `aineer-cli` and is not intended for standalone use. API stability is not guaranteed outside the Aineer workspace.
 
 ## License
 
-MIT — see [LICENSE](https://github.com/andeya/codineer/blob/main/LICENSE) for details.
+MIT — see [LICENSE](https://github.com/andeya/aineer/blob/main/LICENSE) for details.

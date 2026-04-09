@@ -27,7 +27,7 @@ struct MockSubagentApiClient {
     input_path: String,
 }
 
-impl runtime::ApiClient for MockSubagentApiClient {
+impl engine::ApiClient for MockSubagentApiClient {
     fn active_model(&self) -> &str {
         "mock-model"
     }
@@ -66,7 +66,7 @@ fn subagent_runtime_executes_tool_loop_with_isolated_session() {
     let tmp = std::env::temp_dir()
         .canonicalize()
         .unwrap_or_else(|_| std::env::temp_dir());
-    std::env::set_var("CODINEER_WORKSPACE_ROOT", &tmp);
+    std::env::set_var("AINEER_WORKSPACE_ROOT", &tmp);
     let path = temp_path("subagent-input.txt");
     std::fs::write(&path, "hello from child").expect("write input file");
 
@@ -97,7 +97,7 @@ fn subagent_runtime_executes_tool_loop_with_isolated_session() {
         .flat_map(|message| message.blocks.iter())
         .any(|block| matches!(
             block,
-            runtime::ContentBlock::ToolResult { output, .. }
+            engine::ContentBlock::ToolResult { output, .. }
                 if output.contains("hello from child")
         )));
 
@@ -134,7 +134,7 @@ fn notebook_edit_replaces_inserts_and_deletes_cells() {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let nb_root = temp_path("nb-suite");
     fs::create_dir_all(&nb_root).expect("create notebook test root");
-    std::env::set_var("CODINEER_WORKSPACE_ROOT", &nb_root);
+    std::env::set_var("AINEER_WORKSPACE_ROOT", &nb_root);
 
     let path = nb_root.join("notebook.ipynb");
     std::fs::write(
@@ -212,7 +212,7 @@ fn notebook_edit_replaces_inserts_and_deletes_cells() {
     assert_eq!(cells[1]["cell_type"], "code");
     assert_eq!(cells[1]["source"][0], "print(3)\n");
     let _ = std::fs::remove_file(path);
-    std::env::remove_var("CODINEER_WORKSPACE_ROOT");
+    std::env::remove_var("AINEER_WORKSPACE_ROOT");
 }
 
 #[test]
@@ -222,7 +222,7 @@ fn notebook_edit_rejects_invalid_inputs() {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let nb_root = temp_path("nb-reject-suite");
     fs::create_dir_all(&nb_root).expect("create notebook test root");
-    std::env::set_var("CODINEER_WORKSPACE_ROOT", &nb_root);
+    std::env::set_var("AINEER_WORKSPACE_ROOT", &nb_root);
 
     let text_path = nb_root.join("notebook.txt");
     fs::write(&text_path, "not a notebook").expect("write text file");
@@ -264,7 +264,7 @@ fn notebook_edit_rejects_invalid_inputs() {
     .expect_err("delete on empty notebook should fail");
     assert!(missing_cell.contains("Notebook has no cells to edit"));
     let _ = fs::remove_file(empty_notebook);
-    std::env::remove_var("CODINEER_WORKSPACE_ROOT");
+    std::env::remove_var("AINEER_WORKSPACE_ROOT");
 }
 
 #[test]
@@ -516,7 +516,7 @@ fn sleep_waits_and_reports_duration() {
 #[test]
 fn brief_returns_sent_message_and_attachment_metadata() {
     let attachment = std::env::temp_dir().join(format!(
-        "codineer-brief-{}.png",
+        "aineer-brief-{}.png",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("time")
@@ -547,7 +547,7 @@ fn config_reads_and_writes_supported_values() {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let root = std::env::temp_dir().join(format!(
-        "codineer-config-{}",
+        "aineer-config-{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("time")
@@ -555,19 +555,19 @@ fn config_reads_and_writes_supported_values() {
     ));
     let home = root.join("home");
     let cwd = root.join("cwd");
-    std::fs::create_dir_all(home.join(".codineer")).expect("home dir");
-    std::fs::create_dir_all(cwd.join(".codineer")).expect("cwd dir");
+    std::fs::create_dir_all(home.join(".aineer")).expect("home dir");
+    std::fs::create_dir_all(cwd.join(".aineer")).expect("cwd dir");
     std::fs::write(
-        home.join(".codineer").join("settings.json"),
+        home.join(".aineer").join("settings.json"),
         r#"{"verbose":false}"#,
     )
     .expect("write global settings");
 
     let original_home = std::env::var("HOME").ok();
-    let original_config_home = std::env::var("CODINEER_CONFIG_HOME").ok();
+    let original_config_home = std::env::var("AINEER_CONFIG_HOME").ok();
     let original_dir = std::env::current_dir().expect("cwd");
     std::env::set_var("HOME", &home);
-    std::env::remove_var("CODINEER_CONFIG_HOME");
+    std::env::remove_var("AINEER_CONFIG_HOME");
     std::env::set_current_dir(&cwd).expect("set cwd");
 
     let get = execute_tool_str("Config", &json!({"setting": "verbose"})).expect("get config");
@@ -601,8 +601,8 @@ fn config_reads_and_writes_supported_values() {
         None => std::env::remove_var("HOME"),
     }
     match original_config_home {
-        Some(value) => std::env::set_var("CODINEER_CONFIG_HOME", value),
-        None => std::env::remove_var("CODINEER_CONFIG_HOME"),
+        Some(value) => std::env::set_var("AINEER_CONFIG_HOME", value),
+        None => std::env::remove_var("AINEER_CONFIG_HOME"),
     }
     let _ = std::fs::remove_dir_all(root);
 }
@@ -649,7 +649,7 @@ fn powershell_runs_via_stub_shell() {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
 
     let dir = std::env::temp_dir().join(format!(
-        "codineer-pwsh-bin-{}",
+        "aineer-pwsh-bin-{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("time")
@@ -694,7 +694,7 @@ fn powershell_errors_when_shell_is_missing() {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let original_path = std::env::var("PATH").unwrap_or_default();
     let empty_dir = std::env::temp_dir().join(format!(
-        "codineer-empty-bin-{}",
+        "aineer-empty-bin-{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("time")

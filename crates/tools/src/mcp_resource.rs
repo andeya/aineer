@@ -2,7 +2,7 @@
 //!
 //! `ListMcpResources`, `ReadMcpResource`, and `MCPSearch` operate on an
 //! in-process resource registry.  Resources can be seeded via the
-//! `CODINEER_MCP_RESOURCES` environment variable (JSON array) or registered
+//! `AINEER_MCP_RESOURCES` environment variable (JSON array) or registered
 //! programmatically with [`register_mcp_resource`].
 
 use std::collections::BTreeMap;
@@ -38,8 +38,8 @@ static MCP_REGISTRY: OnceLock<Mutex<Registry>> = OnceLock::new();
 fn registry() -> &'static Mutex<Registry> {
     MCP_REGISTRY.get_or_init(|| {
         let mut map = Registry::new();
-        // Seed from `CODINEER_MCP_RESOURCES` env var (JSON array of McpResource).
-        if let Ok(raw) = std::env::var("CODINEER_MCP_RESOURCES") {
+        // Seed from `AINEER_MCP_RESOURCES` env var (JSON array of McpResource).
+        if let Ok(raw) = std::env::var("AINEER_MCP_RESOURCES") {
             if let Ok(resources) = serde_json::from_str::<Vec<McpResource>>(&raw) {
                 for r in resources {
                     map.insert(r.uri.clone(), r);

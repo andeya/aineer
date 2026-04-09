@@ -4,7 +4,7 @@
 //! references, symbols, rename, formatting, diagnostics) as a single tool with
 //! an `operation` discriminator.  A dedicated multi-thread tokio runtime and
 //! global [`LspManager`] singleton are lazily initialized from the
-//! `CODINEER_LSP_SERVERS` env variable, or via [`initialize_lsp_manager`].
+//! `AINEER_LSP_SERVERS` env variable, or via [`initialize_lsp_manager`].
 
 use std::future::Future;
 use std::path::Path;
@@ -28,7 +28,7 @@ fn lsp_runtime() -> &'static tokio::runtime::Runtime {
     LSP_RUNTIME.get_or_init(|| {
         tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
-            .thread_name("codineer-lsp")
+            .thread_name("aineer-lsp")
             .enable_all()
             .build()
             .expect("LSP tokio runtime should build")
@@ -64,14 +64,14 @@ fn get_or_init_manager() -> Result<Arc<LspManager>, String> {
         return Ok(Arc::clone(m));
     }
 
-    let servers_json = std::env::var("CODINEER_LSP_SERVERS").map_err(|_| {
-        "LSP manager not configured. Set CODINEER_LSP_SERVERS to a JSON array of \
+    let servers_json = std::env::var("AINEER_LSP_SERVERS").map_err(|_| {
+        "LSP manager not configured. Set AINEER_LSP_SERVERS to a JSON array of \
          LspServerConfig objects (see LspServerConfig type) to enable the Lsp tool."
             .to_string()
     })?;
 
     let configs: Vec<LspServerConfig> = serde_json::from_str(&servers_json)
-        .map_err(|e| format!("invalid CODINEER_LSP_SERVERS JSON: {e}"))?;
+        .map_err(|e| format!("invalid AINEER_LSP_SERVERS JSON: {e}"))?;
 
     let manager = LspManager::new(configs).map_err(|e| e.to_string())?;
     let manager = Arc::new(manager);
@@ -406,7 +406,7 @@ pub(crate) fn execute_lsp(input: LspInput) -> Result<String, String> {
 }
 
 /// Initialize the global LSP manager from a JSON config array.
-/// Useful for testing or programmatic setup; the `CODINEER_LSP_SERVERS` env
+/// Useful for testing or programmatic setup; the `AINEER_LSP_SERVERS` env
 /// variable triggers lazy auto-init on first `Lsp` tool call.
 pub fn initialize_lsp_manager(configs_json: &Value) -> Result<(), String> {
     let configs: Vec<LspServerConfig> = serde_json::from_value(configs_json.clone())

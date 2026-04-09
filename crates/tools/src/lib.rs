@@ -1,4 +1,4 @@
-//! Built-in tool implementations for the Codineer agent runtime.
+//! Built-in tool implementations for the Aineer agent runtime.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -10,7 +10,7 @@ use serde_json::Value;
 
 use crate::builtin::BuiltinTool;
 
-use runtime::{
+use engine::{
     edit_file, execute_bash, glob_search, grep_search, read_file, write_file, BashCommandInput,
     GrepSearchInput,
 };
@@ -153,11 +153,11 @@ fn validate_todos(todos: &[TodoItem]) -> Result<(), String> {
 }
 
 fn todo_store_path() -> Result<std::path::PathBuf, String> {
-    if let Ok(path) = std::env::var("CODINEER_TODO_STORE") {
+    if let Ok(path) = std::env::var("AINEER_TODO_STORE") {
         return Ok(std::path::PathBuf::from(path));
     }
     let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
-    Ok(runtime::codineer_runtime_dir(&cwd).join("todos.json"))
+    Ok(engine::aineer_runtime_dir(&cwd).join("todos.json"))
 }
 
 fn resolve_skill_path(skill: &str) -> Result<std::path::PathBuf, String> {
@@ -174,13 +174,13 @@ fn resolve_skill_path(skill: &str) -> Result<std::path::PathBuf, String> {
 
     let mut candidates = Vec::new();
     if let Ok(cwd) = std::env::current_dir() {
-        candidates.push(runtime::codineer_runtime_dir(&cwd).join("skills"));
+        candidates.push(engine::aineer_runtime_dir(&cwd).join("skills"));
     }
-    if let Ok(codineer_home) = std::env::var("CODINEER_CONFIG_HOME") {
-        candidates.push(std::path::PathBuf::from(codineer_home).join("skills"));
+    if let Ok(aineer_home) = std::env::var("AINEER_CONFIG_HOME") {
+        candidates.push(std::path::PathBuf::from(aineer_home).join("skills"));
     }
-    if let Some(home) = runtime::home_dir() {
-        candidates.push(home.join(".codineer").join("skills"));
+    if let Some(home) = engine::home_dir() {
+        candidates.push(home.join(".aineer").join("skills"));
     }
 
     for root in candidates {

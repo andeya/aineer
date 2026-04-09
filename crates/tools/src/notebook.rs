@@ -15,7 +15,7 @@ pub(crate) fn execute_notebook_edit(
     }
 
     // Enforce workspace boundary using the runtime helper.
-    let path = runtime::workspace_safe_path(&input.notebook_path)
+    let path = engine::workspace_safe_path(&input.notebook_path)
         .map_err(|e| format!("Workspace boundary violation: {e}"))?;
 
     if path.extension().and_then(|ext| ext.to_str()) != Some("ipynb") {
@@ -124,7 +124,7 @@ pub(crate) fn execute_notebook_edit(
     let updated_file =
         serde_json::to_string_pretty(&notebook).map_err(|error| error.to_string())?;
     // Atomic write: prevents corrupted notebooks on crash mid-write.
-    runtime::write_file(&path.to_string_lossy(), &updated_file).map_err(|e| e.to_string())?;
+    engine::write_file(&path.to_string_lossy(), &updated_file).map_err(|e| e.to_string())?;
 
     Ok(NotebookEditOutput {
         new_source,

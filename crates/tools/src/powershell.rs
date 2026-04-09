@@ -4,7 +4,7 @@ use crate::types::PowerShellInput;
 
 pub(crate) fn execute_powershell(
     input: PowerShellInput,
-) -> std::io::Result<runtime::BashCommandOutput> {
+) -> std::io::Result<engine::BashCommandOutput> {
     let _ = &input.description;
     let shell = detect_powershell_shell()?;
     execute_shell_command(
@@ -53,7 +53,7 @@ pub(crate) fn execute_shell_command(
     command: &str,
     timeout: Option<u64>,
     run_in_background: Option<bool>,
-) -> std::io::Result<runtime::BashCommandOutput> {
+) -> std::io::Result<engine::BashCommandOutput> {
     if run_in_background.unwrap_or(false) {
         let mut child = std::process::Command::new(shell)
             .arg("-NoProfile")
@@ -68,7 +68,7 @@ pub(crate) fn execute_shell_command(
         std::thread::spawn(move || {
             let _ = child.wait();
         });
-        return Ok(runtime::BashCommandOutput {
+        return Ok(engine::BashCommandOutput {
             stdout: String::new(),
             stderr: String::new(),
             raw_output_path: None,
@@ -106,7 +106,7 @@ pub(crate) fn execute_shell_command(
         });
         let deadline = std::time::Duration::from_millis(timeout_ms);
         return match rx.recv_timeout(deadline) {
-            Ok(Ok(output)) => Ok(runtime::BashCommandOutput {
+            Ok(Ok(output)) => Ok(engine::BashCommandOutput {
                 stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
                 stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
                 raw_output_path: None,
@@ -130,7 +130,7 @@ pub(crate) fn execute_shell_command(
             Ok(Err(error)) => Err(error),
             Err(_) => {
                 crate::kill_process(pid);
-                Ok(runtime::BashCommandOutput {
+                Ok(engine::BashCommandOutput {
                     stdout: String::new(),
                     stderr: format!("PowerShell timed out after {timeout_ms}ms"),
                     raw_output_path: None,
@@ -152,7 +152,7 @@ pub(crate) fn execute_shell_command(
     }
 
     let output = process.output()?;
-    Ok(runtime::BashCommandOutput {
+    Ok(engine::BashCommandOutput {
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
         raw_output_path: None,

@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use crate::error::ApiError;
 
-pub mod codineer_provider;
+pub mod aineer_provider;
 pub mod openai_compat;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,7 +25,7 @@ impl Default for RetryPolicy {
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProviderKind {
-    CodineerApi,
+    AineerApi,
     Xai,
     OpenAi,
     Custom,
@@ -43,28 +43,28 @@ const MODEL_REGISTRY: &[(&str, ProviderMetadata)] = &[
     (
         "claude-opus-4-6",
         ProviderMetadata {
-            provider: ProviderKind::CodineerApi,
+            provider: ProviderKind::AineerApi,
             auth_env: "ANTHROPIC_API_KEY",
             base_url_env: "ANTHROPIC_BASE_URL",
-            default_base_url: codineer_provider::DEFAULT_BASE_URL,
+            default_base_url: aineer_provider::DEFAULT_BASE_URL,
         },
     ),
     (
         "claude-sonnet-4-6",
         ProviderMetadata {
-            provider: ProviderKind::CodineerApi,
+            provider: ProviderKind::AineerApi,
             auth_env: "ANTHROPIC_API_KEY",
             base_url_env: "ANTHROPIC_BASE_URL",
-            default_base_url: codineer_provider::DEFAULT_BASE_URL,
+            default_base_url: aineer_provider::DEFAULT_BASE_URL,
         },
     ),
     (
         "claude-haiku-4-5-20251213",
         ProviderMetadata {
-            provider: ProviderKind::CodineerApi,
+            provider: ProviderKind::AineerApi,
             auth_env: "ANTHROPIC_API_KEY",
             base_url_env: "ANTHROPIC_BASE_URL",
-            default_base_url: codineer_provider::DEFAULT_BASE_URL,
+            default_base_url: aineer_provider::DEFAULT_BASE_URL,
         },
     ),
     (
@@ -226,10 +226,10 @@ pub fn metadata_for_model(model: &str) -> Option<ProviderMetadata> {
     }
     if lower.starts_with("claude-") || lower == "claude" {
         return Some(ProviderMetadata {
-            provider: ProviderKind::CodineerApi,
+            provider: ProviderKind::AineerApi,
             auth_env: "ANTHROPIC_API_KEY",
             base_url_env: "ANTHROPIC_BASE_URL",
-            default_base_url: codineer_provider::DEFAULT_BASE_URL,
+            default_base_url: aineer_provider::DEFAULT_BASE_URL,
         });
     }
     if lower.starts_with("gpt")
@@ -256,14 +256,14 @@ pub fn detect_provider_kind(model: &str) -> ProviderKind {
     if let Some(metadata) = metadata_for_model(model) {
         return metadata.provider;
     }
-    let fallback = detect_available_provider().unwrap_or(ProviderKind::CodineerApi);
+    let fallback = detect_available_provider().unwrap_or(ProviderKind::AineerApi);
     eprintln!("[warn] unknown model \"{model}\", falling back to {fallback:?} provider");
     fallback
 }
 
 fn detect_available_provider() -> Option<ProviderKind> {
-    if codineer_provider::has_auth_from_env_or_saved().unwrap_or(false) {
-        return Some(ProviderKind::CodineerApi);
+    if aineer_provider::has_auth_from_env_or_saved().unwrap_or(false) {
+        return Some(ProviderKind::AineerApi);
     }
     if openai_compat::has_api_key("OPENAI_API_KEY") {
         return Some(ProviderKind::OpenAi);
@@ -279,7 +279,7 @@ fn detect_available_provider() -> Option<ProviderKind> {
 #[must_use]
 pub fn auto_detect_default_model() -> Option<&'static str> {
     match detect_available_provider()? {
-        ProviderKind::CodineerApi => Some("claude-sonnet-4-6"),
+        ProviderKind::AineerApi => Some("claude-sonnet-4-6"),
         ProviderKind::Xai => Some("grok-3"),
         ProviderKind::OpenAi => Some("gpt-4o"),
         ProviderKind::Custom => None,
@@ -317,7 +317,7 @@ pub fn list_known_models(
 pub fn provider_kind_by_name(name: &str) -> Option<ProviderKind> {
     let lower = name.to_ascii_lowercase();
     match lower.as_str() {
-        "anthropic" | "claude" => Some(ProviderKind::CodineerApi),
+        "anthropic" | "claude" => Some(ProviderKind::AineerApi),
         "xai" | "grok" => Some(ProviderKind::Xai),
         "openai" | "gpt" => Some(ProviderKind::OpenAi),
         _ => None,
@@ -327,7 +327,7 @@ pub fn provider_kind_by_name(name: &str) -> Option<ProviderKind> {
 impl ProviderKind {
     pub const fn display_name(self) -> &'static str {
         match self {
-            Self::CodineerApi => "Anthropic",
+            Self::AineerApi => "Anthropic",
             Self::Xai => "xAI",
             Self::OpenAi => "OpenAI",
             Self::Custom => "Custom",
@@ -417,7 +417,7 @@ mod tests {
         assert_eq!(detect_provider_kind("grok"), ProviderKind::Xai);
         assert_eq!(
             detect_provider_kind("claude-sonnet-4-6"),
-            ProviderKind::CodineerApi
+            ProviderKind::AineerApi
         );
     }
 
@@ -425,7 +425,7 @@ mod tests {
     fn detects_provider_by_unlisted_model_id_prefix() {
         assert_eq!(
             detect_provider_kind("claude-3-5-sonnet-20241022"),
-            ProviderKind::CodineerApi
+            ProviderKind::AineerApi
         );
         assert_eq!(detect_provider_kind("gpt-4-turbo"), ProviderKind::OpenAi);
         assert_eq!(detect_provider_kind("o1-preview"), ProviderKind::OpenAi);
@@ -499,7 +499,7 @@ mod tests {
     fn list_known_models_returns_all_when_unfiltered() {
         let all = list_known_models(None);
         assert!(!all.is_empty());
-        assert!(all.iter().any(|(_, k)| *k == ProviderKind::CodineerApi));
+        assert!(all.iter().any(|(_, k)| *k == ProviderKind::AineerApi));
         assert!(all.iter().any(|(_, k)| *k == ProviderKind::Xai));
     }
 
@@ -509,11 +509,9 @@ mod tests {
         assert!(!xai.is_empty());
         assert!(xai.iter().all(|(_, k)| *k == ProviderKind::Xai));
 
-        let anthropic = list_known_models(Some(ProviderKind::CodineerApi));
+        let anthropic = list_known_models(Some(ProviderKind::AineerApi));
         assert!(!anthropic.is_empty());
-        assert!(anthropic
-            .iter()
-            .all(|(_, k)| *k == ProviderKind::CodineerApi));
+        assert!(anthropic.iter().all(|(_, k)| *k == ProviderKind::AineerApi));
     }
 
     #[test]
@@ -526,11 +524,11 @@ mod tests {
     fn provider_kind_by_name_resolves_known() {
         assert_eq!(
             provider_kind_by_name("anthropic"),
-            Some(ProviderKind::CodineerApi)
+            Some(ProviderKind::AineerApi)
         );
         assert_eq!(
             provider_kind_by_name("claude"),
-            Some(ProviderKind::CodineerApi)
+            Some(ProviderKind::AineerApi)
         );
         assert_eq!(provider_kind_by_name("xai"), Some(ProviderKind::Xai));
         assert_eq!(provider_kind_by_name("grok"), Some(ProviderKind::Xai));
@@ -542,7 +540,7 @@ mod tests {
     fn provider_kind_by_name_case_insensitive() {
         assert_eq!(
             provider_kind_by_name("Anthropic"),
-            Some(ProviderKind::CodineerApi)
+            Some(ProviderKind::AineerApi)
         );
         assert_eq!(provider_kind_by_name("XAI"), Some(ProviderKind::Xai));
     }
@@ -556,7 +554,7 @@ mod tests {
 
     #[test]
     fn provider_kind_display_name_covers_all_variants() {
-        assert_eq!(ProviderKind::CodineerApi.display_name(), "Anthropic");
+        assert_eq!(ProviderKind::AineerApi.display_name(), "Anthropic");
         assert_eq!(ProviderKind::Xai.display_name(), "xAI");
         assert_eq!(ProviderKind::OpenAi.display_name(), "OpenAI");
         assert_eq!(ProviderKind::Custom.display_name(), "Custom");

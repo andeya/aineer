@@ -1,6 +1,6 @@
 [package]
-name = "codineer-mcp"
-description = "MCP (Model Context Protocol) client, server management, and config types for Codineer"
+name = "aineer-mcp"
+description = "MCP (Model Context Protocol) client, server management, and config types for Aineer"
 readme = "README.md"
 version.workspace = true
 edition.workspace = true
@@ -12,7 +12,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-codineer-core.workspace = true
+protocol.workspace = true
 futures-util = { version = "0.3", default-features = false, features = [
     "sink",
 ] }

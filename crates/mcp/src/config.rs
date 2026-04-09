@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-pub use codineer_core::config::ConfigSource;
+pub use protocol::config::ConfigSource;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct McpConfigCollection {

@@ -1,6 +1,6 @@
 [package]
-name = "codineer-plugins"
-description = "Plugin system and hooks for Codineer"
+name = "aineer-plugins"
+description = "Plugin system and hooks for Aineer"
 readme = "README.md"
 version.workspace = true
 edition.workspace = true
@@ -12,11 +12,13 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-codineer-core.workspace = true
-runtime.workspace = true
+protocol.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+engine.workspace = true
 
 [lints]
 workspace = true

@@ -1,6 +1,6 @@
 [package]
-name = "codineer-api"
-description = "AI provider API clients and streaming for Codineer"
+name = "aineer-api"
+description = "AI provider API clients and streaming for Aineer"
 readme = "README.md"
 version.workspace = true
 edition.workspace = true
@@ -13,7 +13,7 @@ categories.workspace = true
 
 [dependencies]
 async-trait = "0.1"
-codineer-core.workspace = true
+protocol.workspace = true
 reqwest = { version = "0.12", default-features = false, features = [
     "json",
     "rustls-tls",

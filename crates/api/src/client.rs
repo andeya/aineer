@@ -1,5 +1,5 @@
 use crate::error::ApiError;
-use crate::providers::codineer_provider::{self, AuthSource, CodineerApiClient};
+use crate::providers::aineer_provider::{self, AineerApiClient, AuthSource};
 use crate::providers::openai_compat::{self, OpenAiCompatClient, OpenAiCompatConfig};
 use crate::providers::{self, ProviderKind};
 use crate::types::{MessageRequest, MessageResponse, StreamEvent};
@@ -7,7 +7,7 @@ use crate::types::{MessageRequest, MessageResponse, StreamEvent};
 #[non_exhaustive]
 #[derive(Debug, Clone)]
 pub enum ProviderClient {
-    CodineerApi(CodineerApiClient),
+    AineerApi(AineerApiClient),
     Xai(OpenAiCompatClient),
     OpenAi(OpenAiCompatClient),
     Custom(OpenAiCompatClient),
@@ -23,9 +23,9 @@ impl ProviderClient {
         default_auth: Option<AuthSource>,
     ) -> Result<Self, ApiError> {
         match providers::detect_provider_kind(model) {
-            ProviderKind::CodineerApi => Ok(Self::CodineerApi(match default_auth {
-                Some(auth) => CodineerApiClient::from_auth(auth),
-                None => CodineerApiClient::from_env()?,
+            ProviderKind::AineerApi => Ok(Self::AineerApi(match default_auth {
+                Some(auth) => AineerApiClient::from_auth(auth),
+                None => AineerApiClient::from_env()?,
             })),
             ProviderKind::Xai => Ok(Self::Xai(OpenAiCompatClient::from_env(
                 OpenAiCompatConfig::xai(),
@@ -42,13 +42,12 @@ impl ProviderClient {
     /// Build a provider client using a pre-resolved credential from a `CredentialChain`.
     pub fn from_model_with_credential(
         model: &str,
-        credential: codineer_core::ResolvedCredential,
+        credential: protocol::ResolvedCredential,
     ) -> Result<Self, ApiError> {
         let auth = AuthSource::from(credential);
         match providers::detect_provider_kind(model) {
-            ProviderKind::CodineerApi => Ok(Self::CodineerApi(
-                CodineerApiClient::from_auth(auth)
-                    .with_base_url(codineer_provider::read_base_url()),
+            ProviderKind::AineerApi => Ok(Self::AineerApi(
+                AineerApiClient::from_auth(auth).with_base_url(aineer_provider::read_base_url()),
             )),
             ProviderKind::Xai => {
                 let config = OpenAiCompatConfig::xai();
@@ -79,7 +78,7 @@ impl ProviderClient {
     #[must_use]
     pub const fn provider_kind(&self) -> ProviderKind {
         match self {
-            Self::CodineerApi(_) => ProviderKind::CodineerApi,
+            Self::AineerApi(_) => ProviderKind::AineerApi,
             Self::Xai(_) => ProviderKind::Xai,
             Self::OpenAi(_) => ProviderKind::OpenAi,
             Self::Custom(_) => ProviderKind::Custom,
@@ -91,7 +90,7 @@ impl ProviderClient {
         request: &MessageRequest,
     ) -> Result<MessageResponse, ApiError> {
         match self {
-            Self::CodineerApi(client) => client.send_message(request).await,
+            Self::AineerApi(client) => client.send_message(request).await,
             Self::Xai(client) | Self::OpenAi(client) | Self::Custom(client) => {
                 client.send_message(request).await
             }
@@ -103,10 +102,10 @@ impl ProviderClient {
         request: &MessageRequest,
     ) -> Result<MessageStream, ApiError> {
         match self {
-            Self::CodineerApi(client) => client
+            Self::AineerApi(client) => client
                 .stream_message(request)
                 .await
-                .map(MessageStream::CodineerApi),
+                .map(MessageStream::AineerApi),
             Self::Xai(client) | Self::OpenAi(client) | Self::Custom(client) => client
                 .stream_message(request)
                 .await
@@ -117,7 +116,7 @@ impl ProviderClient {
 
 #[derive(Debug)]
 pub enum MessageStream {
-    CodineerApi(codineer_provider::MessageStream),
+    AineerApi(aineer_provider::MessageStream),
     OpenAiCompat(openai_compat::MessageStream),
 }
 
@@ -125,25 +124,23 @@ impl MessageStream {
     #[must_use]
     pub fn request_id(&self) -> Option<&str> {
         match self {
-            Self::CodineerApi(stream) => stream.request_id(),
+            Self::AineerApi(stream) => stream.request_id(),
             Self::OpenAiCompat(stream) => stream.request_id(),
         }
     }
 
     pub async fn next_event(&mut self) -> Result<Option<StreamEvent>, ApiError> {
         match self {
-            Self::CodineerApi(stream) => stream.next_event().await,
+            Self::AineerApi(stream) => stream.next_event().await,
             Self::OpenAiCompat(stream) => stream.next_event().await,
         }
     }
 }
 
-pub use codineer_provider::{
-    resolve_saved_oauth_token, resolve_startup_auth_source, OAuthTokenSet,
-};
+pub use aineer_provider::{resolve_saved_oauth_token, resolve_startup_auth_source, OAuthTokenSet};
 #[must_use]
 pub fn read_base_url() -> String {
-    codineer_provider::read_base_url()
+    aineer_provider::read_base_url()
 }
 
 #[must_use]
@@ -180,7 +177,7 @@ mod tests {
         assert_eq!(detect_provider_kind("grok-3"), ProviderKind::Xai);
         assert_eq!(
             detect_provider_kind("claude-sonnet-4-6"),
-            ProviderKind::CodineerApi
+            ProviderKind::AineerApi
         );
     }
 }

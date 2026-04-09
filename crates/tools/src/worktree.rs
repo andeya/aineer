@@ -258,7 +258,7 @@ mod tests {
 
     #[test]
     fn find_repo_root_in_non_git_dir_returns_error() {
-        let dir = std::env::temp_dir().join(format!("codineer-wt-nogit-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("aineer-wt-nogit-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let err = find_repo_root(&dir).unwrap_err();
         assert!(err.contains("not a git repository"), "got: {err}");

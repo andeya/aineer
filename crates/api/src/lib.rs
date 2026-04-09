@@ -23,7 +23,7 @@ pub use client::{
     MessageStream, OAuthTokenSet, ProviderClient,
 };
 pub use error::ApiError;
-pub use providers::codineer_provider::{AuthSource, CodineerApiClient};
+pub use providers::aineer_provider::{AineerApiClient, AuthSource};
 pub use providers::openai_compat::{OpenAiCompatClient, OpenAiCompatConfig};
 pub use providers::{
     auto_detect_default_model, builtin_preset, detect_provider_kind, list_known_models,

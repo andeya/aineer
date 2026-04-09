@@ -22,7 +22,7 @@ pub(crate) fn http_client() -> &'static Client {
             .timeout(Duration::from_secs(30))
             .redirect(reqwest::redirect::Policy::limited(10))
             .pool_max_idle_per_host(10)
-            .user_agent("codineer-rust-tools/0.1")
+            .user_agent(concat!("aineer-tools/", env!("CARGO_PKG_VERSION")))
             .build()
             .unwrap_or_else(|_| Client::new())
     })
@@ -287,7 +287,7 @@ fn is_ssrf_blocked_ip(ip: std::net::IpAddr) -> bool {
 }
 
 pub(crate) fn build_search_url(query: &str) -> Result<reqwest::Url, String> {
-    if let Ok(base) = std::env::var("CODINEER_WEB_SEARCH_BASE_URL") {
+    if let Ok(base) = std::env::var("AINEER_WEB_SEARCH_BASE_URL") {
         let mut url = reqwest::Url::parse(&base).map_err(|error| error.to_string())?;
         url.query_pairs_mut().append_pair("q", query);
         return Ok(url);

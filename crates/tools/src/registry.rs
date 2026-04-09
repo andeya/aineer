@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use api::ToolDefinition;
+use engine::PermissionMode;
 use plugins::PluginTool;
-use runtime::PermissionMode;
 use serde_json::Value;
 
 use crate::execute_tool;

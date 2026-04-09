@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use codineer_api::{
-    ApiError, AuthSource, CodineerApiClient, ContentBlockDelta, ContentBlockDeltaEvent,
+use aineer_api::{
+    AineerApiClient, ApiError, AuthSource, ContentBlockDelta, ContentBlockDeltaEvent,
     ContentBlockStartEvent, InputContentBlock, InputMessage, MessageDeltaEvent, MessageRequest,
     OutputContentBlock, ProviderClient, RetryPolicy, StreamEvent, SystemBlock, ToolChoice,
     ToolDefinition,
@@ -21,7 +21,7 @@ async fn send_message_posts_json_and_parses_response() {
         "\"id\":\"msg_test\",",
         "\"type\":\"message\",",
         "\"role\":\"assistant\",",
-        "\"content\":[{\"type\":\"text\",\"text\":\"Hello from Codineer\"}],",
+        "\"content\":[{\"type\":\"text\",\"text\":\"Hello from Aineer\"}],",
         "\"model\":\"claude-sonnet-4-6\",",
         "\"stop_reason\":\"end_turn\",",
         "\"stop_sequence\":null,",
@@ -35,7 +35,7 @@ async fn send_message_posts_json_and_parses_response() {
     )
     .await;
 
-    let client = CodineerApiClient::new("test-key")
+    let client = AineerApiClient::new("test-key")
         .with_auth_token(Some("proxy-token".to_string()))
         .with_base_url(server.base_url());
     let response = client
@@ -49,7 +49,7 @@ async fn send_message_posts_json_and_parses_response() {
     assert_eq!(
         response.content,
         vec![OutputContentBlock::Text {
-            text: "Hello from Codineer".to_string(),
+            text: "Hello from Aineer".to_string(),
         }]
     );
 
@@ -105,7 +105,7 @@ async fn stream_message_parses_sse_events_with_tool_use() {
     )
     .await;
 
-    let client = CodineerApiClient::new("test-key")
+    let client = AineerApiClient::new("test-key")
         .with_auth_token(Some("proxy-token".to_string()))
         .with_base_url(server.base_url());
     let mut stream = client
@@ -183,7 +183,7 @@ async fn retries_retryable_failures_before_succeeding() {
     )
     .await;
 
-    let client = CodineerApiClient::new("test-key")
+    let client = AineerApiClient::new("test-key")
         .with_base_url(server.base_url())
         .with_retry_policy(RetryPolicy {
             max_retries: 2,
@@ -219,8 +219,8 @@ async fn provider_client_dispatches_api_requests() {
     )
     .expect("api provider client should be constructed");
     let client = match client {
-        ProviderClient::CodineerApi(client) => {
-            ProviderClient::CodineerApi(client.with_base_url(server.base_url()))
+        ProviderClient::AineerApi(client) => {
+            ProviderClient::AineerApi(client.with_base_url(server.base_url()))
         }
         other => panic!("expected default provider, got {other:?}"),
     };
@@ -261,7 +261,7 @@ async fn surfaces_retry_exhaustion_for_persistent_retryable_errors() {
     )
     .await;
 
-    let client = CodineerApiClient::new("test-key")
+    let client = AineerApiClient::new("test-key")
         .with_base_url(server.base_url())
         .with_retry_policy(RetryPolicy {
             max_retries: 1,
@@ -296,10 +296,10 @@ async fn surfaces_retry_exhaustion_for_persistent_retryable_errors() {
 #[tokio::test]
 #[ignore = "requires ANTHROPIC_API_KEY and network access"]
 async fn live_stream_smoke_test() {
-    let client = CodineerApiClient::from_env().expect("ANTHROPIC_API_KEY must be set");
+    let client = AineerApiClient::from_env().expect("ANTHROPIC_API_KEY must be set");
     let mut stream = client
         .stream_message(&MessageRequest {
-            model: std::env::var("CODINEER_MODEL")
+            model: std::env::var("AINEER_MODEL")
                 .unwrap_or_else(|_| "claude-sonnet-4-6".to_string()),
             max_tokens: 32,
             messages: vec![InputMessage::user_text(
@@ -473,7 +473,7 @@ fn sample_request(stream: bool) -> MessageRequest {
                 },
                 InputContentBlock::ToolResult {
                     tool_use_id: "toolu_prev".to_string(),
-                    content: vec![codineer_api::ToolResultContentBlock::Json {
+                    content: vec![aineer_api::ToolResultContentBlock::Json {
                         value: json!({"forecast": "sunny"}),
                     }],
                     is_error: false,

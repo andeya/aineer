@@ -8,6 +8,7 @@ use serde_json::Value;
 
 use crate::constants::{BUILTIN_MARKETPLACE, BUNDLED_MARKETPLACE, EXTERNAL_MARKETPLACE};
 use crate::error::PluginError;
+use protocol::RuntimeHookConfig;
 
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -80,8 +81,8 @@ impl PluginHooks {
 
     /// Convert to a `RuntimeHookConfig` for use with `HookDispatcher`.
     #[must_use]
-    pub fn to_hook_config(&self) -> runtime::RuntimeHookConfig {
-        runtime::RuntimeHookConfig::new(self.pre_tool_use.clone(), self.post_tool_use.clone())
+    pub fn to_hook_config(&self) -> RuntimeHookConfig {
+        RuntimeHookConfig::new(self.pre_tool_use.clone(), self.post_tool_use.clone())
     }
 }
 
@@ -292,14 +293,14 @@ impl PluginTool {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .env("CODINEER_PLUGIN_ID", &self.plugin_id)
-            .env("CODINEER_PLUGIN_NAME", &self.plugin_name)
-            .env("CODINEER_TOOL_NAME", &self.definition.name)
-            .env("CODINEER_TOOL_INPUT", &input_json);
+            .env("AINEER_PLUGIN_ID", &self.plugin_id)
+            .env("AINEER_PLUGIN_NAME", &self.plugin_name)
+            .env("AINEER_TOOL_NAME", &self.definition.name)
+            .env("AINEER_TOOL_INPUT", &input_json);
         if let Some(root) = &self.root {
             process
                 .current_dir(root)
-                .env("CODINEER_PLUGIN_ROOT", root.display().to_string());
+                .env("AINEER_PLUGIN_ROOT", root.display().to_string());
         }
 
         let mut child = process.spawn()?;

@@ -1,8 +1,8 @@
 //! Cron job management tools.
 //!
 //! `CronCreate`, `CronDelete`, and `CronList` manage the user's crontab.
-//! Managed entries are tagged with `# codineer-managed id=<id> label=<label>`
-//! so they can be listed and deleted without affecting non-codineer entries.
+//! Managed entries are tagged with `# aineer-managed id=<id> label=<label>`
+//! so they can be listed and deleted without affecting non-aineer entries.
 
 use std::process::Command;
 
@@ -14,7 +14,7 @@ use crate::types::{CronCreateInput, CronDeleteInput, CronListInput};
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const MARKER: &str = "# codineer-managed";
+const MARKER: &str = "# aineer-managed";
 
 // ── Output types ─────────────────────────────────────────────────────────────
 
@@ -65,7 +65,7 @@ fn write_crontab(content: &str) -> Result<(), String> {
     }
 }
 
-/// Parse a managed line: `<schedule> <command> # codineer-managed id=<id> label=<label>`
+/// Parse a managed line: `<schedule> <command> # aineer-managed id=<id> label=<label>`
 fn parse_managed_line(line: &str) -> Option<CronEntry> {
     let marker_pos = line.find(MARKER)?;
     let meta = line[marker_pos + MARKER.len()..].trim();
@@ -237,7 +237,7 @@ mod tests {
 
     #[test]
     fn parse_managed_line_extracts_fields() {
-        let line = "*/5 * * * * /usr/bin/check # codineer-managed id=cron-123 label=health_check";
+        let line = "*/5 * * * * /usr/bin/check # aineer-managed id=cron-123 label=health_check";
         let entry = parse_managed_line(line).expect("should parse");
         assert_eq!(entry.id, "cron-123");
         assert_eq!(entry.schedule, "*/5 * * * *");

@@ -1,6 +1,6 @@
-# codineer-plugins
+# aineer-plugins
 
-Plugin system and hooks for [Codineer](https://github.com/andeya/codineer).
+Plugin system and hooks for [Aineer](https://github.com/andeya/aineer).
 
 [中文文档](README_CN.md)
 
@@ -139,8 +139,8 @@ The following environment variables are injected when a tool script runs:
 
 | Variable             | Description                                |
 | -------------------- | ------------------------------------------ |
-| `CODINEER_PLUGIN_ID` | Full plugin ID (e.g. `my-plugin@external`) |
-| `CODINEER_TOOL_NAME` | The name of the tool being called          |
+| `AINEER_PLUGIN_ID` | Full plugin ID (e.g. `my-plugin@external`) |
+| `AINEER_TOOL_NAME` | The name of the tool being called          |
 
 ### Example Tool Script
 
@@ -213,7 +213,7 @@ Lifecycle scripts run once per session:
 }
 ```
 
-- **Init**: Runs when the Codineer session starts (after plugins are loaded).
+- **Init**: Runs when the Aineer session starts (after plugins are loaded).
 - **Shutdown**: Runs when the session ends.
 
 ---
@@ -226,14 +226,14 @@ Plugins are discovered from multiple locations:
 
 | Location                                  | Source type | Description                        |
 | ----------------------------------------- | ----------- | ---------------------------------- |
-| `~/.codineer/plugins/*/`                  | Installed   | Default install location           |
+| `~/.aineer/plugins/*/`                  | Installed   | Default install location           |
 | `plugins.installRoot` in `settings.json`  | Installed   | Custom install root (overrides default) |
-| `plugins.externalDirectories` entries     | External    | Extra dirs (e.g. `<project>/.codineer/plugins`) |
-| Embedded in Codineer binary               | Bundled     | Shipped with Codineer              |
+| `plugins.externalDirectories` entries     | External    | Extra dirs (e.g. `<project>/.aineer/plugins`) |
+| Embedded in Aineer binary               | Bundled     | Shipped with Aineer              |
 
 Each plugin subdirectory must contain a `plugin.json` at its root.
 
-> **Note**: `.codineer/plugins/` inside the project is **not** discovered automatically. To use project-local plugins, add the path to `plugins.externalDirectories` in `.codineer/settings.json`.
+> **Note**: `.aineer/plugins/` inside the project is **not** discovered automatically. To use project-local plugins, add the path to `plugins.externalDirectories` in `.aineer/settings.json`.
 
 ### Managing plugins
 
@@ -252,8 +252,8 @@ Use the `/plugin` slash command (aliases: `/plugins`, `/marketplace`):
 Or from the CLI directly:
 
 ```bash
-codineer plugins list
-codineer plugins install ./my-plugin
+aineer plugins list
+aineer plugins install ./my-plugin
 ```
 
 ### Configuration
@@ -351,14 +351,14 @@ echo "Done."
 
 ```bash
 #!/bin/sh
-echo "[$(date -u +%FT%TZ)] tool_call plugin=$CODINEER_PLUGIN_ID tool=$CODINEER_TOOL_NAME" >> .codineer/audit.log
+echo "[$(date -u +%FT%TZ)] tool_call plugin=$AINEER_PLUGIN_ID tool=$AINEER_TOOL_NAME" >> .aineer/audit.log
 ```
 
 ### Install and use
 
 ```bash
 # Copy the plugin into project plugins directory
-cp -r devops-toolkit .codineer/plugins/
+cp -r devops-toolkit .aineer/plugins/
 
 # Or install via slash command
 /plugin install ./devops-toolkit
@@ -373,8 +373,8 @@ cp -r devops-toolkit .codineer/plugins/
 
 ## Note
 
-This is an internal crate of the Codineer project. It is published to crates.io as a dependency of `codineer-cli` and is not intended for standalone use. API stability is not guaranteed outside the Codineer workspace.
+This is an internal crate of the Aineer project. It is published to crates.io as a dependency of `aineer-cli` and is not intended for standalone use. API stability is not guaranteed outside the Aineer workspace.
 
 ## License
 
-MIT — see [LICENSE](https://github.com/andeya/codineer/blob/main/LICENSE) for details.
+MIT — see [LICENSE](https://github.com/andeya/aineer/blob/main/LICENSE) for details.

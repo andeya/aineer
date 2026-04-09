@@ -4,14 +4,12 @@ use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use codineer_core::{
+use protocol::{
     clear_oauth_credentials, load_oauth_credentials, save_oauth_credentials, OAuthConfig,
     OAuthTokenSet,
 };
 
-use super::{
-    resolve_saved_oauth_token, resolve_startup_auth_source, AuthSource, CodineerApiClient,
-};
+use super::{resolve_saved_oauth_token, resolve_startup_auth_source, AineerApiClient, AuthSource};
 use crate::providers::{
     backoff_for_attempt, is_retryable_status, request_id_from_headers, RetryPolicy,
     ALT_REQUEST_ID_HEADER, REQUEST_ID_HEADER,
@@ -84,7 +82,7 @@ fn spawn_token_server(response_body: &'static str) -> String {
 fn read_api_key_requires_presence() {
     let _guard = env_lock();
     let config_home = temp_config_home();
-    std::env::set_var("CODINEER_CONFIG_HOME", &config_home);
+    std::env::set_var("AINEER_CONFIG_HOME", &config_home);
     std::env::remove_var("ANTHROPIC_AUTH_TOKEN");
     std::env::remove_var("ANTHROPIC_API_KEY");
     let error = super::read_api_key().expect_err("missing key should error");
@@ -92,7 +90,7 @@ fn read_api_key_requires_presence() {
         error,
         crate::error::ApiError::MissingCredentials { .. }
     ));
-    std::env::remove_var("CODINEER_CONFIG_HOME");
+    std::env::remove_var("AINEER_CONFIG_HOME");
     cleanup_temp_config_home(&config_home);
 }
 
@@ -100,7 +98,7 @@ fn read_api_key_requires_presence() {
 fn read_api_key_requires_non_empty_value() {
     let _guard = env_lock();
     let config_home = temp_config_home();
-    std::env::set_var("CODINEER_CONFIG_HOME", &config_home);
+    std::env::set_var("AINEER_CONFIG_HOME", &config_home);
     std::env::set_var("ANTHROPIC_AUTH_TOKEN", "");
     std::env::remove_var("ANTHROPIC_API_KEY");
     let error = super::read_api_key().expect_err("empty key should error");
@@ -109,7 +107,7 @@ fn read_api_key_requires_non_empty_value() {
         crate::error::ApiError::MissingCredentials { .. }
     ));
     std::env::remove_var("ANTHROPIC_AUTH_TOKEN");
-    std::env::remove_var("CODINEER_CONFIG_HOME");
+    std::env::remove_var("AINEER_CONFIG_HOME");
     cleanup_temp_config_home(&config_home);
 }
 
@@ -162,7 +160,7 @@ fn auth_source_from_env_combines_api_key_and_bearer_token() {
 fn auth_source_from_saved_oauth_when_env_absent() {
     let _guard = env_lock();
     let config_home = temp_config_home();
-    std::env::set_var("CODINEER_CONFIG_HOME", &config_home);
+    std::env::set_var("AINEER_CONFIG_HOME", &config_home);
     std::env::remove_var("ANTHROPIC_AUTH_TOKEN");
     std::env::remove_var("ANTHROPIC_API_KEY");
     save_oauth_credentials(&OAuthTokenSet {
@@ -177,7 +175,7 @@ fn auth_source_from_saved_oauth_when_env_absent() {
     assert_eq!(auth.bearer_token(), Some("saved-access-token"));
 
     clear_oauth_credentials().expect("clear credentials");
-    std::env::remove_var("CODINEER_CONFIG_HOME");
+    std::env::remove_var("AINEER_CONFIG_HOME");
     cleanup_temp_config_home(&config_home);
 }
 
@@ -203,7 +201,7 @@ fn oauth_token_expiry_uses_expires_at_timestamp() {
 fn resolve_saved_oauth_token_refreshes_expired_credentials() {
     let _guard = env_lock();
     let config_home = temp_config_home();
-    std::env::set_var("CODINEER_CONFIG_HOME", &config_home);
+    std::env::set_var("AINEER_CONFIG_HOME", &config_home);
     std::env::remove_var("ANTHROPIC_AUTH_TOKEN");
     std::env::remove_var("ANTHROPIC_API_KEY");
     save_oauth_credentials(&OAuthTokenSet {
@@ -227,7 +225,7 @@ fn resolve_saved_oauth_token_refreshes_expired_credentials() {
     assert_eq!(stored.access_token, "refreshed-token");
 
     clear_oauth_credentials().expect("clear credentials");
-    std::env::remove_var("CODINEER_CONFIG_HOME");
+    std::env::remove_var("AINEER_CONFIG_HOME");
     cleanup_temp_config_home(&config_home);
 }
 
@@ -235,7 +233,7 @@ fn resolve_saved_oauth_token_refreshes_expired_credentials() {
 fn resolve_startup_auth_source_uses_saved_oauth_without_loading_config() {
     let _guard = env_lock();
     let config_home = temp_config_home();
-    std::env::set_var("CODINEER_CONFIG_HOME", &config_home);
+    std::env::set_var("AINEER_CONFIG_HOME", &config_home);
     std::env::remove_var("ANTHROPIC_AUTH_TOKEN");
     std::env::remove_var("ANTHROPIC_API_KEY");
     save_oauth_credentials(&OAuthTokenSet {
@@ -251,7 +249,7 @@ fn resolve_startup_auth_source_uses_saved_oauth_without_loading_config() {
     assert_eq!(auth.bearer_token(), Some("saved-access-token"));
 
     clear_oauth_credentials().expect("clear credentials");
-    std::env::remove_var("CODINEER_CONFIG_HOME");
+    std::env::remove_var("AINEER_CONFIG_HOME");
     cleanup_temp_config_home(&config_home);
 }
 
@@ -259,7 +257,7 @@ fn resolve_startup_auth_source_uses_saved_oauth_without_loading_config() {
 fn resolve_startup_auth_source_errors_when_refreshable_token_lacks_config() {
     let _guard = env_lock();
     let config_home = temp_config_home();
-    std::env::set_var("CODINEER_CONFIG_HOME", &config_home);
+    std::env::set_var("AINEER_CONFIG_HOME", &config_home);
     std::env::remove_var("ANTHROPIC_AUTH_TOKEN");
     std::env::remove_var("ANTHROPIC_API_KEY");
     save_oauth_credentials(&OAuthTokenSet {
@@ -282,7 +280,7 @@ fn resolve_startup_auth_source_errors_when_refreshable_token_lacks_config() {
     assert_eq!(stored.refresh_token.as_deref(), Some("refresh-token"));
 
     clear_oauth_credentials().expect("clear credentials");
-    std::env::remove_var("CODINEER_CONFIG_HOME");
+    std::env::remove_var("AINEER_CONFIG_HOME");
     cleanup_temp_config_home(&config_home);
 }
 
@@ -290,7 +288,7 @@ fn resolve_startup_auth_source_errors_when_refreshable_token_lacks_config() {
 fn resolve_saved_oauth_token_preserves_refresh_token_when_refresh_response_omits_it() {
     let _guard = env_lock();
     let config_home = temp_config_home();
-    std::env::set_var("CODINEER_CONFIG_HOME", &config_home);
+    std::env::set_var("AINEER_CONFIG_HOME", &config_home);
     std::env::remove_var("ANTHROPIC_AUTH_TOKEN");
     std::env::remove_var("ANTHROPIC_API_KEY");
     save_oauth_credentials(&OAuthTokenSet {
@@ -315,7 +313,7 @@ fn resolve_saved_oauth_token_preserves_refresh_token_when_refresh_response_omits
     assert_eq!(stored.refresh_token.as_deref(), Some("refresh-token"));
 
     clear_oauth_credentials().expect("clear credentials");
-    std::env::remove_var("CODINEER_CONFIG_HOME");
+    std::env::remove_var("AINEER_CONFIG_HOME");
     cleanup_temp_config_home(&config_home);
 }
 
@@ -343,7 +341,7 @@ fn backoff_doubles_until_maximum() {
         initial_backoff: Duration::from_millis(10),
         max_backoff: Duration::from_millis(25),
     };
-    let _ = CodineerApiClient::new("test-key").with_retry_policy(policy);
+    let _ = AineerApiClient::new("test-key").with_retry_policy(policy);
     assert_eq!(
         backoff_for_attempt(1, &policy).expect("attempt 1"),
         Duration::from_millis(10)
@@ -461,7 +459,7 @@ fn auth_source_debug_redacts_secrets() {
 
 #[test]
 fn resolved_credential_api_key_maps_to_auth_source_api_key() {
-    let cred = codineer_core::ResolvedCredential::ApiKey("sk-key".into());
+    let cred = protocol::ResolvedCredential::ApiKey("sk-key".into());
     let auth = AuthSource::from(cred);
     assert_eq!(auth.api_key(), Some("sk-key"));
     assert_eq!(auth.bearer_token(), None);
@@ -469,7 +467,7 @@ fn resolved_credential_api_key_maps_to_auth_source_api_key() {
 
 #[test]
 fn resolved_credential_bearer_maps_to_auth_source_bearer() {
-    let cred = codineer_core::ResolvedCredential::BearerToken("tok-123".into());
+    let cred = protocol::ResolvedCredential::BearerToken("tok-123".into());
     let auth = AuthSource::from(cred);
     assert_eq!(auth.bearer_token(), Some("tok-123"));
     assert_eq!(auth.api_key(), None);
@@ -477,7 +475,7 @@ fn resolved_credential_bearer_maps_to_auth_source_bearer() {
 
 #[test]
 fn resolved_credential_both_maps_to_auth_source_both() {
-    let cred = codineer_core::ResolvedCredential::ApiKeyAndBearer {
+    let cred = protocol::ResolvedCredential::ApiKeyAndBearer {
         api_key: "key".into(),
         bearer_token: "tok".into(),
     };

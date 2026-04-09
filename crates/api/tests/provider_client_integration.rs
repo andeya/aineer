@@ -1,7 +1,7 @@
 use std::ffi::OsString;
 use std::sync::{Mutex, OnceLock};
 
-use codineer_api::{read_xai_base_url, ApiError, AuthSource, ProviderClient, ProviderKind};
+use aineer_api::{read_xai_base_url, ApiError, AuthSource, ProviderClient, ProviderKind};
 
 #[test]
 fn provider_client_routes_grok_aliases_through_xai() {
@@ -38,11 +38,11 @@ fn provider_client_uses_explicit_auth_without_env_lookup() {
 
     let client = ProviderClient::from_model_with_default_auth(
         "claude-sonnet-4-6",
-        Some(AuthSource::ApiKey("codineer-test-key".to_string())),
+        Some(AuthSource::ApiKey("aineer-test-key".to_string())),
     )
     .expect("explicit auth should avoid env lookup");
 
-    assert_eq!(client.provider_kind(), ProviderKind::CodineerApi);
+    assert_eq!(client.provider_kind(), ProviderKind::AineerApi);
 }
 
 #[test]

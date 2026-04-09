@@ -1,6 +1,6 @@
-# codineer-mcp
+# aineer-mcp
 
-MCP (Model Context Protocol) client, server management, and configuration types for [Codineer](https://github.com/andeya/codineer).
+MCP (Model Context Protocol) client, server management, and configuration types for [Aineer](https://github.com/andeya/aineer).
 
 [中文文档](README_CN.md)
 
@@ -31,8 +31,8 @@ All transport operations return `Result<T, McpTransportError>`, a structured `th
 
 ## Note
 
-This is an internal crate of the Codineer project. It is published to crates.io as a dependency of `codineer-cli` and is not intended for standalone use. API stability is not guaranteed outside the Codineer workspace.
+This is an internal crate of the Aineer project. It is published to crates.io as a dependency of `aineer-cli` and is not intended for standalone use. API stability is not guaranteed outside the Aineer workspace.
 
 ## License
 
-MIT — see [LICENSE](https://github.com/andeya/codineer/blob/main/LICENSE) for details.
+MIT — see [LICENSE](https://github.com/andeya/aineer/blob/main/LICENSE) for details.

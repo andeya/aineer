@@ -9,7 +9,7 @@ fn temp_path(name: &str) -> PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .expect("time")
         .as_nanos();
-    std::env::temp_dir().join(format!("codineer-tools-{unique}-{name}"))
+    std::env::temp_dir().join(format!("aineer-tools-{unique}-{name}"))
 }
 
 #[test]
@@ -135,7 +135,7 @@ fn web_search_extracts_and_filters_results() {
     }));
 
     std::env::set_var(
-        "CODINEER_WEB_SEARCH_BASE_URL",
+        "AINEER_WEB_SEARCH_BASE_URL",
         format!("http://{}/search", server.addr()),
     );
     let result = execute_tool_str(
@@ -147,7 +147,7 @@ fn web_search_extracts_and_filters_results() {
         }),
     )
     .expect("WebSearch should succeed");
-    std::env::remove_var("CODINEER_WEB_SEARCH_BASE_URL");
+    std::env::remove_var("AINEER_WEB_SEARCH_BASE_URL");
 
     let output: serde_json::Value = serde_json::from_str(&result).expect("valid json");
     assert_eq!(output["query"], "rust web search");
@@ -183,7 +183,7 @@ fn web_search_handles_generic_links_and_invalid_base_url() {
     }));
 
     std::env::set_var(
-        "CODINEER_WEB_SEARCH_BASE_URL",
+        "AINEER_WEB_SEARCH_BASE_URL",
         format!("http://{}/fallback", server.addr()),
     );
     let result = execute_tool_str(
@@ -193,7 +193,7 @@ fn web_search_handles_generic_links_and_invalid_base_url() {
         }),
     )
     .expect("WebSearch fallback parsing should succeed");
-    std::env::remove_var("CODINEER_WEB_SEARCH_BASE_URL");
+    std::env::remove_var("AINEER_WEB_SEARCH_BASE_URL");
 
     let output: serde_json::Value = serde_json::from_str(&result).expect("valid json");
     let results = output["results"].as_array().expect("results array");
@@ -206,10 +206,10 @@ fn web_search_handles_generic_links_and_invalid_base_url() {
     assert_eq!(content[0]["url"], "https://example.com/one");
     assert_eq!(content[1]["url"], "https://docs.rs/tokio");
 
-    std::env::set_var("CODINEER_WEB_SEARCH_BASE_URL", "://bad-base-url");
+    std::env::set_var("AINEER_WEB_SEARCH_BASE_URL", "://bad-base-url");
     let error = execute_tool_str("WebSearch", &json!({ "query": "generic links" }))
         .expect_err("invalid base URL should fail");
-    std::env::remove_var("CODINEER_WEB_SEARCH_BASE_URL");
+    std::env::remove_var("AINEER_WEB_SEARCH_BASE_URL");
     assert!(error.contains("relative URL without a base") || error.contains("empty host"));
 }
 
@@ -276,7 +276,7 @@ fn todo_write_persists_and_returns_previous_state() {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let path = temp_path("todos.json");
-    std::env::set_var("CODINEER_TODO_STORE", &path);
+    std::env::set_var("AINEER_TODO_STORE", &path);
 
     let first = execute_tool_str(
         "TodoWrite",
@@ -302,7 +302,7 @@ fn todo_write_persists_and_returns_previous_state() {
         }),
     )
     .expect("TodoWrite should succeed");
-    std::env::remove_var("CODINEER_TODO_STORE");
+    std::env::remove_var("AINEER_TODO_STORE");
     let _ = std::fs::remove_file(path);
 
     let second_output: serde_json::Value = serde_json::from_str(&second).expect("valid json");
@@ -323,7 +323,7 @@ fn todo_write_rejects_invalid_payloads_and_sets_verification_nudge() {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let path = temp_path("todos-errors.json");
-    std::env::set_var("CODINEER_TODO_STORE", &path);
+    std::env::set_var("AINEER_TODO_STORE", &path);
 
     let empty = execute_tool_str("TodoWrite", &json!({ "todos": [] }))
         .expect_err("empty todos should fail");
@@ -363,7 +363,7 @@ fn todo_write_rejects_invalid_payloads_and_sets_verification_nudge() {
         }),
     )
     .expect("completed todos should succeed");
-    std::env::remove_var("CODINEER_TODO_STORE");
+    std::env::remove_var("AINEER_TODO_STORE");
     let _ = fs::remove_file(path);
 
     let output: serde_json::Value = serde_json::from_str(&nudge).expect("valid json");
@@ -371,7 +371,7 @@ fn todo_write_rejects_invalid_payloads_and_sets_verification_nudge() {
 }
 
 #[test]
-#[ignore = "requires local skill fixtures in ~/.codineer/skills/help/SKILL.md"]
+#[ignore = "requires local skill fixtures in ~/.aineer/skills/help/SKILL.md"]
 fn skill_loads_local_skill_prompt() {
     let _guard = env_lock()
         .lock()
@@ -451,7 +451,7 @@ fn agent_persists_handoff_metadata() {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let dir = temp_path("agent-store");
-    std::env::set_var("CODINEER_AGENT_STORE", &dir);
+    std::env::set_var("AINEER_AGENT_STORE", &dir);
     let captured = Arc::new(Mutex::new(None::<AgentJob>));
     let captured_for_spawn = Arc::clone(&captured);
 
@@ -471,7 +471,7 @@ fn agent_persists_handoff_metadata() {
         },
     )
     .expect("Agent should succeed");
-    std::env::remove_var("CODINEER_AGENT_STORE");
+    std::env::remove_var("AINEER_AGENT_STORE");
 
     assert_eq!(manifest.name, "ship-audit");
     assert_eq!(manifest.subagent_type.as_deref(), Some("Explore"));
@@ -528,7 +528,7 @@ fn agent_fake_runner_can_persist_completion_and_failure() {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let dir = temp_path("agent-runner");
-    std::env::set_var("CODINEER_AGENT_STORE", &dir);
+    std::env::set_var("AINEER_AGENT_STORE", &dir);
 
     let completed = execute_agent_with_spawn(
         AgentInput {
@@ -612,7 +612,7 @@ fn agent_fake_runner_can_persist_completion_and_failure() {
     assert!(spawn_error_manifest.contains("\"status\": \"failed\""));
     assert!(spawn_error_manifest.contains("thread creation failed"));
 
-    std::env::remove_var("CODINEER_AGENT_STORE");
+    std::env::remove_var("AINEER_AGENT_STORE");
     let _ = std::fs::remove_dir_all(dir);
 }
 
