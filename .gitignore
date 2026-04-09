@@ -1,7 +1,7 @@
 # Build artifacts
 /target/
 
-# Codineer local artifacts (fine-grained rules live in .codineer/.gitignore)
+# Aineer local artifacts (fine-grained rules live in .aineer/.gitignore)
 
 # Environment
 .env
