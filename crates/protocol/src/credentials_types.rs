@@ -1,5 +1,5 @@
 //! Credential value types shared across crates (API clients, runtime resolvers).
-//! Resolver traits and chains remain in `codineer-runtime`.
+//! Resolver traits and chains remain in `aineer-runtime`.
 
 use std::fmt;
 

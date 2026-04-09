@@ -1,6 +1,6 @@
 [package]
-name = "codineer-core"
-description = "Core types and abstractions for Codineer: events, observer, cancellation, errors, IDs"
+name = "aineer-protocol"
+description = "Agent protocol definitions for Aineer: events, observer, cancellation, errors, hook config"
 readme = "README.md"
 version.workspace = true
 edition.workspace = true

@@ -1,6 +1,6 @@
-# codineer-core
+# aineer-core
 
-所有 [Codineer](https://github.com/andeya/codineer) crate 共享的核心类型与抽象。
+所有 [Aineer](https://github.com/andeya/aineer) crate 共享的核心类型与抽象。
 
 [English](README.md)
 
@@ -32,8 +32,8 @@
 
 ## 说明
 
-本 crate 是 Codineer 项目的内部组件，作为 `codineer-cli` 的依赖发布到 crates.io，不用于独立使用。在 Codineer 工作区之外不保证 API 稳定性。
+本 crate 是 Aineer 项目的内部组件，作为 `aineer-cli` 的依赖发布到 crates.io，不用于独立使用。在 Aineer 工作区之外不保证 API 稳定性。
 
 ## 许可证
 
-MIT — 详见 [LICENSE](https://github.com/andeya/codineer/blob/main/LICENSE)。
+MIT — 详见 [LICENSE](https://github.com/andeya/aineer/blob/main/LICENSE)。

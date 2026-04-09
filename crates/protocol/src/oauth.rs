@@ -1,4 +1,5 @@
-//! OAuth configuration, token types, PKCE helpers, and credential persistence shared by API clients and runtime.
+//! OAuth configuration, token types, PKCE helpers, credential persistence, and URL/form builders
+//! shared by API clients and runtime.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -9,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
-/// OAuth client and endpoint configuration (e.g. Codineer platform login).
+/// OAuth client and endpoint configuration (e.g. Aineer platform login).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OAuthConfig {
     pub client_id: String,
@@ -24,14 +25,14 @@ impl Default for OAuthConfig {
     fn default() -> Self {
         Self {
             client_id: String::from("df03b862-78fe-4a2b-bb24-426ac30897b7"),
-            authorize_url: String::from("https://platform.codineer.dev/oauth/authorize"),
-            token_url: String::from("https://platform.codineer.dev/v1/oauth/token"),
+            authorize_url: String::from("https://platform.aineer.dev/oauth/authorize"),
+            token_url: String::from("https://platform.aineer.dev/v1/oauth/token"),
             callback_port: None,
             manual_redirect_url: None,
             scopes: vec![
                 String::from("user:profile"),
                 String::from("user:inference"),
-                String::from("user:sessions:codineer"),
+                String::from("user:sessions:aineer"),
             ],
         }
     }
@@ -119,14 +120,14 @@ pub struct OAuthCallbackParams {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct StoredOAuthCredentials {
-    access_token: String,
+pub struct StoredOAuthCredentials {
+    pub access_token: String,
     #[serde(default)]
-    refresh_token: Option<String>,
+    pub refresh_token: Option<String>,
     #[serde(default)]
-    expires_at: Option<u64>,
+    pub expires_at: Option<u64>,
     #[serde(default)]
-    scopes: Vec<String>,
+    pub scopes: Vec<String>,
 }
 
 impl From<OAuthTokenSet> for StoredOAuthCredentials {
@@ -298,11 +299,41 @@ pub fn loopback_redirect_uri(port: u16) -> String {
     format!("http://localhost:{port}/callback")
 }
 
+impl OAuthCallbackParams {
+    pub fn from_request_target(target: &str) -> Result<Self, String> {
+        let (path, query) = target
+            .split_once('?')
+            .map_or((target, ""), |(path, query)| (path, query));
+        if path != "/callback" {
+            return Err(format!("unexpected callback path: {path}"));
+        }
+        Self::from_query(query)
+    }
+
+    pub fn from_query(query: &str) -> Result<Self, String> {
+        let mut params = BTreeMap::new();
+        for pair in query.split('&').filter(|pair| !pair.is_empty()) {
+            let (key, value) = pair
+                .split_once('=')
+                .map_or((pair, ""), |(key, value)| (key, value));
+            params.insert(percent_decode(key)?, percent_decode(value)?);
+        }
+        Ok(Self {
+            code: params.get("code").cloned(),
+            state: params.get("state").cloned(),
+            error: params.get("error").cloned(),
+            error_description: params.get("error_description").cloned(),
+        })
+    }
+}
+
+// --- Credential persistence (keyring-preferred, JSON file fallback) ---
+
 pub fn credentials_path() -> io::Result<PathBuf> {
     Ok(credentials_home_dir()?.join("credentials.json"))
 }
 
-const KEYRING_SERVICE: &str = "codineer";
+const KEYRING_SERVICE: &str = "aineer";
 const KEYRING_USER: &str = "oauth";
 
 fn keyring_entry() -> Option<keyring::Entry> {
@@ -337,7 +368,6 @@ pub fn load_oauth_credentials() -> io::Result<Option<OAuthTokenSet>> {
     if let Some(token_set) = load_from_keyring() {
         return Ok(Some(token_set));
     }
-
     let path = match credentials_path() {
         Ok(path) => path,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -353,13 +383,11 @@ pub fn load_oauth_credentials() -> io::Result<Option<OAuthTokenSet>> {
     let stored = serde_json::from_value::<StoredOAuthCredentials>(oauth.clone())
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     let token_set: OAuthTokenSet = stored.into();
-
     if save_to_keyring(&token_set) {
         let mut migrated_root = root;
         migrated_root.remove("oauth");
         let _ = write_credentials_root(&path, &migrated_root);
     }
-
     Ok(Some(token_set))
 }
 
@@ -367,7 +395,6 @@ pub fn save_oauth_credentials(token_set: &OAuthTokenSet) -> io::Result<()> {
     if save_to_keyring(token_set) {
         return Ok(());
     }
-
     let path = credentials_path()?;
     let mut root = read_credentials_root(&path)?;
     root.insert(
@@ -380,54 +407,19 @@ pub fn save_oauth_credentials(token_set: &OAuthTokenSet) -> io::Result<()> {
 
 pub fn clear_oauth_credentials() -> io::Result<()> {
     clear_from_keyring();
-
     let path = credentials_path()?;
     let mut root = read_credentials_root(&path)?;
     root.remove("oauth");
     write_credentials_root(&path, &root)
 }
 
-impl OAuthCallbackParams {
-    pub fn from_request_target(target: &str) -> Result<Self, String> {
-        let (path, query) = target
-            .split_once('?')
-            .map_or((target, ""), |(path, query)| (path, query));
-        if path != "/callback" {
-            return Err(format!("unexpected callback path: {path}"));
-        }
-        Self::from_query(query)
-    }
-
-    pub fn from_query(query: &str) -> Result<Self, String> {
-        let mut params = BTreeMap::new();
-        for pair in query.split('&').filter(|pair| !pair.is_empty()) {
-            let (key, value) = pair
-                .split_once('=')
-                .map_or((pair, ""), |(key, value)| (key, value));
-            params.insert(percent_decode(key)?, percent_decode(value)?);
-        }
-        Ok(Self {
-            code: params.get("code").cloned(),
-            state: params.get("state").cloned(),
-            error: params.get("error").cloned(),
-            error_description: params.get("error_description").cloned(),
-        })
-    }
-}
-
-fn generate_random_token(bytes: usize) -> io::Result<String> {
-    let mut buffer = vec![0_u8; bytes];
-    getrandom::getrandom(&mut buffer).map_err(|e| io::Error::other(e.to_string()))?;
-    Ok(base64url_encode(&buffer))
-}
-
 fn credentials_home_dir() -> io::Result<PathBuf> {
-    if let Some(path) = std::env::var_os("CODINEER_CONFIG_HOME") {
+    if let Some(path) = std::env::var_os("AINEER_CONFIG_HOME") {
         return Ok(PathBuf::from(path));
     }
     for key in ["HOME", "USERPROFILE"] {
         if let Some(home) = std::env::var_os(key) {
-            return Ok(PathBuf::from(home).join(".codineer"));
+            return Ok(PathBuf::from(home).join(".aineer"));
         }
     }
     Err(io::Error::new(
@@ -479,7 +471,15 @@ fn set_file_permissions_owner_only(path: &std::path::Path) {
 #[cfg(not(unix))]
 fn set_file_permissions_owner_only(_path: &std::path::Path) {}
 
-fn base64url_encode(bytes: &[u8]) -> String {
+// --- Helpers ---
+
+fn generate_random_token(bytes: usize) -> io::Result<String> {
+    let mut buffer = vec![0_u8; bytes];
+    getrandom::getrandom(&mut buffer).map_err(|e| io::Error::other(e.to_string()))?;
+    Ok(base64url_encode(&buffer))
+}
+
+pub(crate) fn base64url_encode(bytes: &[u8]) -> String {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
     let mut output = String::new();
     let mut index = 0;
@@ -565,18 +565,24 @@ mod tests {
     use std::sync::Mutex;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use super::{
-        clear_from_keyring, clear_oauth_credentials, code_challenge_s256, credentials_path,
-        generate_state, load_from_keyring, load_oauth_credentials, loopback_redirect_uri,
-        save_oauth_credentials, OAuthAuthorizationRequest, OAuthCallbackParams, OAuthConfig,
-        OAuthRefreshRequest, OAuthTokenExchangeRequest, OAuthTokenSet, PkceCodePair,
-    };
+    use super::*;
 
     fn env_lock() -> std::sync::MutexGuard<'static, ()> {
         static ENV_LOCK: Mutex<()> = Mutex::new(());
         ENV_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn temp_config_home() -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "aineer-protocol-oauth-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ))
     }
 
     fn sample_config() -> OAuthConfig {
@@ -588,17 +594,6 @@ mod tests {
             manual_redirect_url: Some("https://console.test/oauth/callback".to_string()),
             scopes: vec!["org:read".to_string(), "user:write".to_string()],
         }
-    }
-
-    fn temp_config_home() -> std::path::PathBuf {
-        std::env::temp_dir().join(format!(
-            "codineer-core-oauth-test-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("time")
-                .as_nanos()
-        ))
     }
 
     #[test]
@@ -659,7 +654,7 @@ mod tests {
     fn oauth_credentials_round_trip_and_clear() {
         let _guard = env_lock();
         let config_home = temp_config_home();
-        std::env::set_var("CODINEER_CONFIG_HOME", &config_home);
+        std::env::set_var("AINEER_CONFIG_HOME", &config_home);
         let path = credentials_path().expect("credentials path");
         std::fs::create_dir_all(path.parent().expect("parent")).expect("create parent");
         std::fs::write(&path, "{\"other\":\"value\"}\n").expect("seed credentials");
@@ -690,7 +685,7 @@ mod tests {
         assert!(!cleared.contains("\"oauth\""));
 
         clear_from_keyring();
-        std::env::remove_var("CODINEER_CONFIG_HOME");
+        std::env::remove_var("AINEER_CONFIG_HOME");
         std::fs::remove_dir_all(config_home).expect("cleanup temp dir");
     }
 

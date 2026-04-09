@@ -1,6 +1,6 @@
-# codineer-core
+# aineer-core
 
-Core types and abstractions shared across all [Codineer](https://github.com/andeya/codineer) crates.
+Core types and abstractions shared across all [Aineer](https://github.com/andeya/aineer) crates.
 
 [中文文档](README_CN.md)
 
@@ -30,8 +30,8 @@ This crate provides the foundational building blocks that every other crate in t
 
 ## Note
 
-This is an internal crate of the Codineer project. It is published to crates.io as a dependency of `codineer-cli` and is not intended for standalone use. API stability is not guaranteed outside the Codineer workspace.
+This is an internal crate of the Aineer project. It is published to crates.io as a dependency of `aineer-cli` and is not intended for standalone use. API stability is not guaranteed outside the Aineer workspace.
 
 ## License
 
-MIT — see [LICENSE](https://github.com/andeya/codineer/blob/main/LICENSE) for details.
+MIT — see [LICENSE](https://github.com/andeya/aineer/blob/main/LICENSE) for details.
