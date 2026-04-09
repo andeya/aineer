@@ -1,8 +1,12 @@
 use std::io::{self, Read, Write};
+
+#[cfg(unix)]
 use std::path::PathBuf;
 
+#[cfg(unix)]
 const SOCKET_NAME: &str = "aineer.sock";
 
+#[cfg(unix)]
 fn socket_path() -> PathBuf {
     let base = std::env::var("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
