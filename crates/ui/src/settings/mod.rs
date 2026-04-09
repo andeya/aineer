@@ -266,7 +266,11 @@ impl SettingsPanel {
                     .stroke(stroke)
                     .corner_radius(radius::MD);
 
-                if ui.add(btn).clicked() {
+                if ui
+                    .add(btn)
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .clicked()
+                {
                     self.active_tab = *tab;
                 }
             }

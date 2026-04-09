@@ -74,30 +74,26 @@ impl ActivityBar {
 
                 ui.add_space(spacing::XXS);
 
-                // Each item needs its own ID scope to prevent collisions
-                // between the sibling label widgets inside the frames.
-                let resp = ui
-                    .push_id(*item, |ui| {
-                        egui::Frame::new()
-                            .fill(if is_active {
-                                t::alpha(t::ACCENT(), 15)
-                            } else {
-                                egui::Color32::TRANSPARENT
-                            })
-                            .corner_radius(radius::MD)
-                            .inner_margin(egui::Margin::same(spacing::SM as i8))
-                            .show(ui, |ui| {
-                                ui.set_min_width(28.0);
-                                ui.set_min_height(28.0);
-                                ui.vertical_centered(|ui| {
-                                    ui.label(
-                                        RichText::new(item.icon()).size(font_size::TITLE).color(fg),
-                                    );
-                                });
-                            })
-                            .response
+                // Use a proper Button so that Sense::click() is included and
+                // the cursor changes to a hand on hover automatically.
+                let resp = ui.push_id(*item, |ui| {
+                    let btn = egui::Button::new(
+                        RichText::new(item.icon())
+                            .size(font_size::TITLE)
+                            .color(fg),
+                    )
+                    .fill(if is_active {
+                        t::alpha(t::ACCENT(), 20)
+                    } else {
+                        egui::Color32::TRANSPARENT
                     })
-                    .inner;
+                    .corner_radius(radius::MD)
+                    .min_size(egui::vec2(28.0, 28.0))
+                    .frame(true);
+
+                    ui.add(btn)
+                })
+                .inner;
 
                 if is_active {
                     ui.painter().vline(

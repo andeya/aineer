@@ -96,8 +96,6 @@ pub struct AineerApp {
     active_streams: Vec<ActiveStream>,
     _tokio_rt: Arc<tokio::runtime::Runtime>,
     slash_items: Vec<SlashMenuItem>,
-    /// Fraction of central area allocated to the timeline (0.2 .. 0.85).
-    split_fraction: f32,
     ssh_manager: SshManager,
     show_ssh_dialog: bool,
     ssh_draft: SshProfile,
@@ -123,7 +121,6 @@ impl AineerApp {
 
         let mut tab_manager = TabManager::new();
         let session = crate::session::load_session();
-        let saved_split = session.as_ref().map(|s| s.split_fraction).unwrap_or(0.6);
 
         let tab_states: Vec<(u64, TabState)> = if let Some(ref sess) = session {
             let mut states = Vec::new();
@@ -197,7 +194,6 @@ impl AineerApp {
             active_streams: Vec::new(),
             _tokio_rt: rt,
             slash_items,
-            split_fraction: saved_split,
             ssh_manager: SshManager::new(),
             show_ssh_dialog: false,
             ssh_draft: SshProfile::default(),
@@ -1262,7 +1258,7 @@ impl eframe::App for AineerApp {
         let data = crate::session::SessionData {
             tabs,
             active_tab_index,
-            split_fraction: self.split_fraction,
+            split_fraction: 0.6,
         };
 
         if let Err(e) = crate::session::save_session(&data) {
@@ -1695,103 +1691,17 @@ impl eframe::App for AineerApp {
                 self.handle_chat_submit(text, refs);
             }
 
-            // Main content: timeline + live terminal
-            let split_frac = self.split_fraction;
+            // Main content: full-height timeline (live terminal view removed)
             egui::CentralPanel::default()
                 .frame(egui::Frame::new().fill(t::BG()))
                 .show(ctx, |ui| {
-                    let available_height = ui.available_height();
-                    let splitter_h = 6.0;
-                    let min_timeline = 60.0;
-                    let min_terminal = 60.0;
-                    let timeline_height = (available_height * split_frac)
-                        .clamp(min_timeline, available_height - min_terminal - splitter_h);
-
-                    // Timeline area (top portion)
-                    let timeline_action = ui
-                        .allocate_ui(Vec2::new(ui.available_width(), timeline_height), |ui| {
-                            if let Some(state) = self.tab_state_mut(active_tab_id) {
-                                state.timeline.show(ui)
-                            } else {
-                                TimelineAction::None
-                            }
-                        })
-                        .inner;
-                    self.handle_timeline_action(active_tab_id, timeline_action);
-
-                    // Draggable splitter
-                    let splitter_rect = ui
-                        .allocate_space(Vec2::new(ui.available_width(), splitter_h))
-                        .1;
-                    let splitter_resp = ui.interact(
-                        splitter_rect,
-                        egui::Id::new("timeline_terminal_splitter"),
-                        egui::Sense::drag(),
-                    );
-                    ui.painter().hline(
-                        splitter_rect.x_range(),
-                        splitter_rect.center().y,
-                        egui::Stroke::new(
-                            1.0,
-                            if splitter_resp.hovered() || splitter_resp.dragged() {
-                                t::ACCENT()
-                            } else {
-                                t::BORDER_SUBTLE()
-                            },
-                        ),
-                    );
-                    if splitter_resp.hovered() || splitter_resp.dragged() {
-                        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
-                    }
-                    if splitter_resp.dragged() {
-                        let dy = splitter_resp.drag_delta().y;
-                        if dy != 0.0 {
-                            ui.ctx().data_mut(|d| {
-                                d.insert_temp(egui::Id::new("splitter_drag_dy"), dy);
-                            });
-                        }
-                    }
-
-                    // Search bar (above terminal)
-                    let search_action = if let Some((_, state)) = self
-                        .tab_states
-                        .iter_mut()
-                        .find(|(id, _)| *id == active_tab_id)
-                    {
-                        state.search_bar.show(ui)
+                    let timeline_action = if let Some(state) = self.tab_state_mut(active_tab_id) {
+                        state.timeline.show(ui)
                     } else {
-                        SearchAction::None
+                        TimelineAction::None
                     };
-                    self.handle_search_action(active_tab_id, search_action);
-
-                    // Live terminal view (bottom portion)
-                    if let Some(tab) = self.tab_manager.active_tab_mut() {
-                        let terminal = TerminalView::new(ui, &mut tab.backend)
-                            .set_focus(false)
-                            .set_theme(self.terminal_theme.clone())
-                            .set_font(TerminalFont::new(FontSettings {
-                                font_type: FontId::monospace(self.font_size),
-                            }))
-                            .set_size(Vec2::new(ui.available_width(), ui.available_height()));
-                        ui.add(terminal);
-                    }
+                    self.handle_timeline_action(active_tab_id, timeline_action);
                 });
-
-            // Apply splitter drag delta via egui memory
-            {
-                let drag_delta: f32 =
-                    ctx.data_mut(|d| d.get_temp(egui::Id::new("splitter_drag_dy")).unwrap_or(0.0));
-                if drag_delta != 0.0 {
-                    ctx.data_mut(|d| {
-                        d.remove::<f32>(egui::Id::new("splitter_drag_dy"));
-                    });
-                    let central_height = ctx.available_rect().height();
-                    if central_height > 0.0 {
-                        self.split_fraction =
-                            (self.split_fraction + drag_delta / central_height).clamp(0.15, 0.85);
-                    }
-                }
-            }
         }
 
         self.show_ssh_popup(ctx);
