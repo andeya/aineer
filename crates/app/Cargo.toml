@@ -1,0 +1,35 @@
+[package]
+name = "aineer"
+description = "Aineer — AI Engineer: terminal as bone, gateway as vein, IDE as skin, agent as brain. A Rust-powered AI-native terminal with embedded model gateway and autonomous agent."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "aineer"
+path = "src/main.rs"
+
+[dependencies]
+cli = { workspace = true }
+terminal = { workspace = true }
+ui = { workspace = true }
+gateway = { workspace = true }
+engine = { workspace = true }
+api = { workspace = true }
+tools = { workspace = true }
+protocol = { workspace = true }
+eframe = { workspace = true }
+egui = { workspace = true }
+wgpu = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

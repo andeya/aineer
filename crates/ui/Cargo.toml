@@ -1,0 +1,20 @@
+[package]
+name = "aineer-ui"
+description = "Aineer UI component library — timeline, cards, input bar, diff panel, settings"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+terminal = { workspace = true }
+egui = { workspace = true }
+egui_commonmark = { workspace = true }
+git2 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
