@@ -9,7 +9,6 @@ use ui::cards::{Card, ChatCard, ShellCard, SystemCard};
 use ui::diff_panel::DiffPanel;
 use ui::git_watcher::GitWatcher;
 use ui::input_bar::{CardPickerItem, InputBar, SlashMenuItem, SubmitAction};
-use ui::search_bar::{SearchAction, SearchBar};
 use ui::settings::SettingsPanel;
 use ui::timeline::{Timeline, TimelineAction};
 use ui::widgets::{
@@ -33,7 +32,6 @@ pub struct TabState {
     pub timeline: Timeline,
     pub input_bar: InputBar,
     pub fullscreen_overlay: bool,
-    pub search_bar: SearchBar,
 }
 
 impl TabState {
@@ -53,7 +51,6 @@ impl TabState {
             timeline,
             input_bar: InputBar::new(),
             fullscreen_overlay: false,
-            search_bar: SearchBar::new(),
         }
     }
 
@@ -75,7 +72,6 @@ impl TabState {
             timeline,
             input_bar: InputBar::new(),
             fullscreen_overlay: false,
-            search_bar: SearchBar::new(),
         }
     }
 }
@@ -248,12 +244,6 @@ impl AineerApp {
                         label: "SSH Remote Connection".into(),
                         category: "Connection".into(),
                         shortcut: None,
-                    },
-                    PaletteItem {
-                        id: "search_terminal".into(),
-                        label: "Search in Terminal".into(),
-                        category: "Search".into(),
-                        shortcut: Some("⌘⇧ F".into()),
                     },
                 ]);
                 cp
@@ -519,39 +509,6 @@ impl AineerApp {
         }
     }
 
-    fn handle_search_action(&mut self, tab_id: u64, action: SearchAction) {
-        match action {
-            SearchAction::None => {}
-            SearchAction::QueryChanged(query) => {
-                if let Some(tab) = self.tab_manager.tab_mut(tab_id) {
-                    let valid = tab.backend.search_set_query(&query);
-                    if let Some((_, state)) =
-                        self.tab_states.iter_mut().find(|(id, _)| *id == tab_id)
-                    {
-                        state.search_bar.regex_valid = valid;
-                    }
-                }
-            }
-            SearchAction::FindNext => {
-                if let Some(tab) = self.tab_manager.tab_mut(tab_id) {
-                    tab.backend.search_find_next();
-                }
-            }
-            SearchAction::FindPrev => {
-                if let Some(tab) = self.tab_manager.tab_mut(tab_id) {
-                    tab.backend.search_find_prev();
-                }
-            }
-            SearchAction::Close => {
-                if let Some(tab) = self.tab_manager.tab_mut(tab_id) {
-                    tab.backend.search_clear();
-                }
-                if let Some((_, state)) = self.tab_states.iter_mut().find(|(id, _)| *id == tab_id) {
-                    state.search_bar.close();
-                }
-            }
-        }
-    }
 
     fn poll_agent_streams(&mut self) {
         let mut completed = Vec::new();
@@ -990,14 +947,6 @@ impl AineerApp {
                 self.settings_panel.draft.theme = new_mode.as_str().to_string();
             }
             "ssh_connect" => self.show_ssh_dialog = true,
-            "search_terminal" => {
-                if let Some(id) = self.tab_manager.active_tab_id() {
-                    if let Some((_, state)) = self.tab_states.iter_mut().find(|(tid, _)| *tid == id)
-                    {
-                        state.search_bar.toggle();
-                    }
-                }
-            }
             _ => {}
         }
     }
@@ -1288,24 +1237,6 @@ impl eframe::App for AineerApp {
             self.command_palette.toggle();
         }
 
-        // Ctrl+Shift+F / Cmd+Shift+F: toggle terminal search
-        {
-            let toggle_search =
-                ctx.input(|i| i.modifiers.command && i.modifiers.shift && i.key_pressed(Key::F));
-            if toggle_search {
-                if let Some(id) = self.tab_manager.active_tab_id() {
-                    if let Some((_, state)) = self.tab_states.iter_mut().find(|(tid, _)| *tid == id)
-                    {
-                        state.search_bar.toggle();
-                        if !state.search_bar.open {
-                            if let Some(tab) = self.tab_manager.tab_mut(id) {
-                                tab.backend.search_clear();
-                            }
-                        }
-                    }
-                }
-            }
-        }
 
         self.process_pty_events(ctx);
         self.poll_git_status();
