@@ -107,7 +107,10 @@ impl ToastManager {
 
         let screen = ctx
             .input(|i| i.viewport().inner_rect)
-            .unwrap_or(egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(800.0, 600.0)));
+            .unwrap_or(egui::Rect::from_min_max(
+                egui::pos2(0.0, 0.0),
+                egui::pos2(800.0, 600.0),
+            ));
         let margin = 16.0_f32;
         let toast_width = 320.0_f32;
         let toast_height = 52.0_f32;

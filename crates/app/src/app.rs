@@ -509,7 +509,6 @@ impl AineerApp {
         }
     }
 
-
     fn poll_agent_streams(&mut self) {
         let mut completed = Vec::new();
 
@@ -1236,7 +1235,6 @@ impl eframe::App for AineerApp {
         if ctx.input(|i| i.modifiers.command && i.modifiers.shift && i.key_pressed(Key::P)) {
             self.command_palette.toggle();
         }
-
 
         self.process_pty_events(ctx);
         self.poll_git_status();

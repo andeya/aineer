@@ -80,7 +80,9 @@ impl ExplorerPanel {
             let a_dir = a.path().is_dir();
             let b_dir = b.path().is_dir();
             // Directories first, then alphabetical
-            b_dir.cmp(&a_dir).then_with(|| a.file_name().cmp(&b.file_name()))
+            b_dir
+                .cmp(&a_dir)
+                .then_with(|| a.file_name().cmp(&b.file_name()))
         });
 
         for entry in entries {
@@ -123,8 +125,10 @@ impl ExplorerPanel {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
                     .add(
-                        egui::Button::new(RichText::new("↺").size(font_size::SMALL).color(t::FG_DIM()))
-                            .fill(egui::Color32::TRANSPARENT),
+                        egui::Button::new(
+                            RichText::new("↺").size(font_size::SMALL).color(t::FG_DIM()),
+                        )
+                        .fill(egui::Color32::TRANSPARENT),
                     )
                     .on_hover_text("Refresh")
                     .clicked()
@@ -159,7 +163,11 @@ impl ExplorerPanel {
                         ui.add_space(indent);
 
                         let icon = if entry.is_dir {
-                            if entry.expanded { "▼ 📂" } else { "▶ 📁" }
+                            if entry.expanded {
+                                "▼ 📂"
+                            } else {
+                                "▶ 📁"
+                            }
                         } else {
                             file_icon(&entry.name)
                         };
@@ -180,11 +188,10 @@ impl ExplorerPanel {
                         }
 
                         label_resp.context_menu(|ui| {
-                            if entry.is_dir
-                                && ui.button("Open in Terminal").clicked() {
-                                    action = ExplorerAction::ChangeDir(entry.path.clone());
-                                    ui.close();
-                                }
+                            if entry.is_dir && ui.button("Open in Terminal").clicked() {
+                                action = ExplorerAction::ChangeDir(entry.path.clone());
+                                ui.close();
+                            }
                             if ui.button("Copy Path").clicked() {
                                 ui.ctx().copy_text(entry.path.to_string_lossy().to_string());
                                 ui.close();

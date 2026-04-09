@@ -38,11 +38,7 @@ impl<'a> EmptyState<'a> {
             // Push down roughly 1/3 of the available height so it looks centered.
             ui.add_space((height * 0.30).max(spacing::XXL));
 
-            ui.label(
-                RichText::new(self.icon)
-                    .size(40.0)
-                    .color(t::FG_DIM()),
-            );
+            ui.label(RichText::new(self.icon).size(40.0).color(t::FG_DIM()));
             ui.add_space(spacing::MD);
 
             ui.label(
@@ -54,11 +50,7 @@ impl<'a> EmptyState<'a> {
 
             if let Some(sub) = self.subtitle {
                 ui.add_space(spacing::XXS);
-                ui.label(
-                    RichText::new(sub)
-                        .size(font_size::SMALL)
-                        .color(t::FG_DIM()),
-                );
+                ui.label(RichText::new(sub).size(font_size::SMALL).color(t::FG_DIM()));
             }
 
             if let Some(label) = self.action_label {

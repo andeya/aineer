@@ -76,24 +76,23 @@ impl ActivityBar {
 
                 // Use a proper Button so that Sense::click() is included and
                 // the cursor changes to a hand on hover automatically.
-                let resp = ui.push_id(*item, |ui| {
-                    let btn = egui::Button::new(
-                        RichText::new(item.icon())
-                            .size(font_size::TITLE)
-                            .color(fg),
-                    )
-                    .fill(if is_active {
-                        t::alpha(t::ACCENT(), 20)
-                    } else {
-                        egui::Color32::TRANSPARENT
-                    })
-                    .corner_radius(radius::MD)
-                    .min_size(egui::vec2(28.0, 28.0))
-                    .frame(true);
+                let resp = ui
+                    .push_id(*item, |ui| {
+                        let btn = egui::Button::new(
+                            RichText::new(item.icon()).size(font_size::TITLE).color(fg),
+                        )
+                        .fill(if is_active {
+                            t::alpha(t::ACCENT(), 20)
+                        } else {
+                            egui::Color32::TRANSPARENT
+                        })
+                        .corner_radius(radius::MD)
+                        .min_size(egui::vec2(28.0, 28.0))
+                        .frame(true);
 
-                    ui.add(btn)
-                })
-                .inner;
+                        ui.add(btn)
+                    })
+                    .inner;
 
                 if is_active {
                     ui.painter().vline(
