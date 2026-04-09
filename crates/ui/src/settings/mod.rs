@@ -203,7 +203,8 @@ impl SettingsPanel {
         self.open = !self.open;
     }
 
-    pub fn show(&mut self, ui: &mut Ui) {
+    /// Returns `Some(true)` on successful save, `Some(false)` on save error, `None` otherwise.
+    pub fn show(&mut self, ui: &mut Ui) -> Option<bool> {
         // Search bar
         ui.add_space(spacing::SM);
         egui::Frame::new()
@@ -301,7 +302,7 @@ impl SettingsPanel {
             });
 
         ui.add_space(spacing::SM);
-        bar::show(ui, &mut self.dirty, &mut self.status_msg, &mut self.draft);
+        bar::show(ui, &mut self.dirty, &mut self.status_msg, &mut self.draft)
     }
 }
 

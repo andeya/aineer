@@ -5,12 +5,14 @@ use crate::theme::{self as t, font_size, radius, spacing};
 
 use super::SettingsDraft;
 
+/// Returns `Some(true)` on successful save, `Some(false)` on save error, `None` otherwise.
 pub fn show(
     ui: &mut Ui,
     dirty: &mut bool,
     status_msg: &mut Option<(String, bool)>,
     draft: &mut SettingsDraft,
-) {
+) -> Option<bool> {
+    let mut save_result: Option<bool> = None;
     egui::Frame::new()
         .fill(t::PANEL_BG_ALT())
         .corner_radius(radius::LG)
@@ -46,9 +48,11 @@ pub fn show(
                             *status_msg = Some(("Settings saved ✓".to_string(), true));
                             let mode = crate::theme::ThemeMode::parse(&draft.theme);
                             crate::theme::apply(ui.ctx(), mode);
+                            save_result = Some(true);
                         }
                         Err(e) => {
                             *status_msg = Some((format!("Save failed: {e}"), false));
+                            save_result = Some(false);
                         }
                     }
                 }
@@ -94,4 +98,5 @@ pub fn show(
                 }
             });
         });
+    save_result
 }
