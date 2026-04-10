@@ -10,7 +10,7 @@ use axum::routing::{get, post};
 use axum::Router;
 use tokio::sync::watch;
 
-use api::{
+use aineer_api::{
     ContentBlockDelta, InputContentBlock, InputMessage, MessageRequest, ProviderClient,
     StreamEvent, SystemBlock,
 };
@@ -94,7 +94,7 @@ async fn health_handler() -> &'static str {
 async fn models_handler() -> Json<ModelListResponse> {
     let now = now_secs();
 
-    let known_models = api::list_known_models(None);
+    let known_models = aineer_api::list_known_models(None);
     let data: Vec<ModelInfo> = known_models
         .into_iter()
         .map(|(id, kind)| ModelInfo {
@@ -128,7 +128,7 @@ async fn completions_handler(
     let (system, messages) = convert_messages(&req.messages);
     let max_tokens = req
         .max_tokens
-        .unwrap_or_else(|| api::max_tokens_for_model(&model));
+        .unwrap_or_else(|| aineer_api::max_tokens_for_model(&model));
 
     let tools = req.tools.as_ref().and_then(|t| convert_tools(t));
     let tool_choice = req.tool_choice.as_ref().and_then(convert_tool_choice);
@@ -191,7 +191,7 @@ async fn handle_non_streaming(
         .content
         .iter()
         .filter_map(|block| {
-            if let api::OutputContentBlock::Text { text } = block {
+            if let aineer_api::OutputContentBlock::Text { text } = block {
                 Some(text.as_str())
             } else {
                 None
@@ -352,7 +352,7 @@ fn convert_messages(messages: &[ChatMessage]) -> (Option<Vec<SystemBlock>>, Vec<
                         role: "user".to_string(),
                         content: vec![InputContentBlock::ToolResult {
                             tool_use_id: tool_call_id.to_string(),
-                            content: vec![api::ToolResultContentBlock::Text { text }],
+                            content: vec![aineer_api::ToolResultContentBlock::Text { text }],
                             is_error: false,
                             cache_control: None,
                         }],
@@ -388,7 +388,7 @@ fn convert_messages(messages: &[ChatMessage]) -> (Option<Vec<SystemBlock>>, Vec<
     (system, input_messages)
 }
 
-fn convert_tools(tools: &[serde_json::Value]) -> Option<Vec<api::ToolDefinition>> {
+fn convert_tools(tools: &[serde_json::Value]) -> Option<Vec<aineer_api::ToolDefinition>> {
     let mut result = Vec::new();
     for tool in tools {
         let func = tool.get("function")?;
@@ -401,7 +401,7 @@ fn convert_tools(tools: &[serde_json::Value]) -> Option<Vec<api::ToolDefinition>
             .get("parameters")
             .cloned()
             .unwrap_or(serde_json::json!({"type": "object"}));
-        result.push(api::ToolDefinition {
+        result.push(aineer_api::ToolDefinition {
             name,
             description,
             input_schema,
@@ -415,13 +415,13 @@ fn convert_tools(tools: &[serde_json::Value]) -> Option<Vec<api::ToolDefinition>
     }
 }
 
-fn convert_tool_choice(tc: &serde_json::Value) -> Option<api::ToolChoice> {
+fn convert_tool_choice(tc: &serde_json::Value) -> Option<aineer_api::ToolChoice> {
     match tc {
         serde_json::Value::String(s) => match s.as_str() {
-            "auto" => Some(api::ToolChoice::Auto),
-            "any" | "required" => Some(api::ToolChoice::Any),
+            "auto" => Some(aineer_api::ToolChoice::Auto),
+            "any" | "required" => Some(aineer_api::ToolChoice::Any),
             "none" => None,
-            _ => Some(api::ToolChoice::Auto),
+            _ => Some(aineer_api::ToolChoice::Auto),
         },
         serde_json::Value::Object(obj) => {
             if let Some(name) = obj
@@ -429,11 +429,11 @@ fn convert_tool_choice(tc: &serde_json::Value) -> Option<api::ToolChoice> {
                 .and_then(|f| f.get("name"))
                 .and_then(|n| n.as_str())
             {
-                Some(api::ToolChoice::Tool {
+                Some(aineer_api::ToolChoice::Tool {
                     name: name.to_string(),
                 })
             } else {
-                Some(api::ToolChoice::Auto)
+                Some(aineer_api::ToolChoice::Auto)
             }
         }
         _ => None,

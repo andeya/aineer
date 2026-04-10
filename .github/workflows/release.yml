@@ -2,285 +2,51 @@ name: Release
 
 on:
   push:
-    tags:
-      - "v*"
+    tags: ["v*"]
 
-permissions:
-  contents: write
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
   build:
-    name: Build ${{ matrix.target }}
+    name: Build (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false
       matrix:
         include:
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-            archive: tar.gz
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
-            archive: tar.gz
-            cross: true
-          - target: x86_64-apple-darwin
-            os: macos-latest
-            archive: tar.gz
-          - target: aarch64-apple-darwin
-            os: macos-latest
-            archive: tar.gz
-          - target: x86_64-pc-windows-msvc
-            os: windows-latest
-            archive: zip
-
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-
-      - name: Install cross (Linux cross-compilation)
-        if: matrix.cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
-
-      - name: Build release binary
-        run: ${{ matrix.cross && 'cross' || 'cargo' }} build --release -p aineer --target ${{ matrix.target }}
-
-      - name: Determine binary path
-        id: bin
-        shell: bash
-        run: |
-          if [[ "${{ matrix.target }}" == *windows* ]]; then
-            echo "path=target/${{ matrix.target }}/release/aineer.exe" >> "$GITHUB_OUTPUT"
-            echo "name=aineer.exe" >> "$GITHUB_OUTPUT"
-          else
-            echo "path=target/${{ matrix.target }}/release/aineer" >> "$GITHUB_OUTPUT"
-            echo "name=aineer" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Package (tar.gz)
-        if: matrix.archive == 'tar.gz'
-        id: pkg_tar
-        shell: bash
-        run: |
-          staging="aineer-${{ github.ref_name }}-${{ matrix.target }}"
-          mkdir -p "$staging"
-          cp "${{ steps.bin.outputs.path }}" "$staging/"
-          cp LICENSE README.md "$staging/" 2>/dev/null || true
-          tar czf "$staging.tar.gz" "$staging"
-          echo "asset=$staging.tar.gz" >> "$GITHUB_OUTPUT"
-
-      - name: Package (zip)
-        if: matrix.archive == 'zip'
-        id: pkg_zip
-        shell: bash
-        run: |
-          staging="aineer-${{ github.ref_name }}-${{ matrix.target }}"
-          mkdir -p "$staging"
-          cp "${{ steps.bin.outputs.path }}" "$staging/"
-          cp LICENSE README.md "$staging/" 2>/dev/null || true
-          7z a "$staging.zip" "$staging"
-          echo "asset=$staging.zip" >> "$GITHUB_OUTPUT"
-
-      - name: Create macOS .dmg
-        if: matrix.target == 'aarch64-apple-darwin' || matrix.target == 'x86_64-apple-darwin'
-        id: pkg_dmg
-        shell: bash
-        run: |
-          APP_NAME="Aineer"
-          DMG_NAME="aineer-${{ github.ref_name }}-${{ matrix.target }}.dmg"
-          mkdir -p dmg_staging
-          cp "${{ steps.bin.outputs.path }}" dmg_staging/aineer
-          chmod +x dmg_staging/aineer
-          hdiutil create -volname "$APP_NAME" -srcfolder dmg_staging \
-            -ov -format UDZO "$DMG_NAME"
-          echo "asset=$DMG_NAME" >> "$GITHUB_OUTPUT"
-
-      - name: Create Linux AppImage
-        if: matrix.target == 'x86_64-unknown-linux-gnu' && !matrix.cross
-        id: pkg_appimage
-        shell: bash
-        run: |
-          APP_NAME="Aineer"
-          APPDIR="AppDir"
-          mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/icons/hicolor/256x256/apps"
-          cp "${{ steps.bin.outputs.path }}" "$APPDIR/usr/bin/aineer"
-          chmod +x "$APPDIR/usr/bin/aineer"
-          cat > "$APPDIR/aineer.desktop" << 'DESKTOP'
-          [Desktop Entry]
-          Name=Aineer
-          Exec=aineer
-          Icon=aineer
-          Type=Application
-          Categories=Development;TerminalEmulator;
-          DESKTOP
-          # Placeholder icon (will use generated branding later)
-          convert -size 256x256 xc:#6366f1 "$APPDIR/usr/share/icons/hicolor/256x256/apps/aineer.png" 2>/dev/null || true
-          cp "$APPDIR/usr/share/icons/hicolor/256x256/apps/aineer.png" "$APPDIR/aineer.png" 2>/dev/null || true
-          # Download appimagetool
-          wget -q "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage" -O appimagetool
-          chmod +x appimagetool
-          ARCH=x86_64 ./appimagetool "$APPDIR" "aineer-${{ github.ref_name }}-x86_64.AppImage"
-          echo "asset=aineer-${{ github.ref_name }}-x86_64.AppImage" >> "$GITHUB_OUTPUT"
-
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }} -p aineer
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: aineer-${{ matrix.target }}
-          path: |
-            ${{ steps.pkg_tar.outputs.asset }}
-            ${{ steps.pkg_zip.outputs.asset }}
-            ${{ steps.pkg_dmg.outputs.asset }}
-            ${{ steps.pkg_appimage.outputs.asset }}
+          path: target/${{ matrix.target }}/release/aineer${{ matrix.os == 'windows-latest' && '.exe' || '' }}
 
   release:
-    name: Create GitHub Release
+    name: Create Release
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          merge-multiple: true
-
-      - name: Create release
+      - uses: actions/download-artifact@v4
+      - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: artifacts/*
-
-  publish-crates:
-    name: Publish to crates.io
-    needs: release
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Publish crates (dependency order with retry)
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: |
-          publish_crate() {
-            local crate="$1"
-            local max_retries=5
-            local delay=120
-            for attempt in $(seq 1 "$max_retries"); do
-              echo "::group::Publishing $crate (attempt $attempt/$max_retries)"
-              local output
-              output=$(cargo publish -p "$crate" --locked 2>&1) && {
-                echo "$output"
-                echo "$crate published successfully."
-                echo "::endgroup::"
-                return 0
-              }
-              echo "$output"
-              echo "::endgroup::"
-              if echo "$output" | grep -q "already uploaded"; then
-                echo "$crate already on crates.io, skipping."
-                return 0
-              fi
-              if [ "$attempt" -lt "$max_retries" ]; then
-                echo "Retrying $crate in ${delay}s..."
-                sleep "$delay"
-                delay=$((delay * 2))
-              fi
-            done
-            echo "::error::Failed to publish $crate after $max_retries attempts"
-            return 1
-          }
-
-          failed=""
-          for crate in aineer-core aineer-mcp aineer-lsp aineer-api aineer-runtime aineer-plugins aineer-tools aineer-commands aineer-cli aineer; do
-            if ! publish_crate "$crate"; then
-              failed="$failed $crate"
-            fi
-            sleep 90
-          done
-          if [ -n "$failed" ]; then
-            echo "::warning::These crates failed to publish:$failed"
-          fi
-
-  update-homebrew:
-    name: Update Homebrew tap
-    needs: release
-    runs-on: ubuntu-latest
-    steps:
-      - name: Extract version
-        id: version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-
-      - name: Compute SHA256 checksums
-        run: |
-          for target in x86_64-apple-darwin aarch64-apple-darwin x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
-            archive="aineer-${{ github.ref_name }}-${target}.tar.gz"
-            url="https://github.com/andeya/aineer/releases/download/${{ github.ref_name }}/${archive}"
-            sha=$(curl -sL "$url" | sha256sum | cut -d' ' -f1)
-            key=$(echo "$target" | tr '-' '_')
-            echo "sha_${key}=${sha}" >> "$GITHUB_ENV"
-          done
-
-      - name: Check out Homebrew tap repo
-        uses: actions/checkout@v4
-        with:
-          repository: andeya/homebrew-aineer
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-
-      - name: Update Formula
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          TAG="${{ github.ref_name }}"
-          mkdir -p Formula
-          cat > Formula/aineer.rb << FORMULA
-          class Aineer < Formula
-            desc "Local coding-agent CLI implemented in safe Rust"
-            homepage "https://github.com/andeya/aineer"
-            version "${VERSION}"
-            license "MIT"
-
-            on_macos do
-              if Hardware::CPU.arm?
-                url "https://github.com/andeya/aineer/releases/download/${TAG}/aineer-${TAG}-aarch64-apple-darwin.tar.gz"
-                sha256 "${sha_aarch64_apple_darwin}"
-              else
-                url "https://github.com/andeya/aineer/releases/download/${TAG}/aineer-${TAG}-x86_64-apple-darwin.tar.gz"
-                sha256 "${sha_x86_64_apple_darwin}"
-              end
-            end
-
-            on_linux do
-              if Hardware::CPU.arm?
-                url "https://github.com/andeya/aineer/releases/download/${TAG}/aineer-${TAG}-aarch64-unknown-linux-gnu.tar.gz"
-                sha256 "${sha_aarch64_unknown_linux_gnu}"
-              else
-                url "https://github.com/andeya/aineer/releases/download/${TAG}/aineer-${TAG}-x86_64-unknown-linux-gnu.tar.gz"
-                sha256 "${sha_x86_64_unknown_linux_gnu}"
-              end
-            end
-
-            def install
-              bin.install "aineer"
-            end
-
-            test do
-              assert_match version.to_s, shell_output("#{bin}/aineer --version")
-            end
-          end
-          FORMULA
-
-      - name: Commit and push
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Formula/aineer.rb
-          git diff --cached --quiet && exit 0
-          git commit -m "formula: bump to ${{ github.ref_name }}"
-          git push
-        continue-on-error: true
+          files: |
+            aineer-*/aineer*

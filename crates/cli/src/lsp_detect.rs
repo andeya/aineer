@@ -1,6 +1,6 @@
 use std::process::Command;
 
-use engine::{LspManager, LspServerConfig};
+use aineer_engine::{LspManager, LspServerConfig};
 
 pub(crate) fn detect_lsp_servers(workspace_root: &std::path::Path) -> Option<LspManager> {
     let mut configs = Vec::new();

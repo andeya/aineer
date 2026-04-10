@@ -1,0 +1,12 @@
+[package]
+name = "aineer-settings"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+aineer-protocol = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+notify = { workspace = true }

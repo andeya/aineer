@@ -42,7 +42,7 @@ impl ProviderClient {
     /// Build a provider client using a pre-resolved credential from a `CredentialChain`.
     pub fn from_model_with_credential(
         model: &str,
-        credential: protocol::ResolvedCredential,
+        credential: aineer_protocol::ResolvedCredential,
     ) -> Result<Self, ApiError> {
         let auth = AuthSource::from(credential);
         match providers::detect_provider_kind(model) {

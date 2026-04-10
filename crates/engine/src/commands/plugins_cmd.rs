@@ -1,4 +1,4 @@
-use plugins::{PluginError, PluginManager, PluginSummary};
+use aineer_plugins::{PluginError, PluginManager, PluginSummary};
 
 use super::{PluginEffect, PluginsCommandResult};
 

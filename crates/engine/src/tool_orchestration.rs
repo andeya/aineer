@@ -23,7 +23,7 @@ pub enum ToolSlot {
 
 /// Cooperative abort signal for tools in the same batch when `bash` fails.
 ///
-/// Backed by [`Arc`]`<`[`AtomicBool`]`>` (same pattern as [`protocol::cancel::CancelToken`]).
+/// Backed by [`Arc`]`<`[`AtomicBool`]`>` (same pattern as [`aineer_protocol::cancel::CancelToken`]).
 #[derive(Debug, Clone)]
 pub struct SiblingAbortController {
     flag: Arc<AtomicBool>,
@@ -62,7 +62,7 @@ impl Default for SiblingAbortController {
 /// Handle for incremental tool feedback during batch execution.
 ///
 /// Call [`Self::progress`] with a status line; orchestration forwards it through
-/// [`ExecuteBatchOptions::on_tool_progress`] (callers often emit [`protocol::events::RuntimeEvent::ToolProgress`]).
+/// [`ExecuteBatchOptions::on_tool_progress`] (callers often emit [`aineer_protocol::events::RuntimeEvent::ToolProgress`]).
 pub struct ToolProgressSink<'a> {
     tool_use_id: &'a str,
     tool_name: &'a str,
@@ -267,7 +267,7 @@ pub struct ToolCallResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use protocol::events::{EventKind, RuntimeEvent};
+    use aineer_protocol::events::{EventKind, RuntimeEvent};
 
     struct MockExecutor {
         safe_tools: Vec<String>,

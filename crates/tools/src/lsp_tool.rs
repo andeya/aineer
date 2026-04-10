@@ -10,7 +10,7 @@ use std::future::Future;
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use lsp::{
+use aineer_lsp::{
     diagnostic_severity_label, CompletionItem, DocumentSymbolInfo, HoverResult, LspManager,
     LspServerConfig, LspTextEdit, Position, SymbolLocation,
 };

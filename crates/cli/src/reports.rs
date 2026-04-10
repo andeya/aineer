@@ -1,4 +1,4 @@
-use engine::{
+use aineer_engine::{
     ConfigLoader, ConfigSource, ContentBlock, MessageRole, ProjectContext, Session, TokenUsage,
 };
 use std::borrow::ToOwned;
@@ -6,7 +6,7 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use engine::RemoteSessionContext;
+use aineer_engine::RemoteSessionContext;
 
 use crate::error::CliResult;
 use crate::style::Palette;

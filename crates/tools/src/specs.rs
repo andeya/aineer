@@ -1,4 +1,4 @@
-use engine::PermissionMode;
+use aineer_engine::PermissionMode;
 use serde_json::json;
 
 use crate::registry::{ToolSpec, ToolTier};

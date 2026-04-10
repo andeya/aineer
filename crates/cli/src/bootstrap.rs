@@ -2,11 +2,11 @@ use std::env;
 use std::path::{Path, PathBuf};
 
 use crate::error::CliResult;
-use engine::ConfigLoader;
-use plugins::{PluginManager, PluginManagerConfig};
-use tools::GlobalToolRegistry;
+use aineer_engine::ConfigLoader;
+use aineer_plugins::{PluginManager, PluginManagerConfig};
+use aineer_tools::GlobalToolRegistry;
 
-pub(crate) fn build_runtime_plugin_state() -> CliResult<(engine::RuntimeConfig, GlobalToolRegistry)>
+pub(crate) fn build_runtime_plugin_state() -> CliResult<(aineer_engine::RuntimeConfig, GlobalToolRegistry)>
 {
     crate::init::ensure_home_aineer_dirs();
     let cwd = env::current_dir()?;
@@ -21,7 +21,7 @@ pub(crate) fn build_runtime_plugin_state() -> CliResult<(engine::RuntimeConfig, 
 pub(crate) fn build_plugin_manager(
     cwd: &Path,
     loader: &ConfigLoader,
-    runtime_config: &engine::RuntimeConfig,
+    runtime_config: &aineer_engine::RuntimeConfig,
 ) -> PluginManager {
     let plugin_settings = runtime_config.plugins();
     let mut plugin_config = PluginManagerConfig::new(loader.config_home().to_path_buf());
@@ -54,14 +54,14 @@ fn resolve_plugin_path(cwd: &Path, config_home: &Path, value: &str) -> PathBuf {
     }
 }
 
-pub(crate) fn build_system_prompt() -> CliResult<Vec<api::SystemBlock>> {
+pub(crate) fn build_system_prompt() -> CliResult<Vec<aineer_api::SystemBlock>> {
     build_system_prompt_with_lsp(None)
 }
 
 pub(crate) fn build_system_prompt_with_lsp(
-    lsp_context: Option<&engine::LspContextEnrichment>,
-) -> CliResult<Vec<api::SystemBlock>> {
-    Ok(engine::load_system_prompt_with_lsp(
+    lsp_context: Option<&aineer_engine::LspContextEnrichment>,
+) -> CliResult<Vec<aineer_api::SystemBlock>> {
+    Ok(aineer_engine::load_system_prompt_with_lsp(
         env::current_dir()?,
         super::current_date(),
         env::consts::OS,

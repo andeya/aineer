@@ -3,7 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-use engine::{ContentBlock, MessageRole, Session};
+use aineer_engine::{ContentBlock, MessageRole, Session};
 
 use crate::error::CliResult;
 

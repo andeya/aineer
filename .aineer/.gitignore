@@ -3,11 +3,15 @@
 !settings.json
 !plugins/
 !skills/
+!rules/
+!specs/
+!mcp/
 
 # Ignored (local / runtime artifacts)
 settings.local.json
 sessions/
 agents/
+memory/
 sandbox-home/
 sandbox-tmp/
 todos.json

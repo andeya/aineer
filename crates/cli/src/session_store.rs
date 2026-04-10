@@ -3,7 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use engine::Session;
+use aineer_engine::Session;
 
 use crate::error::CliResult;
 
@@ -23,7 +23,7 @@ pub(crate) struct ManagedSessionSummary {
 
 pub(crate) fn sessions_dir() -> CliResult<PathBuf> {
     let cwd = env::current_dir()?;
-    let path = engine::aineer_runtime_dir(&cwd).join("sessions");
+    let path = aineer_engine::aineer_runtime_dir(&cwd).join("sessions");
     fs::create_dir_all(&path)?;
     Ok(path)
 }

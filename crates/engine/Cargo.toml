@@ -12,24 +12,17 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-protocol.workspace = true
-api.workspace = true
-mcp.workspace = true
-lsp.workspace = true
-plugins.workspace = true
+aineer-protocol.workspace = true
+aineer-api.workspace = true
+aineer-mcp.workspace = true
+aineer-lsp.workspace = true
+aineer-plugins.workspace = true
 async-trait = "0.1"
 dunce = "1"
 glob = "0.3"
 serde.workspace = true
 serde_json.workspace = true
-tokio = { version = "1", features = [
-    "io-util",
-    "macros",
-    "process",
-    "rt",
-    "rt-multi-thread",
-    "time",
-] }
+tokio.workspace = true
 grep-regex = "0.1.14"
 grep-searcher = "0.1.16"
 ignore = "0.4.25"

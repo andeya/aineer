@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
-pub use protocol::OAuthTokenSet;
-use protocol::{
+pub use aineer_protocol::OAuthTokenSet;
+use aineer_protocol::{
     load_oauth_credentials, save_oauth_credentials, OAuthConfig, OAuthRefreshRequest,
     OAuthTokenExchangeRequest,
 };
@@ -105,12 +105,12 @@ impl From<OAuthTokenSet> for AuthSource {
     }
 }
 
-impl From<protocol::ResolvedCredential> for AuthSource {
-    fn from(value: protocol::ResolvedCredential) -> Self {
+impl From<aineer_protocol::ResolvedCredential> for AuthSource {
+    fn from(value: aineer_protocol::ResolvedCredential) -> Self {
         match value {
-            protocol::ResolvedCredential::ApiKey(key) => Self::ApiKey(key),
-            protocol::ResolvedCredential::BearerToken(token) => Self::BearerToken(token),
-            protocol::ResolvedCredential::ApiKeyAndBearer {
+            aineer_protocol::ResolvedCredential::ApiKey(key) => Self::ApiKey(key),
+            aineer_protocol::ResolvedCredential::BearerToken(token) => Self::BearerToken(token),
+            aineer_protocol::ResolvedCredential::ApiKeyAndBearer {
                 api_key,
                 bearer_token,
             } => Self::ApiKeyAndBearer {

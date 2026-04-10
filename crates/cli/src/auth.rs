@@ -4,10 +4,10 @@ use std::net::TcpListener;
 use std::process::Command;
 use std::sync::Arc;
 
-use api::{AineerApiClient, AuthSource, ProviderKind};
+use aineer_api::{AineerApiClient, AuthSource, ProviderKind};
 
 use crate::error::{CliError, CliResult};
-use engine::{
+use aineer_engine::{
     generate_state, save_oauth_credentials, AineerOAuthResolver, ClaudeCodeResolver, ConfigLoader,
     CredentialChain, EnvVarResolver, OAuthAuthorizationRequest, OAuthCallbackParams, OAuthConfig,
     OAuthRefreshRequest, OAuthTokenExchangeRequest, PkceCodePair, RuntimeConfig,
@@ -64,7 +64,7 @@ pub fn build_credential_chain(kind: ProviderKind, config: &RuntimeConfig) -> Cre
             let cred_config = config.credentials();
 
             let refresh_fn = make_refresh_fn();
-            let mut resolvers: Vec<Box<dyn engine::CredentialResolver>> = vec![
+            let mut resolvers: Vec<Box<dyn aineer_engine::CredentialResolver>> = vec![
                 Box::new(EnvVarResolver::anthropic()),
                 Box::new(AineerOAuthResolver::new(Some(oauth_config)).with_refresh_fn(refresh_fn)),
             ];
@@ -82,10 +82,10 @@ pub fn build_credential_chain(kind: ProviderKind, config: &RuntimeConfig) -> Cre
     }
 }
 
-fn make_refresh_fn() -> engine::credentials::oauth_resolver::RefreshFn {
-    Arc::new(|config: &OAuthConfig, token_set: engine::OAuthTokenSet| {
+fn make_refresh_fn() -> aineer_engine::credentials::oauth_resolver::RefreshFn {
+    Arc::new(|config: &OAuthConfig, token_set: aineer_engine::OAuthTokenSet| {
         let client =
-            AineerApiClient::from_auth(AuthSource::None).with_base_url(api::read_base_url());
+            AineerApiClient::from_auth(AuthSource::None).with_base_url(aineer_api::read_base_url());
         let refresh_token = token_set.refresh_token.clone().ok_or_else(|| {
             let err: Box<dyn std::error::Error + Send + Sync> =
                 Box::new(CliError::from("no refresh token available"));
@@ -98,7 +98,7 @@ fn make_refresh_fn() -> engine::credentials::oauth_resolver::RefreshFn {
                 .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
                 Box::new(CliError::from(e))
             })?;
-        Ok(engine::OAuthTokenSet {
+        Ok(aineer_engine::OAuthTokenSet {
             access_token: refreshed.access_token,
             refresh_token: refreshed.refresh_token.or(token_set.refresh_token),
             expires_at: refreshed.expires_at,
@@ -107,14 +107,14 @@ fn make_refresh_fn() -> engine::credentials::oauth_resolver::RefreshFn {
     })
 }
 
-fn client_runtime_block_on<F, T>(future: F) -> Result<T, api::ApiError>
+fn client_runtime_block_on<F, T>(future: F) -> Result<T, aineer_api::ApiError>
 where
-    F: std::future::Future<Output = Result<T, api::ApiError>>,
+    F: std::future::Future<Output = Result<T, aineer_api::ApiError>>,
 {
     match tokio::runtime::Handle::try_current() {
         Ok(handle) => tokio::task::block_in_place(|| handle.block_on(future)),
         Err(_) => tokio::runtime::Runtime::new()
-            .map_err(api::ApiError::from)?
+            .map_err(aineer_api::ApiError::from)?
             .block_on(future),
     }
 }
@@ -139,7 +139,7 @@ fn resolve_provider_and_chain(
 fn find_source<'a>(
     chain: &'a CredentialChain,
     source_id: &str,
-) -> CliResult<&'a dyn engine::CredentialResolver> {
+) -> CliResult<&'a dyn aineer_engine::CredentialResolver> {
     chain.get_resolver(source_id).ok_or_else(|| {
         let available: Vec<&str> = chain.resolver_ids().collect();
         format!(
@@ -198,7 +198,7 @@ pub fn run_logout(provider: Option<&str>, source: Option<&str>) -> CliResult<()>
     }
 
     if kind == ProviderKind::AineerApi {
-        engine::clear_oauth_credentials()?;
+        aineer_engine::clear_oauth_credentials()?;
         println!("Aineer OAuth credentials cleared.");
         return Ok(());
     }
@@ -241,9 +241,9 @@ pub fn run_status(provider: Option<&str>) -> CliResult<()> {
         match chain.resolve() {
             Ok(cred) => {
                 let label = match cred {
-                    engine::ResolvedCredential::ApiKey(_) => "API key",
-                    engine::ResolvedCredential::BearerToken(_) => "Bearer token",
-                    engine::ResolvedCredential::ApiKeyAndBearer { .. } => "API key + Bearer token",
+                    aineer_engine::ResolvedCredential::ApiKey(_) => "API key",
+                    aineer_engine::ResolvedCredential::BearerToken(_) => "Bearer token",
+                    aineer_engine::ResolvedCredential::ApiKeyAndBearer { .. } => "API key + Bearer token",
                     _ => "credentials",
                 };
                 println!("  Active: {label}");
@@ -259,7 +259,7 @@ pub fn run_status(provider: Option<&str>) -> CliResult<()> {
 
 /// For auto-discover sources (e.g. Claude Code) that don't support interactive
 /// login, check whether credentials are already available and print guidance.
-fn check_auto_discover_source(resolver: &dyn engine::CredentialResolver) -> CliResult<()> {
+fn check_auto_discover_source(resolver: &dyn aineer_engine::CredentialResolver) -> CliResult<()> {
     match resolver.resolve() {
         Ok(Some(_)) => {
             println!(
@@ -287,7 +287,7 @@ fn run_aineer_oauth_login(config: &RuntimeConfig) -> CliResult<()> {
     let default_oauth = OAuthConfig::default();
     let oauth = config.oauth().unwrap_or(&default_oauth);
     let callback_port = oauth.callback_port.unwrap_or(DEFAULT_OAUTH_CALLBACK_PORT);
-    let redirect_uri = engine::loopback_redirect_uri(callback_port);
+    let redirect_uri = aineer_engine::loopback_redirect_uri(callback_port);
     let pkce = PkceCodePair::generate()?;
     let state = generate_state()?;
     let authorize_url =
@@ -318,13 +318,13 @@ fn run_aineer_oauth_login(config: &RuntimeConfig) -> CliResult<()> {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "oauth state mismatch").into());
     }
 
-    let client = AineerApiClient::from_auth(AuthSource::None).with_base_url(api::read_base_url());
+    let client = AineerApiClient::from_auth(AuthSource::None).with_base_url(aineer_api::read_base_url());
     let exchange_request =
         OAuthTokenExchangeRequest::from_config(oauth, code, state, pkce.verifier, redirect_uri);
     let token_set = client_runtime_block_on(async {
         client.exchange_oauth_code(oauth, &exchange_request).await
     })?;
-    save_oauth_credentials(&engine::OAuthTokenSet {
+    save_oauth_credentials(&aineer_engine::OAuthTokenSet {
         access_token: token_set.access_token,
         refresh_token: token_set.refresh_token,
         expires_at: token_set.expires_at,
@@ -355,7 +355,7 @@ fn open_browser(url: &str) -> io::Result<()> {
     ))
 }
 
-fn wait_for_oauth_callback(port: u16) -> CliResult<engine::OAuthCallbackParams> {
+fn wait_for_oauth_callback(port: u16) -> CliResult<aineer_engine::OAuthCallbackParams> {
     let listener = TcpListener::bind(("127.0.0.1", port))?;
     let (mut stream, _) = listener.accept()?;
     let mut buffer = [0_u8; 4096];

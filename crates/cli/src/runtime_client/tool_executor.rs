@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
-use api::ToolDefinition;
-use engine::{ToolError, ToolExecutor};
-use tools::GlobalToolRegistry;
+use aineer_api::ToolDefinition;
+use aineer_engine::{ToolError, ToolExecutor};
+use aineer_tools::GlobalToolRegistry;
 
 use crate::cli::{discover_mcp_tools, AllowedToolSet, SharedMcpManager};
 use crate::render::TerminalRenderer;
@@ -47,7 +47,7 @@ impl CliToolExecutor {
     }
 
     fn execute_tool_search(&self, input: &str) -> Result<String, ToolError> {
-        let search_input: tools::ToolSearchInput = serde_json::from_str(input)
+        let search_input: aineer_tools::ToolSearchInput = serde_json::from_str(input)
             .map_err(|e| ToolError::new(format!("invalid ToolSearch input: {e}")))?;
         let pending = self
             .mcp_manager
@@ -72,7 +72,7 @@ impl CliToolExecutor {
                 .clone()
         };
         extra.extend(mcp);
-        let output = tools::execute_tool_search_with_context(
+        let output = aineer_tools::execute_tool_search_with_context(
             search_input,
             pending,
             &extra,
@@ -150,12 +150,12 @@ impl ToolExecutor for CliToolExecutor {
     fn execute_batch(
         &self,
         calls: &[(&str, &str)],
-    ) -> Option<Vec<Result<String, engine::ToolError>>> {
+    ) -> Option<Vec<Result<String, aineer_engine::ToolError>>> {
         let batch = self.tool_registry.execute_batch(calls);
         Some(
             batch
                 .into_iter()
-                .map(|r| r.map_err(engine::ToolError::new))
+                .map(|r| r.map_err(aineer_engine::ToolError::new))
                 .collect(),
         )
     }

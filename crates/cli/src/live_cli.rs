@@ -6,12 +6,12 @@ use std::sync::Arc;
 use crate::error::CliResult;
 use crate::input;
 use crate::models_cmd;
-use engine::commands::{
+use aineer_engine::commands::{
     handle_agents_slash_command, handle_branch_slash_command, handle_commit_push_pr_slash_command,
     handle_plugins_slash_command, handle_skills_slash_command, handle_worktree_slash_command,
     CommitPushPrRequest, SlashCommand,
 };
-use engine::{
+use aineer_engine::{
     CompactionConfig, ConfigLoader, ConversationRuntime, LspContextEnrichment, LspManager,
     PermissionMode, Session,
 };
@@ -55,7 +55,7 @@ pub(crate) struct LiveCli {
     model_aliases: std::collections::BTreeMap<String, String>,
     allowed_tools: Option<AllowedToolSet>,
     permission_mode: PermissionMode,
-    system_prompt: Vec<api::SystemBlock>,
+    system_prompt: Vec<aineer_api::SystemBlock>,
     runtime: ConversationRuntime<DefaultRuntimeClient, CliToolExecutor, CliObserver>,
     /// Same `Arc<Runtime>` as `DefaultRuntimeClient` / `CliToolExecutor` for this session.
     tokio_runtime: Arc<tokio::runtime::Runtime>,
@@ -121,12 +121,12 @@ impl LiveCli {
     /// Run a single conversation turn.  Errors are printed to the terminal
     /// but never propagated — the REPL must stay alive.
     fn run_turn(&mut self, input: &str) {
-        self.run_turn_blocks(vec![engine::ContentBlock::Text {
+        self.run_turn_blocks(vec![aineer_engine::ContentBlock::Text {
             text: input.to_string(),
         }]);
     }
 
-    fn run_turn_blocks(&mut self, blocks: Vec<engine::ContentBlock>) {
+    fn run_turn_blocks(&mut self, blocks: Vec<aineer_engine::ContentBlock>) {
         if let Some(enrichment) = self.collect_lsp_diagnostics() {
             if let Ok(refreshed) = build_system_prompt_with_lsp(Some(&enrichment)) {
                 self.system_prompt = refreshed;
@@ -880,7 +880,7 @@ impl LiveCli {
         let mut manager = build_plugin_manager(&cwd, &loader, &runtime_config);
         let result = handle_plugins_slash_command(action, target, &mut manager)?;
         println!("{}", result.message);
-        if result.effect == engine::commands::PluginEffect::ReloadRuntime {
+        if result.effect == aineer_engine::commands::PluginEffect::ReloadRuntime {
             self.reload_runtime_features()?;
         }
         Ok(false)
@@ -1246,7 +1246,7 @@ pub(crate) fn run_repl(
                 }
                 editor.push_history(input);
 
-                let extra_images: Vec<engine::ContentBlock> = payload
+                let extra_images: Vec<aineer_engine::ContentBlock> = payload
                     .images
                     .iter()
                     .filter_map(|img| {

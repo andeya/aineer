@@ -9,8 +9,8 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
-api = { workspace = true }
-protocol = { workspace = true }
+aineer-api.workspace = true
+aineer-protocol.workspace = true
 axum = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }

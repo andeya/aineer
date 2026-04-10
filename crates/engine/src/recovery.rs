@@ -4,7 +4,7 @@
 //! selecting strategies, and tracking attempts — mirroring Claude Code's
 //! multi-layer error handling: fallback → compact → collapse → escalate.
 
-use protocol::loop_state::Transition;
+use aineer_protocol::loop_state::Transition;
 
 /// Token figures extracted from provider context-overflow error text.
 #[derive(Debug, Clone, PartialEq, Eq)]

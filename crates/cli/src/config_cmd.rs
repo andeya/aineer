@@ -2,13 +2,13 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
-use engine::JsonValue;
+use aineer_engine::JsonValue;
 
 use crate::error::CliResult;
 
 fn global_settings_path() -> PathBuf {
     // Respect AINEER_CONFIG_HOME just like the runtime config loader does.
-    engine::default_config_home().join("settings.json")
+    aineer_engine::default_config_home().join("settings.json")
 }
 
 fn load_global_settings() -> CliResult<BTreeMap<String, JsonValue>> {
@@ -51,9 +51,9 @@ pub fn run_config_set(key: &str, value: &str) -> CliResult<()> {
     Ok(())
 }
 
-fn load_merged_config() -> CliResult<engine::RuntimeConfig> {
+fn load_merged_config() -> CliResult<aineer_engine::RuntimeConfig> {
     let cwd = std::env::current_dir()?;
-    Ok(engine::ConfigLoader::default_for(&cwd).load()?)
+    Ok(aineer_engine::ConfigLoader::default_for(&cwd).load()?)
 }
 
 fn print_scalar(value: &JsonValue) {

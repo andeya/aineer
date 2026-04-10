@@ -204,7 +204,7 @@ pub struct CompletedToolCall {
 mod tests {
     use super::*;
     use crate::conversation::ToolError;
-    use protocol::events::{EventKind, RuntimeEvent};
+    use aineer_protocol::events::{EventKind, RuntimeEvent};
 
     struct EchoExecutor;
 

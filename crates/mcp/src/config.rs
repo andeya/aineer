@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-pub use protocol::config::ConfigSource;
+pub use aineer_protocol::config::ConfigSource;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct McpConfigCollection {

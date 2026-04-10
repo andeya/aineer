@@ -1,5 +1,5 @@
-use protocol::events::RuntimeEvent;
-use protocol::observer::{EventDirective, RuntimeObserver};
+use aineer_protocol::events::RuntimeEvent;
+use aineer_protocol::observer::{EventDirective, RuntimeObserver};
 
 /// Observer that emits structured tracing events for runtime lifecycle.
 #[derive(Debug, Default)]

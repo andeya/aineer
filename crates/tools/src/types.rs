@@ -308,7 +308,7 @@ pub(crate) struct AgentOutput {
 pub(crate) struct AgentJob {
     pub(crate) manifest: AgentOutput,
     pub(crate) prompt: String,
-    pub(crate) system_prompt: Vec<api::SystemBlock>,
+    pub(crate) system_prompt: Vec<aineer_api::SystemBlock>,
     pub(crate) allowed_tools: BTreeSet<String>,
 }
 

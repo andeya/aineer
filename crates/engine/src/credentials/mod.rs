@@ -6,7 +6,7 @@ pub use claude_code::ClaudeCodeResolver;
 pub use env_resolver::EnvVarResolver;
 pub use oauth_resolver::AineerOAuthResolver;
 
-pub use protocol::{CredentialStatus, ResolvedCredential};
+pub use aineer_protocol::{CredentialStatus, ResolvedCredential};
 
 use std::fmt;
 

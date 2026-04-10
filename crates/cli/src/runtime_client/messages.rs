@@ -1,20 +1,20 @@
-use api::{CacheControl, ImageSource, InputContentBlock, InputMessage, ToolResultContentBlock};
-use engine::ConversationMessage;
+use aineer_api::{CacheControl, ImageSource, InputContentBlock, InputMessage, ToolResultContentBlock};
+use aineer_engine::ConversationMessage;
 
 /// Convert runtime messages to API input messages, placing a single
 /// `cache_control: ephemeral` breakpoint on the last content block of the
 /// last message. This lets the Anthropic API cache the entire conversation
 /// prefix on subsequent turns.
 pub(crate) fn convert_messages(messages: &[ConversationMessage]) -> Vec<InputMessage> {
-    use engine::ContentBlock;
+    use aineer_engine::ContentBlock;
     let mut result: Vec<InputMessage> = messages
         .iter()
         .filter_map(|message| {
             let role = match message.role {
-                engine::MessageRole::System
-                | engine::MessageRole::User
-                | engine::MessageRole::Tool => "user",
-                engine::MessageRole::Assistant => "assistant",
+                aineer_engine::MessageRole::System
+                | aineer_engine::MessageRole::User
+                | aineer_engine::MessageRole::Tool => "user",
+                aineer_engine::MessageRole::Assistant => "assistant",
                 _ => "user",
             };
             let content = message

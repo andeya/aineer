@@ -1,7 +1,7 @@
 use std::io::Write;
 
-use engine::{PermissionMode, PermissionPolicy, PermissionRule};
-use tools::GlobalToolRegistry;
+use aineer_engine::{PermissionMode, PermissionPolicy, PermissionRule};
+use aineer_tools::GlobalToolRegistry;
 
 pub(crate) struct CliPermissionPrompter {
     current_mode: PermissionMode,
@@ -13,8 +13,8 @@ impl CliPermissionPrompter {
     }
 }
 
-impl engine::PermissionPrompter for CliPermissionPrompter {
-    fn decide(&mut self, request: &engine::PermissionRequest) -> engine::PermissionPromptDecision {
+impl aineer_engine::PermissionPrompter for CliPermissionPrompter {
+    fn decide(&mut self, request: &aineer_engine::PermissionRequest) -> aineer_engine::PermissionPromptDecision {
         println!();
         println!("Permission approval required");
         println!("  Tool             {}", request.tool_name);
@@ -29,9 +29,9 @@ impl engine::PermissionPrompter for CliPermissionPrompter {
             Ok(_) => {
                 let normalized = response.trim().to_ascii_lowercase();
                 if matches!(normalized.as_str(), "y" | "yes") {
-                    engine::PermissionPromptDecision::Allow
+                    aineer_engine::PermissionPromptDecision::Allow
                 } else {
-                    engine::PermissionPromptDecision::Deny {
+                    aineer_engine::PermissionPromptDecision::Deny {
                         reason: format!(
                             "tool '{}' denied by user approval prompt",
                             request.tool_name
@@ -39,7 +39,7 @@ impl engine::PermissionPrompter for CliPermissionPrompter {
                     }
                 }
             }
-            Err(error) => engine::PermissionPromptDecision::Deny {
+            Err(error) => aineer_engine::PermissionPromptDecision::Deny {
                 reason: format!("permission approval failed: {error}"),
             },
         }

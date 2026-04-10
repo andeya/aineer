@@ -4,11 +4,11 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-pub use protocol::error::RuntimeError;
+pub use aineer_protocol::error::RuntimeError;
 
-use protocol::events::RuntimeEvent;
-use protocol::observer::RuntimeObserver;
-use protocol::prompt_types::SystemBlock;
+use aineer_protocol::events::RuntimeEvent;
+use aineer_protocol::observer::RuntimeObserver;
+use aineer_protocol::prompt_types::SystemBlock;
 
 use crate::compact::{
     apply_model_compact_summary, build_model_compact_request, compact_session,
@@ -785,7 +785,7 @@ mod tests {
     use crate::prompt::{ProjectContext, SystemPromptBuilder};
     use crate::session::{ContentBlock, ConversationMessage, MessageRole, Session};
     use crate::usage::TokenUsage;
-    use protocol::prompt_types::SystemBlock;
+    use aineer_protocol::prompt_types::SystemBlock;
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};

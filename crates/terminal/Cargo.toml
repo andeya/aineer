@@ -1,19 +1,10 @@
 [package]
 name = "aineer-terminal"
-description = "Terminal emulator widget for Aineer, forked from egui_term (MIT)"
 version.workspace = true
 edition.workspace = true
-rust-version.workspace = true
-license.workspace = true
-authors.workspace = true
-repository.workspace = true
 
 [dependencies]
-egui = { workspace = true }
-alacritty_terminal = "0.25.1"
-anyhow = { workspace = true }
-open = "5.3.2"
+alacritty_terminal = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
 tracing = { workspace = true }
-
-[lints]
-workspace = true

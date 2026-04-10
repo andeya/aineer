@@ -12,7 +12,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-protocol.workspace = true
+aineer-protocol.workspace = true
 futures-util = { version = "0.3", default-features = false, features = [
     "sink",
 ] }
@@ -23,13 +23,7 @@ reqwest = { version = "0.12", default-features = false, features = [
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tokio = { version = "1", features = [
-    "io-util",
-    "macros",
-    "process",
-    "rt",
-    "time",
-] }
+tokio.workspace = true
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 
 [lints]

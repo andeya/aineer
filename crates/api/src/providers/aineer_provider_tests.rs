@@ -4,7 +4,7 @@ use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use protocol::{
+use aineer_protocol::{
     clear_oauth_credentials, load_oauth_credentials, save_oauth_credentials, OAuthConfig,
     OAuthTokenSet,
 };
@@ -459,7 +459,7 @@ fn auth_source_debug_redacts_secrets() {
 
 #[test]
 fn resolved_credential_api_key_maps_to_auth_source_api_key() {
-    let cred = protocol::ResolvedCredential::ApiKey("sk-key".into());
+    let cred = aineer_protocol::ResolvedCredential::ApiKey("sk-key".into());
     let auth = AuthSource::from(cred);
     assert_eq!(auth.api_key(), Some("sk-key"));
     assert_eq!(auth.bearer_token(), None);
@@ -467,7 +467,7 @@ fn resolved_credential_api_key_maps_to_auth_source_api_key() {
 
 #[test]
 fn resolved_credential_bearer_maps_to_auth_source_bearer() {
-    let cred = protocol::ResolvedCredential::BearerToken("tok-123".into());
+    let cred = aineer_protocol::ResolvedCredential::BearerToken("tok-123".into());
     let auth = AuthSource::from(cred);
     assert_eq!(auth.bearer_token(), Some("tok-123"));
     assert_eq!(auth.api_key(), None);
@@ -475,7 +475,7 @@ fn resolved_credential_bearer_maps_to_auth_source_bearer() {
 
 #[test]
 fn resolved_credential_both_maps_to_auth_source_both() {
-    let cred = protocol::ResolvedCredential::ApiKeyAndBearer {
+    let cred = aineer_protocol::ResolvedCredential::ApiKeyAndBearer {
         api_key: "key".into(),
         bearer_token: "tok".into(),
     };

@@ -1,0 +1,13 @@
+[package]
+name = "aineer-auto-update"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+aineer-release-channel = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }

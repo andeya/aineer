@@ -1,0 +1,6 @@
+[package]
+name = "aineer-release-channel"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]

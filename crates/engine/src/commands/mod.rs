@@ -23,8 +23,8 @@ pub use slash_help::{
 pub use slash_spec::{slash_command_specs, SlashCommand, SlashCommandCategory, SlashCommandSpec};
 
 use crate::{compact_session, CompactionConfig, Session};
-use protocol::events::RuntimeEvent;
-use protocol::observer::RuntimeObserver;
+use aineer_protocol::events::RuntimeEvent;
+use aineer_protocol::observer::RuntimeObserver;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SlashCommandResult {

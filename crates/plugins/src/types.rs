@@ -8,7 +8,7 @@ use serde_json::Value;
 
 use crate::constants::{BUILTIN_MARKETPLACE, BUNDLED_MARKETPLACE, EXTERNAL_MARKETPLACE};
 use crate::error::PluginError;
-use protocol::RuntimeHookConfig;
+use aineer_protocol::RuntimeHookConfig;
 
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]

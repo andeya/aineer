@@ -5,19 +5,19 @@ use crate::execute_tool;
 use crate::registry::ToolSpec;
 use crate::specs::mvp_tool_specs;
 use crate::types::{AgentInput, AgentJob, AgentOutput, AgentResult, AgentRunStatus};
-use api::{
+use aineer_api::{
     max_tokens_for_model, ContentBlockDelta, InputContentBlock, InputMessage, MessageRequest,
     MessageResponse, OutputContentBlock, ProviderClient, StreamEvent as ApiStreamEvent,
     SystemBlock, ToolChoice, ToolDefinition, ToolResultContentBlock,
 };
-use engine::{
+use aineer_engine::{
     load_system_prompt, ApiClient, ApiRequest, AssistantEvent, ContentBlock, ConversationMessage,
     ConversationRuntime, MessageRole, PermissionMode, PermissionPolicy, RuntimeError, Session,
     TokenUsage, ToolError, ToolExecutor,
 };
 
 fn default_agent_model() -> String {
-    api::auto_detect_default_model()
+    aineer_api::auto_detect_default_model()
         .unwrap_or("claude-sonnet-4-6")
         .to_string()
 }
@@ -386,7 +386,7 @@ fn format_agent_terminal_output(
 }
 
 /// Builds a structured summary after a sub-agent turn, including paths touched by file tools.
-pub(crate) fn build_agent_result(summary: &engine::TurnSummary, success: bool) -> AgentResult {
+pub(crate) fn build_agent_result(summary: &aineer_engine::TurnSummary, success: bool) -> AgentResult {
     AgentResult {
         summary: final_assistant_text(summary),
         files_modified: collect_files_modified_from_turn(summary),
@@ -394,8 +394,8 @@ pub(crate) fn build_agent_result(summary: &engine::TurnSummary, success: bool) -
     }
 }
 
-fn collect_files_modified_from_turn(summary: &engine::TurnSummary) -> Vec<String> {
-    use engine::ContentBlock;
+fn collect_files_modified_from_turn(summary: &aineer_engine::TurnSummary) -> Vec<String> {
+    use aineer_engine::ContentBlock;
 
     let mut paths = BTreeSet::new();
     for message in &summary.assistant_messages {
@@ -479,7 +479,7 @@ impl ApiClient for ProviderRuntimeClient {
                 .client
                 .stream_message(&message_request)
                 .await
-                .map_err(api::ApiError::into_runtime_error)?;
+                .map_err(aineer_api::ApiError::into_runtime_error)?;
             let mut events = Vec::new();
             let mut pending_tools: BTreeMap<u32, (String, String, String)> = BTreeMap::new();
             let mut saw_stop = false;
@@ -487,7 +487,7 @@ impl ApiClient for ProviderRuntimeClient {
             while let Some(event) = stream
                 .next_event()
                 .await
-                .map_err(api::ApiError::into_runtime_error)?
+                .map_err(aineer_api::ApiError::into_runtime_error)?
             {
                 match event {
                     ApiStreamEvent::MessageStart(start) => {
@@ -562,7 +562,7 @@ impl ApiClient for ProviderRuntimeClient {
                     ..message_request.clone()
                 })
                 .await
-                .map_err(api::ApiError::into_runtime_error)?;
+                .map_err(aineer_api::ApiError::into_runtime_error)?;
             Ok(response_to_events(response))
         })
     }
@@ -618,7 +618,7 @@ fn convert_messages(messages: &[ConversationMessage]) -> Vec<InputMessage> {
                         cache_control: None,
                     },
                     ContentBlock::Image { media_type, data } => InputContentBlock::Image {
-                        source: api::ImageSource {
+                        source: aineer_api::ImageSource {
                             source_type: "base64".to_string(),
                             media_type: media_type.clone(),
                             data: data.clone(),
@@ -706,7 +706,7 @@ fn response_to_events(response: MessageResponse) -> Vec<AssistantEvent> {
     events
 }
 
-pub(crate) fn final_assistant_text(summary: &engine::TurnSummary) -> String {
+pub(crate) fn final_assistant_text(summary: &aineer_engine::TurnSummary) -> String {
     summary
         .assistant_messages
         .last()
@@ -728,7 +728,7 @@ fn agent_store_dir() -> Result<std::path::PathBuf, String> {
         return Ok(std::path::PathBuf::from(path));
     }
     let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
-    Ok(engine::aineer_runtime_dir(&cwd).join("agents"))
+    Ok(aineer_engine::aineer_runtime_dir(&cwd).join("agents"))
 }
 
 fn make_agent_id() -> String {
@@ -808,7 +808,7 @@ fn civil_from_days(days: i64) -> (i32, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::build_agent_result;
-    use engine::{ContentBlock, ConversationMessage, MessageRole, TokenUsage, TurnSummary};
+    use aineer_engine::{ContentBlock, ConversationMessage, MessageRole, TokenUsage, TurnSummary};
 
     #[test]
     fn agent_result_includes_summary_and_file_paths() {

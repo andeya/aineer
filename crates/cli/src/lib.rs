@@ -48,13 +48,13 @@ pub(crate) use bootstrap::{
 };
 
 pub fn default_model() -> String {
-    api::auto_detect_default_model()
+    aineer_api::auto_detect_default_model()
         .unwrap_or("auto")
         .to_string()
 }
 
 pub fn max_tokens_for_model(model: &str) -> u32 {
-    api::max_tokens_for_model(model)
+    aineer_api::max_tokens_for_model(model)
 }
 
 pub fn current_date() -> String {
@@ -227,7 +227,7 @@ fn run() -> CliResult<()> {
 }
 
 fn print_system_prompt(cwd: PathBuf, date: String) -> CliResult<()> {
-    let blocks = engine::load_system_prompt_with_lsp(cwd, date, env::consts::OS, "unknown", None)?;
+    let blocks = aineer_engine::load_system_prompt_with_lsp(cwd, date, env::consts::OS, "unknown", None)?;
     let text: Vec<&str> = blocks.iter().map(|b| b.text.as_str()).collect();
     println!("{}", text.join("\n\n"));
     Ok(())

@@ -1,0 +1,15 @@
+[package]
+name = "aineer-provider"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+aineer-protocol = { workspace = true }
+aineer-api = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+keyring = { workspace = true }
+tracing = { workspace = true }
+reqwest = { workspace = true }

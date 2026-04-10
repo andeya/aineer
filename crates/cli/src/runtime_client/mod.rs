@@ -8,15 +8,15 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use api::{
+use aineer_api::{
     CacheControl, CacheScope, CacheType, MessageRequest, ProviderClient, ProviderKind, ToolChoice,
     ToolDefinition,
 };
-use engine::{
+use aineer_engine::{
     ApiClient, ApiRequest, AssistantEvent, CacheLock, ConversationRuntime, HookDispatcher,
     RuntimeError,
 };
-use tools::GlobalToolRegistry;
+use aineer_tools::GlobalToolRegistry;
 
 use crate::error::CliResult;
 use crate::tracing_observer::TracingObserver;
@@ -39,13 +39,13 @@ pub(crate) use stream::{push_output_block, response_to_events, write_flush};
 pub(crate) use tool_executor::CliToolExecutor;
 
 pub(crate) struct RuntimeParams {
-    pub(crate) session: engine::Session,
+    pub(crate) session: aineer_engine::Session,
     pub(crate) model: String,
-    pub(crate) system_prompt: Vec<api::SystemBlock>,
+    pub(crate) system_prompt: Vec<aineer_api::SystemBlock>,
     pub(crate) enable_tools: bool,
     pub(crate) emit_output: bool,
     pub(crate) allowed_tools: Option<AllowedToolSet>,
-    pub(crate) permission_mode: engine::PermissionMode,
+    pub(crate) permission_mode: aineer_engine::PermissionMode,
     pub(crate) progress_reporter: Option<InternalPromptProgressReporter>,
     pub(crate) mcp_manager: SharedMcpManager,
 }
@@ -74,10 +74,10 @@ pub(crate) fn build_runtime(params: RuntimeParams) -> CliResult<RuntimeBuildResu
     let model = if model == "auto" {
         runtime_config
             .model()
-            .map(|m| api::resolve_model_alias(m, runtime_config.model_aliases()))
+            .map(|m| aineer_api::resolve_model_alias(m, runtime_config.model_aliases()))
             .unwrap_or(model)
     } else {
-        api::resolve_model_alias(&model, runtime_config.model_aliases())
+        aineer_api::resolve_model_alias(&model, runtime_config.model_aliases())
     };
     let resolver = ModelResolver::new(&runtime_config);
     let resolved = resolver.resolve(&model)?;
@@ -88,7 +88,7 @@ pub(crate) fn build_runtime(params: RuntimeParams) -> CliResult<RuntimeBuildResu
         .iter()
         .filter_map(|fb| {
             let expanded = resolver.expand_shorthand(fb).ok()?;
-            let canonical = api::resolve_model_alias(&expanded, runtime_config.model_aliases());
+            let canonical = aineer_api::resolve_model_alias(&expanded, runtime_config.model_aliases());
             if canonical == resolved_model {
                 return None;
             }

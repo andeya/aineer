@@ -4,51 +4,96 @@ default-members = ["crates/app"]
 resolver = "2"
 
 [workspace.package]
-version = "0.7.0"
+version = "0.1.0"
 edition = "2021"
 rust-version = "1.83"
-license = "MIT"
+license = "Apache-2.0"
 authors = ["andeya <andeyalee@outlook.com>"]
 repository = "https://github.com/andeya/aineer"
 homepage = "https://github.com/andeya/aineer"
-documentation = "https://github.com/andeya/aineer"
-keywords = ["ai", "coding-agent", "cli", "llm", "developer-tools"]
+keywords = [
+    "ai",
+    "ade",
+    "agentic-development-environment",
+    "llm",
+    "developer-tools",
+]
 categories = ["command-line-utilities", "development-tools"]
 
 [workspace.dependencies]
-protocol = { path = "crates/protocol", version = "*", package = "aineer-protocol" }
-api = { path = "crates/api", version = "*", package = "aineer-api" }
-lsp = { path = "crates/lsp", version = "*", package = "aineer-lsp" }
-mcp = { path = "crates/mcp", version = "*", package = "aineer-mcp" }
-plugins = { path = "crates/plugins", version = "*", package = "aineer-plugins" }
-engine = { path = "crates/engine", version = "*", package = "aineer-engine" }
-tools = { path = "crates/tools", version = "*", package = "aineer-tools" }
-terminal = { path = "crates/terminal", version = "*", package = "aineer-terminal" }
-ui = { path = "crates/ui", version = "*", package = "aineer-ui" }
-cli = { path = "crates/cli", version = "*", package = "aineer-cli" }
-gateway = { path = "crates/gateway", version = "*", package = "aineer-gateway" }
+# GPUI
+gpui = "0.2.2"
+gpui-component = "0.5.1"
 
-base64 = "0.22"
-git2 = { version = "0.20", default-features = false }
+# Async
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+futures-core = "0.3"
+
+# Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["rt-multi-thread"] }
-egui = "0.33"
-eframe = { version = "0.33", default-features = false, features = [
-    "accesskit",
-    "default_fonts",
-    "wgpu",
-    "persistence",
-] }
-wgpu = "27"
-egui_commonmark = "0.22"
-axum = "0.8"
-lsp-types = "0.97"
+
+# Error handling
 thiserror = "2"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Terminal
+alacritty_terminal = "0.24"
+
+# Git
+git2 = { version = "0.19", default-features = false }
+
+# HTTP
+reqwest = { version = "0.12", features = ["json", "stream"] }
+axum = { version = "0.8", features = ["ws"] }
+
+# Syntax
+syntect = "5"
+
+# Credentials
+keyring = "3"
+
+# Search
+tantivy = "0.22"
+
+# Platform (macOS dock icon, etc.)
+cocoa = "0.26"
+objc = "0.2"
+
+# Async executor (GPUI backend)
+smol = "2"
+
+# Utilities
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
 strum = { version = "0.27", features = ["derive"] }
+base64 = "0.22"
+notify = "7"
+
+# Internal crates
+aineer-protocol = { path = "crates/protocol" }
+aineer-api = { path = "crates/api" }
+aineer-provider = { path = "crates/provider" }
+aineer-settings = { path = "crates/settings" }
+aineer-theme = { path = "crates/theme" }
+aineer-terminal = { path = "crates/terminal" }
+aineer-engine = { path = "crates/engine" }
+aineer-tools = { path = "crates/tools" }
+aineer-gateway = { path = "crates/gateway" }
+aineer-mcp = { path = "crates/mcp" }
+aineer-lsp = { path = "crates/lsp" }
+aineer-plugins = { path = "crates/plugins" }
+aineer-cli = { path = "crates/cli" }
+aineer-ui = { path = "crates/ui" }
+aineer-memory = { path = "crates/memory" }
+aineer-channels = { path = "crates/channels" }
+aineer-auto-update = { path = "crates/auto_update" }
+aineer-release-channel = { path = "crates/release_channel" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

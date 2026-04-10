@@ -51,11 +51,11 @@ pub use file_ops::{
 };
 pub use hooks::HookDispatcher;
 pub use json::JsonValue;
-pub use lsp::{
+pub use aineer_lsp::{
     FileDiagnostics, LspContextEnrichment, LspError, LspManager, LspServerConfig, SymbolLocation,
     WorkspaceDiagnostics,
 };
-pub use mcp::{
+pub use aineer_mcp::{
     mcp_server_signature, mcp_tool_name, mcp_tool_prefix, normalize_name_for_mcp,
     scoped_mcp_config_hash, unwrap_mcp_proxy_url, ManagedMcpTool, McpClientBootstrap,
     McpRemoteClient, McpServerManager, McpServerManagerError, McpStdioProcess, McpTool,
@@ -75,7 +75,7 @@ pub use prompt::{
     load_system_prompt, load_system_prompt_with_lsp, ContextFile, InstructionLoader,
     ProjectContext, PromptBuildError, PromptCache, SystemPromptBuilder,
 };
-pub use protocol::prompt_types::{
+pub use aineer_protocol::prompt_types::{
     BlockKind, CacheControl, CacheScope, CacheType, SystemBlock, ThinkingConfig, ThinkingMode,
 };
 pub use remote::{

@@ -3,11 +3,11 @@ use std::env;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use api::ToolDefinition;
-use engine::commands::SlashCommand;
-use engine::{ConfigLoader, McpServerManager, PermissionMode};
+use aineer_api::ToolDefinition;
+use aineer_engine::commands::SlashCommand;
+use aineer_engine::{ConfigLoader, McpServerManager, PermissionMode};
 use serde_json::json;
-use tools::GlobalToolRegistry;
+use aineer_tools::GlobalToolRegistry;
 
 use crate::help::append_slash_command_suggestions;
 use crate::reports::normalize_permission_mode;
@@ -427,7 +427,7 @@ pub(crate) fn resolve_model_alias(
     model: &str,
     aliases: &std::collections::BTreeMap<String, String>,
 ) -> String {
-    api::resolve_model_alias(model, aliases)
+    aineer_api::resolve_model_alias(model, aliases)
 }
 
 pub(crate) fn normalize_allowed_tools(values: &[String]) -> Result<Option<AllowedToolSet>, String> {

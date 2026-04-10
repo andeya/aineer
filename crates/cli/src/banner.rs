@@ -262,7 +262,7 @@ fn right_column(p: &Palette, ctx: &BannerContext<'_>, layout: &BannerLayout) -> 
 }
 
 pub(crate) fn tilde_session_path(path: &Path) -> std::path::PathBuf {
-    let Some(home) = engine::home_dir() else {
+    let Some(home) = aineer_engine::home_dir() else {
         return path.to_path_buf();
     };
     if path.starts_with(&home) {

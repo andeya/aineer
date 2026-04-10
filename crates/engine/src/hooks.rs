@@ -4,8 +4,8 @@ use std::process::Command;
 
 use serde_json::{json, Value};
 
-use protocol::events::{EventKind, RuntimeEvent};
-use protocol::observer::{Decision, EventDirective, RuntimeObserver};
+use aineer_protocol::events::{EventKind, RuntimeEvent};
+use aineer_protocol::observer::{Decision, EventDirective, RuntimeObserver};
 
 use crate::config::{RuntimeFeatureConfig, RuntimeHookConfig};
 
@@ -419,8 +419,8 @@ fn hook_result_to_directive(result: HookRunResult) -> EventDirective {
 mod tests {
     use super::{HookDispatcher, HookRunResult};
     use crate::config::RuntimeHookConfig;
-    use protocol::events::{EventKind, RuntimeEvent};
-    use protocol::observer::RuntimeObserver;
+    use aineer_protocol::events::{EventKind, RuntimeEvent};
+    use aineer_protocol::observer::RuntimeObserver;
 
     #[test]
     fn allows_exit_code_zero_and_captures_stdout() {

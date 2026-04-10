@@ -14,8 +14,8 @@ use super::{
     final_assistant_text, mvp_tool_specs, persist_agent_terminal_state, push_output_block,
     AgentInput, AgentJob, SubagentToolExecutor,
 };
-use api::OutputContentBlock;
-use engine::{ApiRequest, AssistantEvent, ConversationRuntime, RuntimeError, Session};
+use aineer_api::OutputContentBlock;
+use aineer_engine::{ApiRequest, AssistantEvent, ConversationRuntime, RuntimeError, Session};
 use serde_json::json;
 use serde_json::Value;
 

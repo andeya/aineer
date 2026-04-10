@@ -5,12 +5,12 @@ use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use api::ToolDefinition;
+use aineer_api::ToolDefinition;
 use serde_json::Value;
 
 use crate::builtin::BuiltinTool;
 
-use engine::{
+use aineer_engine::{
     edit_file, execute_bash, glob_search, grep_search, read_file, write_file, BashCommandInput,
     GrepSearchInput,
 };
@@ -157,7 +157,7 @@ fn todo_store_path() -> Result<std::path::PathBuf, String> {
         return Ok(std::path::PathBuf::from(path));
     }
     let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
-    Ok(engine::aineer_runtime_dir(&cwd).join("todos.json"))
+    Ok(aineer_engine::aineer_runtime_dir(&cwd).join("todos.json"))
 }
 
 fn resolve_skill_path(skill: &str) -> Result<std::path::PathBuf, String> {
@@ -174,12 +174,12 @@ fn resolve_skill_path(skill: &str) -> Result<std::path::PathBuf, String> {
 
     let mut candidates = Vec::new();
     if let Ok(cwd) = std::env::current_dir() {
-        candidates.push(engine::aineer_runtime_dir(&cwd).join("skills"));
+        candidates.push(aineer_engine::aineer_runtime_dir(&cwd).join("skills"));
     }
     if let Ok(aineer_home) = std::env::var("AINEER_CONFIG_HOME") {
         candidates.push(std::path::PathBuf::from(aineer_home).join("skills"));
     }
-    if let Some(home) = engine::home_dir() {
+    if let Some(home) = aineer_engine::home_dir() {
         candidates.push(home.join(".aineer").join("skills"));
     }
 

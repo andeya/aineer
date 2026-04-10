@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
-use api::{OpenAiCompatClient, ProviderClient};
-use engine::CustomProviderConfig;
+use aineer_api::{OpenAiCompatClient, ProviderClient};
+use aineer_engine::CustomProviderConfig;
 
 use crate::auth::{build_credential_chain, no_credentials_error, provider_hint};
 use crate::error::{CliError, CliResult};
@@ -17,11 +17,11 @@ pub(crate) struct ResolvedModel {
 /// Pipeline:  input → expand_shorthand → resolve_alias → build_client
 pub(crate) struct ModelResolver<'a> {
     providers: &'a BTreeMap<String, CustomProviderConfig>,
-    config: &'a engine::RuntimeConfig,
+    config: &'a aineer_engine::RuntimeConfig,
 }
 
 impl<'a> ModelResolver<'a> {
-    pub fn new(config: &'a engine::RuntimeConfig) -> Self {
+    pub fn new(config: &'a aineer_engine::RuntimeConfig) -> Self {
         Self {
             providers: config.providers(),
             config,
@@ -30,7 +30,7 @@ impl<'a> ModelResolver<'a> {
 
     pub fn resolve(&self, input: &str) -> CliResult<ResolvedModel> {
         let expanded = self.expand_shorthand(input)?;
-        let canonical = api::resolve_model_alias(&expanded, self.config.model_aliases());
+        let canonical = aineer_api::resolve_model_alias(&expanded, self.config.model_aliases());
         match self.build_client(&canonical) {
             Ok(resolved) => Ok(resolved),
             Err(primary_err) => self.try_fallback(&canonical, primary_err),
@@ -51,7 +51,7 @@ impl<'a> ModelResolver<'a> {
                 Ok(m) => m,
                 Err(_) => continue,
             };
-            let canonical = api::resolve_model_alias(&expanded, self.config.model_aliases());
+            let canonical = aineer_api::resolve_model_alias(&expanded, self.config.model_aliases());
             if let Ok(resolved) = self.build_client(&canonical) {
                 eprintln!("[info] {primary_model} unavailable, falling back to {canonical}");
                 return Ok(resolved);
@@ -65,8 +65,8 @@ impl<'a> ModelResolver<'a> {
             "auto" => self.auto_detect_model(),
             "ollama" => detect_ollama_model(self.providers)
                 .ok_or_else(|| "Ollama is not running. Start it with: ollama serve".into()),
-            bare if api::builtin_preset(bare).is_some()
-                && api::parse_custom_provider_prefix(bare).is_none() =>
+            bare if aineer_api::builtin_preset(bare).is_some()
+                && aineer_api::parse_custom_provider_prefix(bare).is_none() =>
             {
                 self.expand_bare_provider(bare)
             }
@@ -75,7 +75,7 @@ impl<'a> ModelResolver<'a> {
     }
 
     fn auto_detect_model(&self) -> CliResult<String> {
-        if let Some(builtin) = api::auto_detect_default_model() {
+        if let Some(builtin) = aineer_api::auto_detect_default_model() {
             return Ok(builtin.to_string());
         }
         if let Some(ollama) = detect_ollama_model(self.providers) {
@@ -99,7 +99,7 @@ impl<'a> ModelResolver<'a> {
     }
 
     fn build_client(&self, model: &str) -> CliResult<ResolvedModel> {
-        if let Some((provider_name, _)) = api::parse_custom_provider_prefix(model) {
+        if let Some((provider_name, _)) = aineer_api::parse_custom_provider_prefix(model) {
             return self.build_custom_client(model, provider_name);
         }
         self.build_builtin_client(model)
@@ -119,7 +119,7 @@ impl<'a> ModelResolver<'a> {
                 c = c.with_custom_headers(provider_cfg.headers.clone());
             }
             c.with_gemini_cache_config(self.config.gemini_cache().clone())
-        } else if let Some(preset) = api::builtin_preset(&lower) {
+        } else if let Some(preset) = aineer_api::builtin_preset(&lower) {
             let api_key = resolve_preset_api_key(preset, self.config)?;
             OpenAiCompatClient::new_custom(preset.base_url, api_key)
                 .with_gemini_cache_config(self.config.gemini_cache().clone())
@@ -140,7 +140,7 @@ impl<'a> ModelResolver<'a> {
     }
 
     fn build_builtin_client(&self, model: &str) -> CliResult<ResolvedModel> {
-        let kind = api::detect_provider_kind(model);
+        let kind = aineer_api::detect_provider_kind(model);
         let chain = build_credential_chain(kind, self.config);
         let credential = chain.resolve().map_err(|err| provider_hint(model, &err))?;
         let client = ProviderClient::from_model_with_credential(model, credential)
@@ -154,7 +154,7 @@ impl<'a> ModelResolver<'a> {
 
 pub(crate) fn resolve_custom_api_key(
     provider: &CustomProviderConfig,
-    config: &engine::RuntimeConfig,
+    config: &aineer_engine::RuntimeConfig,
 ) -> CliResult<String> {
     if let Some(key) = &provider.api_key {
         if !key.is_empty() {
@@ -173,8 +173,8 @@ pub(crate) fn resolve_custom_api_key(
 }
 
 pub(crate) fn resolve_preset_api_key(
-    preset: &api::BuiltinProviderPreset,
-    config: &engine::RuntimeConfig,
+    preset: &aineer_api::BuiltinProviderPreset,
+    config: &aineer_engine::RuntimeConfig,
 ) -> CliResult<String> {
     if preset.api_key_env.is_empty() {
         return Ok(String::new());

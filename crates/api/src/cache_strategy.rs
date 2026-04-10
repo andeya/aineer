@@ -12,7 +12,7 @@ use crate::providers::{is_retryable_status, parse_custom_provider_prefix};
 use crate::types::{
     gemini_cache_key_hash, GeminiCachedContent, MessageRequest, SystemBlock, ToolDefinition,
 };
-use protocol::GeminiCacheConfig;
+use aineer_protocol::GeminiCacheConfig;
 
 /// Strategy for provider-level context caching (e.g. Gemini's cachedContents API).
 /// Providers that don't support explicit caching simply use [`NoCacheStrategy`].

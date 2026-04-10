@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
-use api::{list_known_models, provider_kind_by_name, ProviderKind, BUILTIN_PROVIDER_PRESETS};
-use engine::{ConfigLoader, CustomProviderConfig, RuntimeConfig};
+use aineer_api::{list_known_models, provider_kind_by_name, ProviderKind, BUILTIN_PROVIDER_PRESETS};
+use aineer_engine::{ConfigLoader, CustomProviderConfig, RuntimeConfig};
 
 use crate::error::CliResult;
 use crate::runtime_client::{resolve_custom_api_key, resolve_preset_api_key};
@@ -65,7 +65,7 @@ pub fn run_providers() -> CliResult<()> {
         println!("  Configure in settings.json: {{\"providers\": {{\"name\": {{\"baseUrl\": \"...\", ...}}}}}}");
     } else {
         for (name, cfg) in providers {
-            if api::builtin_preset(name).is_some() {
+            if aineer_api::builtin_preset(name).is_some() {
                 continue;
             }
             let model_count = cfg.models.len();
@@ -206,7 +206,7 @@ fn query_provider_models(cfg: &CustomProviderConfig, config: &RuntimeConfig) -> 
 }
 
 fn query_preset_models(
-    preset: &api::BuiltinProviderPreset,
+    preset: &aineer_api::BuiltinProviderPreset,
     config: &RuntimeConfig,
 ) -> V1ModelsResult {
     match resolve_preset_api_key(preset, config) {
@@ -271,7 +271,7 @@ fn print_dynamic_models_for(name: &str, config: &RuntimeConfig) {
         return;
     }
 
-    if let Some(preset) = api::builtin_preset(name) {
+    if let Some(preset) = aineer_api::builtin_preset(name) {
         print_v1_result(name, &query_preset_models(preset, config));
         return;
     }
@@ -351,10 +351,10 @@ mod tests {
 
     #[test]
     fn builtin_preset_ollama_exists() {
-        assert!(api::builtin_preset("ollama").is_some());
-        assert!(api::builtin_preset("groq").is_some());
-        assert!(api::builtin_preset("lmstudio").is_some());
-        assert!(api::builtin_preset("nonexistent").is_none());
+        assert!(aineer_api::builtin_preset("ollama").is_some());
+        assert!(aineer_api::builtin_preset("groq").is_some());
+        assert!(aineer_api::builtin_preset("lmstudio").is_some());
+        assert!(aineer_api::builtin_preset("nonexistent").is_none());
     }
 
     #[test]

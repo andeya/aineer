@@ -4,10 +4,10 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use protocol::prompt_types::{CacheControl, SystemBlock};
+use aineer_protocol::prompt_types::{CacheControl, SystemBlock};
 
 use crate::config::{ConfigError, ConfigLoader, RuntimeConfig};
-use lsp::LspContextEnrichment;
+use aineer_lsp::LspContextEnrichment;
 
 #[derive(Debug)]
 pub enum PromptBuildError {

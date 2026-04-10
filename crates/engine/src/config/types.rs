@@ -1,18 +1,18 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-pub use protocol::GeminiCacheConfig;
+pub use aineer_protocol::GeminiCacheConfig;
 
 use crate::json::JsonValue;
 use crate::permissions::PermissionRule;
 use crate::sandbox::SandboxConfig;
 
-pub use mcp::{
+pub use aineer_mcp::{
     McpConfigCollection, McpManagedProxyServerConfig, McpOAuthConfig, McpRemoteServerConfig,
     McpSdkServerConfig, McpServerConfig, McpStdioServerConfig, McpTransport,
     McpWebSocketServerConfig, ScopedMcpServerConfig,
 };
-pub use protocol::config::ConfigSource;
+pub use aineer_protocol::config::ConfigSource;
 
 pub const AINEER_SETTINGS_SCHEMA_NAME: &str = "SettingsSchema";
 
@@ -98,8 +98,8 @@ pub struct CustomProviderConfig {
     pub headers: BTreeMap<String, String>,
 }
 
-pub use protocol::hook_config::RuntimeHookConfig;
-pub use protocol::OAuthConfig;
+pub use aineer_protocol::hook_config::RuntimeHookConfig;
+pub use aineer_protocol::OAuthConfig;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {

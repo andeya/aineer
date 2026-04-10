@@ -45,12 +45,12 @@ pub(crate) struct Task {
 
 fn task_store_path() -> Result<PathBuf, String> {
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
-    Ok(engine::aineer_runtime_dir(&cwd).join("tasks.json"))
+    Ok(aineer_engine::aineer_runtime_dir(&cwd).join("tasks.json"))
 }
 
 fn task_output_dir() -> Result<PathBuf, String> {
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
-    Ok(engine::aineer_runtime_dir(&cwd).join("task-outputs"))
+    Ok(aineer_engine::aineer_runtime_dir(&cwd).join("task-outputs"))
 }
 
 fn read_tasks() -> Result<Vec<Task>, String> {

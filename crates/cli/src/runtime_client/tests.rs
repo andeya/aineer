@@ -4,7 +4,7 @@ use crate::error::CliError;
 use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
 
-use engine::{ConfigLoader, CustomProviderConfig};
+use aineer_engine::{ConfigLoader, CustomProviderConfig};
 
 fn env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -15,7 +15,7 @@ fn empty_providers() -> BTreeMap<String, CustomProviderConfig> {
     BTreeMap::new()
 }
 
-fn empty_runtime_config() -> engine::RuntimeConfig {
+fn empty_runtime_config() -> aineer_engine::RuntimeConfig {
     let dir = std::env::temp_dir().join("aineer-test-empty-cfg");
     let _ = std::fs::create_dir_all(&dir);
     let _ = std::fs::write(dir.join("settings.json"), "{}");
@@ -36,10 +36,10 @@ fn make_provider(base_url: &str, default_model: Option<&str>) -> CustomProviderC
 
 fn config_with_providers(
     providers: BTreeMap<String, CustomProviderConfig>,
-) -> engine::RuntimeConfig {
-    let mut feature = engine::RuntimeFeatureConfig::default();
+) -> aineer_engine::RuntimeConfig {
+    let mut feature = aineer_engine::RuntimeFeatureConfig::default();
     feature.set_providers(providers);
-    engine::RuntimeConfig::new(BTreeMap::new(), Vec::new(), feature)
+    aineer_engine::RuntimeConfig::new(BTreeMap::new(), Vec::new(), feature)
 }
 
 // -----------------------------------------------------------------------
@@ -134,14 +134,14 @@ fn resolve_custom_api_key_errors_on_missing_env_var() {
 #[test]
 fn resolve_preset_api_key_returns_empty_for_local_provider() {
     let rt = empty_runtime_config();
-    let preset = api::builtin_preset("ollama").unwrap();
+    let preset = aineer_api::builtin_preset("ollama").unwrap();
     assert_eq!(resolve_preset_api_key(preset, &rt).unwrap(), "");
 }
 
 #[test]
 fn resolve_preset_api_key_errors_when_env_missing() {
     let rt = empty_runtime_config();
-    let preset = api::builtin_preset("groq").unwrap();
+    let preset = aineer_api::builtin_preset("groq").unwrap();
     let err = resolve_preset_api_key(preset, &rt).unwrap_err();
     assert!(err.to_string().contains("GROQ_API_KEY"));
 }
@@ -152,12 +152,12 @@ fn resolve_preset_api_key_errors_when_env_missing() {
 
 #[test]
 fn resolver_resolves_user_alias_before_building_client() {
-    let mut feature = engine::RuntimeFeatureConfig::default();
+    let mut feature = aineer_engine::RuntimeFeatureConfig::default();
     feature.set_providers(empty_providers());
     let mut aliases = BTreeMap::new();
     aliases.insert("sonnet".into(), "claude-sonnet-4-6".into());
     feature.set_model_aliases(aliases);
-    let config = engine::RuntimeConfig::new(BTreeMap::new(), Vec::new(), feature);
+    let config = aineer_engine::RuntimeConfig::new(BTreeMap::new(), Vec::new(), feature);
     let resolver = ModelResolver::new(&config);
     let err = resolver.resolve("sonnet").unwrap_err();
     assert!(
@@ -370,11 +370,11 @@ fn ollama_base_url_from_env_var_strips_trailing_slash() {
 fn config_with_fallback(
     providers: BTreeMap<String, CustomProviderConfig>,
     fallback_models: Vec<String>,
-) -> engine::RuntimeConfig {
-    let mut feature = engine::RuntimeFeatureConfig::default();
+) -> aineer_engine::RuntimeConfig {
+    let mut feature = aineer_engine::RuntimeFeatureConfig::default();
     feature.set_providers(providers);
     feature.set_fallback_models(fallback_models);
-    engine::RuntimeConfig::new(BTreeMap::new(), Vec::new(), feature)
+    aineer_engine::RuntimeConfig::new(BTreeMap::new(), Vec::new(), feature)
 }
 
 #[test]

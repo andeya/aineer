@@ -1,15 +1,14 @@
-pub mod cards;
-pub mod chat_card;
-pub mod completer;
-pub mod diff_panel;
-pub mod git_diff;
-pub mod git_watcher;
-pub mod icons;
-pub mod input_bar;
-pub mod search_bar;
-pub mod settings;
-pub mod shell_card;
-pub mod theme;
-pub mod timeline;
-pub mod toolbar;
-pub mod widgets;
+pub mod blocks;
+
+// These modules will be implemented in Phase 2-3
+// pub mod stream_view;
+// pub mod input_bar;
+// pub mod terminal_element;
+// pub mod explorer;
+// pub mod diff_viewer;
+// pub mod settings_panel;
+// pub mod model_picker;
+// pub mod command_palette;
+// pub mod activity_bar;
+// pub mod status_bar;
+// pub mod toast;

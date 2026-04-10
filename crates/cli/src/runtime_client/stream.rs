@@ -1,10 +1,10 @@
 use std::io::Write;
 
-use api::{
+use aineer_api::{
     ContentBlockDelta, MessageResponse, OutputContentBlock, ProviderClient,
     StreamEvent as ApiStreamEvent,
 };
-use engine::{AssistantEvent, RuntimeError, TokenUsage};
+use aineer_engine::{AssistantEvent, RuntimeError, TokenUsage};
 
 use crate::progress::InternalPromptProgressReporter;
 use crate::render::{MarkdownStreamState, TerminalRenderer};
@@ -134,14 +134,14 @@ pub(crate) fn write_flush(out: &mut dyn Write, buf: &str) -> Result<(), RuntimeE
 
 pub(super) async fn stream_with_client(
     client: &ProviderClient,
-    message_request: &api::MessageRequest,
+    message_request: &aineer_api::MessageRequest,
     emit_output: bool,
     progress: Option<&InternalPromptProgressReporter>,
 ) -> Result<Vec<AssistantEvent>, RuntimeError> {
     let mut stream = client
         .stream_message(message_request)
         .await
-        .map_err(api::ApiError::into_runtime_error)?;
+        .map_err(aineer_api::ApiError::into_runtime_error)?;
     let (gf, gc) = crate::render::gutter_prefixes();
     let mut gutter = crate::render::GutterWriter::new(std::io::stdout(), gf, gc);
     let mut sink = std::io::sink();
@@ -150,7 +150,7 @@ pub(super) async fn stream_with_client(
     while let Some(event) = stream
         .next_event()
         .await
-        .map_err(api::ApiError::into_runtime_error)?
+        .map_err(aineer_api::ApiError::into_runtime_error)?
     {
         state.handle_event(event, progress, out)?;
     }
@@ -166,13 +166,13 @@ pub(super) async fn stream_with_client(
     }
 
     let response = client
-        .send_message(&api::MessageRequest {
+        .send_message(&aineer_api::MessageRequest {
             stream: false,
             thinking: None,
             ..message_request.clone()
         })
         .await
-        .map_err(api::ApiError::into_runtime_error)?;
+        .map_err(aineer_api::ApiError::into_runtime_error)?;
     response_to_events(response, out)
 }
 

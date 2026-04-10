@@ -4,16 +4,16 @@
 #[derive(Debug, thiserror::Error)]
 pub enum CliError {
     #[error(transparent)]
-    Runtime(#[from] engine::RuntimeError),
+    Runtime(#[from] aineer_engine::RuntimeError),
 
     #[error(transparent)]
-    Api(#[from] api::ApiError),
+    Api(#[from] aineer_api::ApiError),
 
     #[error(transparent)]
-    Config(#[from] engine::ConfigError),
+    Config(#[from] aineer_engine::ConfigError),
 
     #[error(transparent)]
-    Session(#[from] engine::SessionError),
+    Session(#[from] aineer_engine::SessionError),
 
     #[error(transparent)]
     Io(#[from] std::io::Error),
@@ -25,10 +25,10 @@ pub enum CliError {
     Json(#[from] serde_json::Error),
 
     #[error(transparent)]
-    Plugin(#[from] plugins::PluginError),
+    Plugin(#[from] aineer_plugins::PluginError),
 
     #[error(transparent)]
-    PromptBuild(#[from] engine::PromptBuildError),
+    PromptBuild(#[from] aineer_engine::PromptBuildError),
 
     #[error("{0}")]
     Other(String),

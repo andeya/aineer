@@ -1,8 +1,8 @@
 use std::env;
 use std::path::Path;
 
-use engine::commands::{handle_agents_slash_command, handle_skills_slash_command, SlashCommand};
-use engine::{compact_session, CompactionConfig, Session, UsageTracker};
+use aineer_engine::commands::{handle_agents_slash_command, handle_skills_slash_command, SlashCommand};
+use aineer_engine::{compact_session, CompactionConfig, Session, UsageTracker};
 
 use crate::cli::default_permission_mode;
 use crate::error::CliResult;

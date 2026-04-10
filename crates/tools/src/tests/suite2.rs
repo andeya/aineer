@@ -27,7 +27,7 @@ struct MockSubagentApiClient {
     input_path: String,
 }
 
-impl engine::ApiClient for MockSubagentApiClient {
+impl aineer_engine::ApiClient for MockSubagentApiClient {
     fn active_model(&self) -> &str {
         "mock-model"
     }
@@ -78,7 +78,7 @@ fn subagent_runtime_executes_tool_loop_with_isolated_session() {
         },
         SubagentToolExecutor::new(BTreeSet::from([String::from("read_file")])),
         agent_permission_policy(),
-        api::SystemBlock::from_plain("system prompt"),
+        aineer_api::SystemBlock::from_plain("system prompt"),
         (),
     );
 
@@ -97,7 +97,7 @@ fn subagent_runtime_executes_tool_loop_with_isolated_session() {
         .flat_map(|message| message.blocks.iter())
         .any(|block| matches!(
             block,
-            engine::ContentBlock::ToolResult { output, .. }
+            aineer_engine::ContentBlock::ToolResult { output, .. }
                 if output.contains("hello from child")
         )));
 

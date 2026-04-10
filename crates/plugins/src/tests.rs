@@ -996,9 +996,9 @@ fn session_plugin_dir_is_discovered_and_not_installed() {
 #[cfg(unix)]
 mod hook_integration {
     use crate::{PluginHooks, PluginManager, PluginManagerConfig};
-    use engine::HookDispatcher;
-    use protocol::events::RuntimeEvent;
-    use protocol::observer::RuntimeObserver;
+    use aineer_engine::HookDispatcher;
+    use aineer_protocol::events::RuntimeEvent;
+    use aineer_protocol::observer::RuntimeObserver;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};

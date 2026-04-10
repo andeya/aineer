@@ -158,7 +158,7 @@ fn ensure_aineer_scaffold(root: &Path) -> Result<Vec<InitArtifact>, std::io::Err
 }
 
 pub(crate) fn ensure_home_aineer_dirs() {
-    let Some(home) = engine::home_dir() else {
+    let Some(home) = aineer_engine::home_dir() else {
         return;
     };
     let _ = ensure_aineer_scaffold(&home);

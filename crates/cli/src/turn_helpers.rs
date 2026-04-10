@@ -1,4 +1,4 @@
-use engine::ContentBlock;
+use aineer_engine::ContentBlock;
 use serde_json::json;
 
 /// Structured output from `@`-mention processing, carrying both text and image
@@ -7,7 +7,7 @@ pub(crate) struct EnrichedInput {
     pub blocks: Vec<ContentBlock>,
 }
 
-pub(crate) fn final_assistant_text(summary: &engine::TurnSummary) -> String {
+pub(crate) fn final_assistant_text(summary: &aineer_engine::TurnSummary) -> String {
     summary
         .assistant_messages
         .last()
@@ -25,7 +25,7 @@ pub(crate) fn final_assistant_text(summary: &engine::TurnSummary) -> String {
         .unwrap_or_default()
 }
 
-pub(crate) fn collect_tool_uses(summary: &engine::TurnSummary) -> Vec<serde_json::Value> {
+pub(crate) fn collect_tool_uses(summary: &aineer_engine::TurnSummary) -> Vec<serde_json::Value> {
     summary
         .assistant_messages
         .iter()
@@ -41,7 +41,7 @@ pub(crate) fn collect_tool_uses(summary: &engine::TurnSummary) -> Vec<serde_json
         .collect()
 }
 
-pub(crate) fn collect_tool_results(summary: &engine::TurnSummary) -> Vec<serde_json::Value> {
+pub(crate) fn collect_tool_results(summary: &aineer_engine::TurnSummary) -> Vec<serde_json::Value> {
     summary
         .tool_results
         .iter()

@@ -20,15 +20,15 @@ use crate::runtime_client::{
 use crate::tool_display::{format_tool_call_start, format_tool_result};
 use crate::workspace::parse_git_status_metadata;
 
-use api::{MessageResponse, OutputContentBlock, Usage};
-use engine::commands::{resume_supported_slash_commands, SlashCommand};
-use engine::{AssistantEvent, ContentBlock, ConversationMessage, MessageRole, PermissionMode};
-use plugins::{PluginTool, PluginToolDefinition, PluginToolPermission};
+use aineer_api::{MessageResponse, OutputContentBlock, Usage};
+use aineer_engine::commands::{resume_supported_slash_commands, SlashCommand};
+use aineer_engine::{AssistantEvent, ContentBlock, ConversationMessage, MessageRole, PermissionMode};
+use aineer_plugins::{PluginTool, PluginToolDefinition, PluginToolPermission};
 use serde_json::json;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
-use tools::GlobalToolRegistry;
+use aineer_tools::GlobalToolRegistry;
 
 fn env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -522,7 +522,7 @@ fn resume_flag_inherits_model_and_permission_flags() {
             assert!(!model.is_empty(), "model must not be empty");
             assert_eq!(
                 permission_mode,
-                engine::PermissionMode::DangerFullAccess,
+                aineer_engine::PermissionMode::DangerFullAccess,
                 "--permission-mode flag must be forwarded through --resume"
             );
         }
@@ -602,7 +602,7 @@ fn permission_policy_uses_plugin_tool_permissions() {
 
 #[test]
 fn shared_help_uses_resume_annotation_copy() {
-    let help = engine::commands::render_slash_command_help();
+    let help = aineer_engine::commands::render_slash_command_help();
     assert!(help.contains("Slash commands"));
     assert!(help.contains("Tab completes commands inside the REPL."));
     assert!(help.contains("available via aineer --resume SESSION.json"));
@@ -709,7 +709,7 @@ fn compact_report_uses_structured_output() {
 
 #[test]
 fn cost_report_uses_sectioned_layout() {
-    let report = format_cost_report(engine::TokenUsage {
+    let report = format_cost_report(aineer_engine::TokenUsage {
         input_tokens: 20,
         output_tokens: 8,
         cache_creation_input_tokens: 3,
@@ -795,13 +795,13 @@ fn status_line_reports_model_and_token_totals() {
         StatusUsage {
             message_count: 7,
             turns: 3,
-            latest: engine::TokenUsage {
+            latest: aineer_engine::TokenUsage {
                 input_tokens: 5,
                 output_tokens: 4,
                 cache_creation_input_tokens: 1,
                 cache_read_input_tokens: 0,
             },
-            cumulative: engine::TokenUsage {
+            cumulative: aineer_engine::TokenUsage {
                 input_tokens: 20,
                 output_tokens: 8,
                 cache_creation_input_tokens: 2,
@@ -1308,7 +1308,7 @@ fn response_to_events_maps_thinking_to_text_deltas() {
 #[test]
 fn resolve_export_path_rejects_traversal() {
     use crate::reports::resolve_export_path;
-    use engine::Session;
+    use aineer_engine::Session;
     let session = Session::default();
 
     let err = resolve_export_path(Some("../../../etc/passwd"), &session);
@@ -1613,18 +1613,18 @@ fn process_at_mentioned_files_image_produces_image_block() {
     let has_image = enriched
         .blocks
         .iter()
-        .any(|b| matches!(b, engine::ContentBlock::Image { .. }));
+        .any(|b| matches!(b, aineer_engine::ContentBlock::Image { .. }));
     assert!(has_image, "should contain an Image block");
 
     let has_text = enriched.blocks.iter().any(|b| match b {
-        engine::ContentBlock::Text { text } => text.contains("describe this"),
+        aineer_engine::ContentBlock::Text { text } => text.contains("describe this"),
         _ => false,
     });
     assert!(has_text, "should contain user text");
 
     // Should NOT contain the @path in the text
     let no_at = enriched.blocks.iter().all(|b| match b {
-        engine::ContentBlock::Text { text } => !text.contains(&format!("@{file_name}")),
+        aineer_engine::ContentBlock::Text { text } => !text.contains(&format!("@{file_name}")),
         _ => true,
     });
     assert!(no_at, "@path should be stripped from text");
@@ -1646,7 +1646,7 @@ fn process_at_mentioned_files_binary_injects_metadata_block() {
         .blocks
         .iter()
         .filter_map(|b| match b {
-            engine::ContentBlock::Text { text } => Some(text.as_str()),
+            aineer_engine::ContentBlock::Text { text } => Some(text.as_str()),
             _ => None,
         })
         .collect::<String>();

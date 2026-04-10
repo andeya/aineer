@@ -54,7 +54,7 @@ pub(crate) fn media_type_from_extension(path: &Path) -> Option<&'static str> {
 }
 
 /// Read an image file and return a `ContentBlock::Image`.
-pub(crate) fn read_image_as_block(path: &Path) -> CliResult<engine::ContentBlock> {
+pub(crate) fn read_image_as_block(path: &Path) -> CliResult<aineer_engine::ContentBlock> {
     let file_len = std::fs::metadata(path)?.len();
     if file_len > MAX_IMAGE_BYTES {
         return Err(size_error_msg(file_len).into());
@@ -70,7 +70,7 @@ pub(crate) fn read_image_as_block(path: &Path) -> CliResult<engine::ContentBlock
 pub(crate) fn bytes_to_image_block(
     bytes: &[u8],
     fallback_media_type: Option<&str>,
-) -> CliResult<engine::ContentBlock> {
+) -> CliResult<aineer_engine::ContentBlock> {
     let len = bytes.len() as u64;
     if len > MAX_IMAGE_BYTES {
         return Err(size_error_msg(len).into());
@@ -81,8 +81,8 @@ pub(crate) fn bytes_to_image_block(
     Ok(image_block(media_type, bytes))
 }
 
-fn image_block(media_type: &str, bytes: &[u8]) -> engine::ContentBlock {
-    engine::ContentBlock::Image {
+fn image_block(media_type: &str, bytes: &[u8]) -> aineer_engine::ContentBlock {
+    aineer_engine::ContentBlock::Image {
         media_type: media_type.to_string(),
         data: base64::engine::general_purpose::STANDARD.encode(bytes),
     }
@@ -162,13 +162,13 @@ mod tests {
         // Detects from magic bytes
         let block = bytes_to_image_block(png, None).unwrap();
         assert!(
-            matches!(block, engine::ContentBlock::Image { ref media_type, .. } if media_type == "image/png")
+            matches!(block, aineer_engine::ContentBlock::Image { ref media_type, .. } if media_type == "image/png")
         );
 
         // Uses fallback when unrecognised
         let block = bytes_to_image_block(b"raw", Some("image/png")).unwrap();
         assert!(
-            matches!(block, engine::ContentBlock::Image { ref media_type, .. } if media_type == "image/png")
+            matches!(block, aineer_engine::ContentBlock::Image { ref media_type, .. } if media_type == "image/png")
         );
 
         // Rejects unknown without fallback

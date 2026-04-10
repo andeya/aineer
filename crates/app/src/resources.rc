@@ -1,0 +1,2 @@
+// Windows resource file — embeds icon into .exe
+1 ICON "../../../assets/aineer.ico"

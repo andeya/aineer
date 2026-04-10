@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
-use api::ToolDefinition;
-use engine::PermissionMode;
-use plugins::PluginTool;
+use aineer_api::ToolDefinition;
+use aineer_engine::PermissionMode;
+use aineer_plugins::PluginTool;
 use serde_json::Value;
 
 use crate::execute_tool;
