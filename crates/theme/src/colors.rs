@@ -165,7 +165,8 @@ pub struct ThemeStyles {
 impl Default for ThemeStyles {
     fn default() -> Self {
         Self {
-            font_mono: r#""Berkeley Mono", "Cascadia Code", "JetBrains Mono", "Menlo", monospace"#.into(),
+            font_mono: r#""Berkeley Mono", "Cascadia Code", "JetBrains Mono", "Menlo", monospace"#
+                .into(),
             font_sans: r#""Inter", "SF Pro Text", "Segoe UI", system-ui, sans-serif"#.into(),
             font_size_xs: 11.0,
             font_size_sm: 12.0,
