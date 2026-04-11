@@ -1,5 +1,5 @@
-pub mod schema;
 mod loader;
+pub mod schema;
 
 use schema::SettingsContent;
 use std::path::PathBuf;

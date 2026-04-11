@@ -1,5 +1,5 @@
-use crate::SettingsError;
 use crate::schema::SettingsContent;
+use crate::SettingsError;
 use std::path::Path;
 
 pub fn load_json_or_default(path: &Path) -> Result<SettingsContent, SettingsError> {
