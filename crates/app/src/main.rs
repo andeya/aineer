@@ -18,8 +18,7 @@ fn main() -> Result<()> {
 
     if args.iter().any(|a| a == "--cli" || a == "-c") {
         tracing::info!("Starting Aineer CLI mode");
-        println!("Aineer CLI mode — not yet implemented in new codebase");
-        return Ok(());
+        std::process::exit(aineer_cli::run_cli());
     }
 
     tracing::info!(
