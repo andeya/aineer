@@ -386,7 +386,10 @@ fn format_agent_terminal_output(
 }
 
 /// Builds a structured summary after a sub-agent turn, including paths touched by file tools.
-pub(crate) fn build_agent_result(summary: &aineer_engine::TurnSummary, success: bool) -> AgentResult {
+pub(crate) fn build_agent_result(
+    summary: &aineer_engine::TurnSummary,
+    success: bool,
+) -> AgentResult {
     AgentResult {
         summary: final_assistant_text(summary),
         files_modified: collect_files_modified_from_turn(summary),

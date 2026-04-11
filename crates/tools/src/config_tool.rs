@@ -203,7 +203,8 @@ pub(crate) fn config_home_dir() -> Result<PathBuf, String> {
     if let Ok(path) = std::env::var("AINEER_CONFIG_HOME") {
         return Ok(PathBuf::from(path));
     }
-    let home = aineer_engine::home_dir().ok_or_else(|| String::from("HOME / USERPROFILE is not set"))?;
+    let home =
+        aineer_engine::home_dir().ok_or_else(|| String::from("HOME / USERPROFILE is not set"))?;
     Ok(home.join(".aineer"))
 }
 
