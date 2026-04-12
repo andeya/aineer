@@ -25,11 +25,15 @@ pub enum SettingsError {
 
 pub struct SettingsStore {
     user: SettingsContent,
+    #[allow(dead_code)]
     project: SettingsContent,
+    #[allow(dead_code)]
     local: SettingsContent,
     merged: SettingsContent,
     user_path: PathBuf,
+    #[allow(dead_code)]
     project_path: Option<PathBuf>,
+    #[allow(dead_code)]
     local_path: Option<PathBuf>,
 }
 
