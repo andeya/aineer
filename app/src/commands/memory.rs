@@ -24,7 +24,7 @@ impl From<aineer_memory::MemoryEntry> for MemoryEntry {
 pub async fn search_memory(query: String) -> AppResult<Vec<MemoryEntry>> {
     tracing::info!("search_memory: query={query}");
     let client = MemoryClient::new();
-    let results = client.search(&query, 20).await;
+    let results = client.search(&query, 20);
     Ok(results.into_iter().map(MemoryEntry::from).collect())
 }
 
@@ -44,7 +44,6 @@ pub async fn remember(content: String) -> AppResult<String> {
     };
     client
         .save(entry)
-        .await
         .map_err(|e| AppError::Memory(e.to_string()))?;
     Ok(id)
 }
@@ -52,9 +51,8 @@ pub async fn remember(content: String) -> AppResult<String> {
 #[tauri::command]
 pub async fn forget(id: String) -> AppResult<()> {
     tracing::info!("forget: id={id}");
-    // MemoryClient doesn't expose a delete method yet, so for now
-    // we search and filter. A proper delete will be added to the crate.
-    Err(AppError::Memory(format!(
-        "Memory deletion for '{id}' is not yet supported by the memory crate"
-    )))
+    let mut client = MemoryClient::new();
+    client
+        .forget(&id)
+        .map_err(|e| AppError::Memory(e.to_string()))
 }

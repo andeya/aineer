@@ -52,10 +52,16 @@ pub enum MemoryCategory {
     Custom(String),
 }
 
-fn memory_store_path() -> PathBuf {
-    std::env::var("HOME")
+/// Cross-platform home directory: `HOME` (Unix/WSL), `USERPROFILE` (Windows).
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("."))
+}
+
+fn memory_store_path() -> PathBuf {
+    home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
         .join(".aineer")
         .join("memory.json")
 }
@@ -103,7 +109,7 @@ impl MemoryClient {
     }
 
     /// Load L0+L1 memories at session startup
-    pub async fn wake_up(&self) -> Vec<MemoryEntry> {
+    pub fn wake_up(&self) -> Vec<MemoryEntry> {
         self.store
             .entries
             .iter()
@@ -113,7 +119,7 @@ impl MemoryClient {
     }
 
     /// Search relevant memories for a query (L2)
-    pub async fn search(&self, query: &str, limit: usize) -> Vec<MemoryEntry> {
+    pub fn search(&self, query: &str, limit: usize) -> Vec<MemoryEntry> {
         let q = query.to_lowercase();
         let mut results: Vec<_> = self
             .store
@@ -127,8 +133,18 @@ impl MemoryClient {
         results
     }
 
+    /// Remove a memory entry by id.
+    pub fn forget(&mut self, id: &str) -> Result<(), MemoryError> {
+        let before = self.store.entries.len();
+        self.store.entries.retain(|e| e.id != id);
+        if self.store.entries.len() == before {
+            return Err(MemoryError::NotFound(id.to_string()));
+        }
+        self.store.save()
+    }
+
     /// Save a memory entry
-    pub async fn save(&mut self, entry: MemoryEntry) -> Result<(), MemoryError> {
+    pub fn save(&mut self, entry: MemoryEntry) -> Result<(), MemoryError> {
         if let Some(existing) = self.store.entries.iter_mut().find(|e| e.id == entry.id) {
             existing.content = entry.content;
             existing.category = entry.category;
