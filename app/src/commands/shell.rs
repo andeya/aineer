@@ -166,7 +166,7 @@ pub async fn execute_command(request: ExecuteCommandRequest) -> AppResult<Comman
         .spawn()
         .map_err(|e| AppError::Shell(format!("Failed to spawn command: {e}")))?;
 
-    let result = tokio::task::spawn_blocking({ move || wait_with_timeout(&mut child, timeout) })
+    let result = tokio::task::spawn_blocking(move || wait_with_timeout(&mut child, timeout))
         .await
         .map_err(|e| AppError::Shell(format!("Task join error: {e}")))?;
 

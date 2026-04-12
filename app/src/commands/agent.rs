@@ -1,17 +1,27 @@
-#[allow(unused_imports)]
 use crate::error::{AppError, AppResult};
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, LazyLock, Mutex};
 use tauri::Emitter;
 
-use aineer_engine::{ContentBlock, MessageRole, Session};
+use aineer_cli::desktop::{self, ShellContextSnippet};
 
-static NEXT_AGENT_ID: AtomicU64 = AtomicU64::new(1);
+use super::next_block_id;
+
+/// Active agent tasks: `block_id` -> cancel flag (set by `stop_agent`).
+static AGENT_ABORT: LazyLock<Mutex<HashMap<u64, Arc<AtomicBool>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AgentRequest {
     pub goal: String,
-    pub context_block_ids: Vec<u64>,
+    #[serde(default)]
+    pub cwd: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub shell_context: Vec<ShellContextSnippet>,
 }
 
 #[derive(Clone, Serialize)]
@@ -22,46 +32,44 @@ struct AgentEvent {
     data: String,
 }
 
-/// Start an autonomous agent session.
-///
-/// The agent uses the engine's ConversationRuntime with tool execution enabled.
-/// Events (text deltas, tool-use requests, approvals) are pushed to the frontend
-/// via Tauri events.
+/// Run one agent turn (tools enabled, `PermissionMode::Allow` — GUI stdin prompts are not used).
 #[tauri::command]
 pub async fn start_agent(app: tauri::AppHandle, request: AgentRequest) -> AppResult<u64> {
-    let block_id = NEXT_AGENT_ID.fetch_add(1, Ordering::Relaxed);
+    let block_id = next_block_id();
+    let cwd = super::workspace_cwd_from(request.cwd.as_deref());
+    let goal = request.goal.clone();
+    let model = request.model.clone();
+    let shell_context = request.shell_context.clone();
 
-    tracing::info!("start_agent: block_id={block_id}, goal={}", request.goal);
+    tracing::info!(
+        "start_agent: block_id={block_id}, cwd={}, goal_len={}",
+        cwd.display(),
+        goal.len()
+    );
 
-    let mut session = Session {
-        version: 1,
-        messages: Vec::new(),
-        cwd: None,
-        model_id: None,
-        created_at: Some(chrono::Utc::now().to_rfc3339()),
-    };
-
-    session.messages.push(aineer_engine::ConversationMessage {
-        role: MessageRole::User,
-        blocks: vec![ContentBlock::Text {
-            text: request.goal.clone(),
-        }],
-        usage: None,
-    });
+    let cancel = Arc::new(AtomicBool::new(false));
+    {
+        let mut map = AGENT_ABORT
+            .lock()
+            .map_err(|e| AppError::Agent(format!("agent registry lock poisoned: {e}")))?;
+        map.insert(block_id, Arc::clone(&cancel));
+    }
 
     let app_clone = app.clone();
-    tokio::spawn(async move {
-        // TODO: Wire up ConversationRuntime with a real ToolExecutor and ApiClient.
+    tokio::task::spawn_blocking(move || {
+        let result = desktop::run_desktop_agent_turn(&cwd, model.as_deref(), &goal, &shell_context);
+
+        let (kind, data) = match result {
+            Ok(text) => ("text".to_string(), text),
+            Err(e) => ("error".to_string(), e.to_string()),
+        };
+
         let _ = app_clone.emit(
             "agent_event",
             AgentEvent {
                 block_id,
-                kind: "text".into(),
-                data: format!(
-                    "Agent mode is not yet connected to the engine runtime. \
-                     Goal: `{}`. Configure an API key in Settings → Models to enable.",
-                    request.goal
-                ),
+                kind,
+                data,
             },
         );
         let _ = app_clone.emit(
@@ -72,6 +80,10 @@ pub async fn start_agent(app: tauri::AppHandle, request: AgentRequest) -> AppRes
                 data: String::new(),
             },
         );
+
+        if let Ok(mut map) = AGENT_ABORT.lock() {
+            map.remove(&block_id);
+        }
     });
 
     Ok(block_id)
@@ -79,21 +91,24 @@ pub async fn start_agent(app: tauri::AppHandle, request: AgentRequest) -> AppRes
 
 #[tauri::command]
 pub async fn approve_tool(block_id: u64) -> AppResult<()> {
-    tracing::info!("approve_tool: block_id={block_id}");
-    // TODO: Signal the running agent to proceed with the pending tool call.
+    tracing::info!("approve_tool: block_id={block_id} (no-op until GUI approval is wired)");
     Ok(())
 }
 
 #[tauri::command]
 pub async fn deny_tool(block_id: u64) -> AppResult<()> {
-    tracing::info!("deny_tool: block_id={block_id}");
-    // TODO: Signal the running agent to skip the pending tool call.
+    tracing::info!("deny_tool: block_id={block_id} (no-op until GUI approval is wired)");
     Ok(())
 }
 
 #[tauri::command]
-pub async fn stop_agent() -> AppResult<()> {
-    tracing::info!("stop_agent");
-    // TODO: Cancel the running agent.
+pub async fn stop_agent(block_id: u64) -> AppResult<()> {
+    tracing::info!("stop_agent: block_id={block_id}");
+    let map = AGENT_ABORT
+        .lock()
+        .map_err(|e| AppError::Agent(format!("agent registry lock poisoned: {e}")))?;
+    if let Some(flag) = map.get(&block_id) {
+        flag.store(true, Ordering::Relaxed);
+    }
     Ok(())
 }

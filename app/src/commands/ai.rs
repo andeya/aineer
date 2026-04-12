@@ -1,18 +1,28 @@
-#[allow(unused_imports)]
 use crate::error::{AppError, AppResult};
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, LazyLock, Mutex};
 use tauri::Emitter;
 
-use aineer_engine::{ContentBlock, MessageRole, Session};
+use aineer_cli::desktop::{self, ShellContextSnippet, StreamDelta};
 
-static NEXT_BLOCK_ID: AtomicU64 = AtomicU64::new(1);
+use super::next_block_id;
+
+/// Active AI streams: `block_id` -> cancel flag (set by `stop_ai_stream`).
+static AI_STREAM_ABORT: LazyLock<Mutex<HashMap<u64, Arc<AtomicBool>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AiMessageRequest {
     pub message: String,
     pub model: Option<String>,
-    pub context_block_ids: Vec<u64>,
+    /// Workspace / project root for settings discovery (defaults to current dir).
+    #[serde(default)]
+    pub cwd: Option<String>,
+    /// Recent shell runs from the UI (command + output) for zero-shot context.
+    #[serde(default)]
+    pub shell_context: Vec<ShellContextSnippet>,
 }
 
 #[derive(Clone, Serialize)]
@@ -20,53 +30,82 @@ pub struct AiMessageRequest {
 struct AiStreamDelta {
     block_id: u64,
     delta: String,
+    /// `"text"` for formal output, `"thinking"` for model reasoning, empty on done.
+    kind: String,
     done: bool,
 }
 
-/// Send a user message to the AI engine and stream the response back via Tauri events.
-///
-/// Currently creates a session but relies on a configured API provider to actually
-/// produce responses.  When no provider is configured, returns a helpful message.
+/// Send a user message to the configured provider and stream assistant text via `ai_stream_delta`.
 #[tauri::command]
 pub async fn send_ai_message(app: tauri::AppHandle, request: AiMessageRequest) -> AppResult<u64> {
-    let block_id = NEXT_BLOCK_ID.fetch_add(1, Ordering::Relaxed);
-    let model = request.model.clone().unwrap_or_else(|| "default".into());
+    let block_id = next_block_id();
+    let cwd = super::workspace_cwd_from(request.cwd.as_deref());
+    let message = request.message.clone();
+    let model = request.model.clone();
+    let shell_context = request.shell_context.clone();
 
-    tracing::info!("send_ai_message: block_id={block_id}, model={model}");
+    tracing::info!(
+        "send_ai_message: block_id={block_id}, cwd={}, model={:?}",
+        cwd.display(),
+        model
+    );
 
-    let mut session = Session {
-        version: 1,
-        messages: Vec::new(),
-        cwd: None,
-        model_id: Some(model.clone()),
-        created_at: Some(chrono::Utc::now().to_rfc3339()),
-    };
+    let cancel = Arc::new(AtomicBool::new(false));
+    {
+        let mut map = AI_STREAM_ABORT
+            .lock()
+            .map_err(|e| AppError::Ai(format!("stream registry lock poisoned: {e}")))?;
+        map.insert(block_id, Arc::clone(&cancel));
+    }
 
-    session.messages.push(aineer_engine::ConversationMessage {
-        role: MessageRole::User,
-        blocks: vec![ContentBlock::Text {
-            text: request.message,
-        }],
-        usage: None,
-    });
-
-    // Spawn the streaming task so the IPC call returns immediately with the block_id.
     let app_clone = app.clone();
-    tokio::spawn(async move {
-        // TODO: Wire up ProviderClient + ConversationRuntime for real streaming.
-        // For now, emit a placeholder delta so the frontend shows something.
-        let _ = app_clone.emit(
-            "ai_stream_delta",
-            AiStreamDelta {
-                block_id,
-                delta: format!(
-                    "AI streaming is not yet connected to a provider. \
-                     Model requested: `{model}`. \
-                     Configure an API key in Settings → Models to enable AI chat."
-                ),
-                done: true,
-            },
-        );
+    // `stream_desktop_chat` uses `dyn Write` internally; its future is not `Send`, so run it on a
+    // current-thread runtime inside `spawn_blocking` instead of `tokio::spawn`.
+    tokio::task::spawn_blocking(move || {
+        let emit_delta = |delta: &str, kind: &str, done: bool| {
+            let _ = app_clone.emit(
+                "ai_stream_delta",
+                AiStreamDelta {
+                    block_id,
+                    delta: delta.to_string(),
+                    kind: kind.to_string(),
+                    done,
+                },
+            );
+        };
+
+        let rt_result = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build();
+
+        let result = match rt_result {
+            Ok(rt) => rt.block_on(async {
+                desktop::stream_desktop_chat(
+                    &cwd,
+                    model.as_deref(),
+                    &message,
+                    &shell_context,
+                    Arc::clone(&cancel),
+                    |d| match d {
+                        StreamDelta::Text(t) => emit_delta(t, "text", false),
+                        StreamDelta::Thinking(t) => emit_delta(t, "thinking", false),
+                    },
+                )
+                .await
+            }),
+            Err(e) => Err(aineer_cli::desktop::DesktopStreamError::Cli(
+                aineer_cli::error::CliError::Other(format!("tokio runtime: {e}")),
+            )),
+        };
+
+        match result {
+            Ok(_) => emit_delta("", "", true),
+            Err(e) => emit_delta(&format!("**Error:** {e}"), "text", true),
+        }
+
+        if let Ok(mut map) = AI_STREAM_ABORT.lock() {
+            map.remove(&block_id);
+        }
     });
 
     Ok(block_id)
@@ -75,6 +114,11 @@ pub async fn send_ai_message(app: tauri::AppHandle, request: AiMessageRequest) -
 #[tauri::command]
 pub async fn stop_ai_stream(block_id: u64) -> AppResult<()> {
     tracing::info!("stop_ai_stream: block_id={block_id}");
-    // TODO: Cancel the running stream associated with block_id.
+    let map = AI_STREAM_ABORT
+        .lock()
+        .map_err(|e| AppError::Ai(format!("stream registry lock poisoned: {e}")))?;
+    if let Some(flag) = map.get(&block_id) {
+        flag.store(true, Ordering::Relaxed);
+    }
     Ok(())
 }
