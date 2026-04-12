@@ -28,10 +28,7 @@ struct AiStreamDelta {
 /// Currently creates a session but relies on a configured API provider to actually
 /// produce responses.  When no provider is configured, returns a helpful message.
 #[tauri::command]
-pub async fn send_ai_message(
-    app: tauri::AppHandle,
-    request: AiMessageRequest,
-) -> AppResult<u64> {
+pub async fn send_ai_message(app: tauri::AppHandle, request: AiMessageRequest) -> AppResult<u64> {
     let block_id = NEXT_BLOCK_ID.fetch_add(1, Ordering::Relaxed);
     let model = request.model.clone().unwrap_or_else(|| "default".into());
 

@@ -16,7 +16,14 @@ pub struct ModelGroup {
 /// Users can override or extend these via settings.json `providers` section.
 fn builtin_providers() -> Vec<(&'static str, Vec<&'static str>)> {
     vec![
-        ("anthropic", vec!["claude-sonnet-4-20250514", "claude-opus-4-20250514", "claude-haiku-4-20250514"]),
+        (
+            "anthropic",
+            vec![
+                "claude-sonnet-4-20250514",
+                "claude-opus-4-20250514",
+                "claude-haiku-4-20250514",
+            ],
+        ),
         ("openai", vec!["gpt-4o", "gpt-4o-mini", "o3", "o4-mini"]),
         ("google", vec!["gemini-2.5-pro", "gemini-2.5-flash"]),
         ("deepseek", vec!["deepseek-chat", "deepseek-reasoner"]),
@@ -82,22 +89,17 @@ impl ManagedSettings {
     pub fn load() -> Self {
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
         let user_path = home.join(".aineer").join("settings.json");
-        let project_dir = std::env::current_dir()
-            .ok()
-            .map(|d| d.join(".aineer"));
+        let project_dir = std::env::current_dir().ok().map(|d| d.join(".aineer"));
 
-        let store = SettingsStore::load(user_path, project_dir)
-            .unwrap_or_else(|e| {
-                tracing::warn!("Failed to load settings: {e}, using defaults");
-                SettingsStore::load(
-                    home.join(".aineer").join("settings.json"),
-                    None,
-                )
-                .unwrap_or_else(|_| {
+        let store = SettingsStore::load(user_path, project_dir).unwrap_or_else(|e| {
+            tracing::warn!("Failed to load settings: {e}, using defaults");
+            SettingsStore::load(home.join(".aineer").join("settings.json"), None).unwrap_or_else(
+                |_| {
                     SettingsStore::load(PathBuf::from("/dev/null"), None)
                         .expect("default settings must load")
-                })
-            });
+                },
+            )
+        });
 
         Self {
             store: Mutex::new(store),
@@ -132,9 +134,7 @@ impl ManagedSettings {
 }
 
 #[tauri::command]
-pub async fn get_settings(
-    state: tauri::State<'_, ManagedSettings>,
-) -> AppResult<SettingsContent> {
+pub async fn get_settings(state: tauri::State<'_, ManagedSettings>) -> AppResult<SettingsContent> {
     state.merged().map_err(AppError::Settings)
 }
 
@@ -151,7 +151,10 @@ pub async fn get_api_key(
     state: tauri::State<'_, ManagedSettings>,
     provider: String,
 ) -> AppResult<Option<String>> {
-    let store = state.store.lock().map_err(|e| AppError::Settings(e.to_string()))?;
+    let store = state
+        .store
+        .lock()
+        .map_err(|e| AppError::Settings(e.to_string()))?;
     let merged = store.merged();
 
     // Check env section first
@@ -204,7 +207,10 @@ pub async fn set_api_key(
         "env": { key_name: key }
     });
 
-    let store = state.store.lock().map_err(|e| AppError::Settings(e.to_string()))?;
+    let store = state
+        .store
+        .lock()
+        .map_err(|e| AppError::Settings(e.to_string()))?;
     store
         .save_user(&updates)
         .map_err(|e| AppError::Settings(e.to_string()))?;

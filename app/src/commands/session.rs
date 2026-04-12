@@ -23,10 +23,7 @@ fn sessions_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 }
 
 #[tauri::command]
-pub async fn save_session(
-    app: tauri::AppHandle,
-    data: serde_json::Value,
-) -> AppResult<String> {
+pub async fn save_session(app: tauri::AppHandle, data: serde_json::Value) -> AppResult<String> {
     let id = data
         .get("id")
         .and_then(|v| v.as_str())
@@ -37,16 +34,12 @@ pub async fn save_session(
     let dir = sessions_dir(&app).map_err(AppError::Session)?;
     let path = dir.join(format!("{id}.json"));
     let json = serde_json::to_string_pretty(&data).map_err(|e| AppError::Session(e.to_string()))?;
-    std::fs::write(&path, json)
-        .map_err(|e| AppError::Session(format!("Write failed: {e}")))?;
+    std::fs::write(&path, json).map_err(|e| AppError::Session(format!("Write failed: {e}")))?;
     Ok(id)
 }
 
 #[tauri::command]
-pub async fn load_session(
-    app: tauri::AppHandle,
-    id: String,
-) -> AppResult<serde_json::Value> {
+pub async fn load_session(app: tauri::AppHandle, id: String) -> AppResult<serde_json::Value> {
     tracing::info!("load_session: id={id}");
     let dir = sessions_dir(&app).map_err(AppError::Session)?;
     let path = dir.join(format!("{id}.json"));

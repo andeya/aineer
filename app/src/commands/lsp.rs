@@ -37,11 +37,7 @@ pub async fn lsp_diagnostics(path: String) -> AppResult<Vec<LspDiagnosticItem>> 
 }
 
 #[tauri::command]
-pub async fn lsp_hover(
-    path: String,
-    line: u32,
-    character: u32,
-) -> AppResult<Option<LspHoverInfo>> {
+pub async fn lsp_hover(path: String, line: u32, character: u32) -> AppResult<Option<LspHoverInfo>> {
     tracing::info!("lsp_hover: {path}:{line}:{character}");
     Ok(None)
 }

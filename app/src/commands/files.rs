@@ -61,9 +61,8 @@ pub async fn list_dir(path: String) -> AppResult<Vec<FileEntry>> {
 
 #[tauri::command]
 pub async fn read_file(path: String) -> AppResult<String> {
-    std::fs::read_to_string(&path).map_err(|e| {
-        AppError::File(format!("Failed to read {}: {}", path, e))
-    })
+    std::fs::read_to_string(&path)
+        .map_err(|e| AppError::File(format!("Failed to read {}: {}", path, e)))
 }
 
 #[derive(Debug, Serialize, Deserialize)]

@@ -28,10 +28,7 @@ struct AgentEvent {
 /// Events (text deltas, tool-use requests, approvals) are pushed to the frontend
 /// via Tauri events.
 #[tauri::command]
-pub async fn start_agent(
-    app: tauri::AppHandle,
-    request: AgentRequest,
-) -> AppResult<u64> {
+pub async fn start_agent(app: tauri::AppHandle, request: AgentRequest) -> AppResult<u64> {
     let block_id = NEXT_AGENT_ID.fetch_add(1, Ordering::Relaxed);
 
     tracing::info!("start_agent: block_id={block_id}, goal={}", request.goal);
