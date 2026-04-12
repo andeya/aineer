@@ -1,4 +1,4 @@
-export type { AgentRequest, AiMessageRequest } from "./ai";
+export type { AgentRequest, AiMessageRequest, ShellContextSnippet } from "./ai";
 export {
   approveTool,
   denyTool,

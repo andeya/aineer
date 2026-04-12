@@ -91,6 +91,7 @@ function MainApp() {
   // ── Chat execution (messages, streaming, submit, slash) ──
   const chat = useChatExecution({
     projectRoot: workspace.projectRoot,
+    modelName: workspace.modelName,
     dequeue,
     enqueue,
     tabs,

@@ -1,16 +1,41 @@
-import { useCallback, useRef, useState } from "react";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { isInteractiveCommand } from "@/lib/constants";
+import type { ShellContextSnippet } from "@/lib/tauri";
 import {
   executeCommand,
   executeSlashCommand,
   isTauri,
   sendAiMessage,
   startAgent,
+  stopAgent,
+  stopAiStream,
 } from "@/lib/tauri";
 import type { Attachment, ChatMessage, InputMode } from "@/lib/types";
 
+interface AiStreamPayload {
+  blockId: number;
+  delta: string;
+  /** `"text"` for formal output, `"thinking"` for model reasoning */
+  kind: string;
+  done: boolean;
+}
+
+interface AgentStreamPayload {
+  blockId: number;
+  kind: string;
+  data: string;
+}
+
+interface StreamBinding {
+  backendBlockId: number;
+  assistantMsgId: number;
+  safetyTimer: ReturnType<typeof setTimeout>;
+}
+
 interface UseChatExecutionOptions {
   projectRoot: string;
+  modelName: string;
   dequeue: (channel: "chat" | "terminal") => { content: string; mode: InputMode } | undefined;
   enqueue: (channel: "chat" | "terminal", mode: InputMode, content: string) => void;
   tabs: { id: string; type: string }[];
@@ -24,8 +49,22 @@ interface UseChatExecutionOptions {
   setTerminalVisible: (v: boolean) => void;
 }
 
+const STREAM_SAFETY_TIMEOUT_MS = 120_000;
+
+function recentShellContext(msgs: ChatMessage[], max: number): ShellContextSnippet[] {
+  const out: ShellContextSnippet[] = [];
+  for (let i = msgs.length - 1; i >= 0 && out.length < max; i--) {
+    const m = msgs[i];
+    if (m.mode === "shell" && m.shell) {
+      out.push({ command: m.shell.command, output: m.shell.output });
+    }
+  }
+  return out.reverse();
+}
+
 export function useChatExecution({
   projectRoot,
+  modelName,
   dequeue,
   enqueue,
   tabs,
@@ -42,39 +81,61 @@ export function useChatExecution({
   const pendingAttachmentsRef = useRef<Attachment[] | null>(null);
   const [inputMode, setInputMode] = useState<InputMode>("shell");
 
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+
+  const modelNameRef = useRef(modelName);
+  modelNameRef.current = modelName;
+
+  const projectRootRef = useRef(projectRoot);
+  projectRootRef.current = projectRoot;
+
+  const aiStreamRef = useRef<StreamBinding | null>(null);
+  const agentStreamRef = useRef<StreamBinding | null>(null);
+  const aiStopBlockRef = useRef<number | null>(null);
+
+  const clearAiStream = useCallback(() => {
+    const cur = aiStreamRef.current;
+    if (cur) {
+      clearTimeout(cur.safetyTimer);
+      aiStreamRef.current = null;
+    }
+    aiStopBlockRef.current = null;
+  }, []);
+
+  const clearAgentStream = useCallback(() => {
+    const cur = agentStreamRef.current;
+    if (cur) {
+      clearTimeout(cur.safetyTimer);
+      agentStreamRef.current = null;
+    }
+  }, []);
+
+  const processChatQueue = useCallback(() => {
+    if (activeTab && activeTab.type !== "chat") {
+      const chatTab = tabs.find((t) => t.type === "chat");
+      if (chatTab) markUnread(chatTab.id);
+    }
+    const next = dequeue("chat");
+    if (next) {
+      executeChatTaskRef.current(next.content, next.mode);
+    } else {
+      setIsStreaming(false);
+    }
+  }, [activeTab, tabs, markUnread, dequeue]);
+
+  const processChatQueueRef = useRef(processChatQueue);
+  processChatQueueRef.current = processChatQueue;
+
   const allocId = useCallback(() => {
     const id = nextIdRef.current;
     nextIdRef.current += 1;
     return id;
   }, []);
 
-  const notifyChatUpdate = useCallback(() => {
-    if (activeTab && activeTab.type !== "chat") {
-      const chatTab = tabs.find((t) => t.type === "chat");
-      if (chatTab) markUnread(chatTab.id);
-    }
-  }, [activeTab, tabs, markUnread]);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: circular dependency between executeChatTask ↔ processChatQueue ↔ execute*Task
-  const executeChatTask = useCallback(async (text: string, mode: InputMode) => {
-    if (mode === "shell") {
-      await _executeShell(text);
-    } else if (mode === "ai") {
-      await _executeAi(text);
-    } else {
-      await _executeAgent(text);
-    }
-  }, []);
-
-  const processChatQueue = useCallback(() => {
-    notifyChatUpdate();
-    const next = dequeue("chat");
-    if (next) {
-      executeChatTask(next.content, next.mode);
-    } else {
-      setIsStreaming(false);
-    }
-  }, [dequeue, executeChatTask, notifyChatUpdate]);
+  const executeChatTaskRef = useRef((_text: string, _mode: InputMode) => {
+    /* set below */
+  });
 
   const _executeShell = useCallback(
     async (text: string) => {
@@ -100,7 +161,7 @@ export function useChatExecution({
       let exitCode: number;
       let durationMs: number;
       let timedOut = false;
-      const cwd = projectRoot || undefined;
+      const cwd = projectRootRef.current || undefined;
       const startMs = Date.now();
 
       if (isTauri()) {
@@ -180,9 +241,9 @@ export function useChatExecution({
           },
         },
       ]);
-      processChatQueue();
+      processChatQueueRef.current();
     },
-    [allocId, projectRoot, processChatQueue],
+    [allocId],
   );
 
   const _executeAi = useCallback(
@@ -205,11 +266,43 @@ export function useChatExecution({
 
       if (isTauri()) {
         try {
-          await sendAiMessage({ message: text, context_block_ids: [] });
-          processChatQueue();
+          const shellContext = recentShellContext(messagesRef.current, 5);
+          const assistantId = allocId();
+          const blockId = await sendAiMessage({
+            message: text,
+            model: modelNameRef.current || undefined,
+            cwd: projectRootRef.current || undefined,
+            shell_context: shellContext.length > 0 ? shellContext : undefined,
+          });
+          const safetyTimer = setTimeout(() => {
+            if (aiStreamRef.current?.backendBlockId === blockId) {
+              clearAiStream();
+              processChatQueueRef.current();
+            }
+          }, STREAM_SAFETY_TIMEOUT_MS);
+          aiStreamRef.current = {
+            backendBlockId: blockId,
+            assistantMsgId: assistantId,
+            safetyTimer,
+          };
+          aiStopBlockRef.current = blockId;
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: assistantId,
+              role: "assistant",
+              mode: "ai",
+              content: "",
+              timestamp: Date.now(),
+              model: modelNameRef.current || undefined,
+            },
+          ]);
           return;
         } catch {
-          // fall through to mock
+          clearAiStream();
+          setIsStreaming(false);
+          processChatQueueRef.current();
+          return;
         }
       }
 
@@ -225,10 +318,10 @@ export function useChatExecution({
             timestamp: Date.now(),
           },
         ]);
-        processChatQueue();
+        processChatQueueRef.current();
       }, 1200);
     },
-    [allocId, processChatQueue],
+    [allocId, clearAiStream],
   );
 
   const _executeAgent = useCallback(
@@ -251,11 +344,42 @@ export function useChatExecution({
 
       if (isTauri()) {
         try {
-          await startAgent({ goal: text, context_block_ids: [] });
-          processChatQueue();
+          const shellContext = recentShellContext(messagesRef.current, 5);
+          const assistantId = allocId();
+          const blockId = await startAgent({
+            goal: text,
+            cwd: projectRootRef.current || undefined,
+            model: modelNameRef.current || undefined,
+            shell_context: shellContext.length > 0 ? shellContext : undefined,
+          });
+          const safetyTimer = setTimeout(() => {
+            if (agentStreamRef.current?.backendBlockId === blockId) {
+              clearAgentStream();
+              processChatQueueRef.current();
+            }
+          }, STREAM_SAFETY_TIMEOUT_MS);
+          agentStreamRef.current = {
+            backendBlockId: blockId,
+            assistantMsgId: assistantId,
+            safetyTimer,
+          };
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: assistantId,
+              role: "assistant",
+              mode: "agent",
+              content: "",
+              timestamp: Date.now(),
+              model: modelNameRef.current || undefined,
+            },
+          ]);
           return;
         } catch {
-          // fall through to mock
+          clearAgentStream();
+          setIsStreaming(false);
+          processChatQueueRef.current();
+          return;
         }
       }
 
@@ -286,11 +410,94 @@ export function useChatExecution({
             ],
           },
         ]);
-        processChatQueue();
+        processChatQueueRef.current();
       }, 1800);
     },
-    [allocId, processChatQueue],
+    [allocId, clearAgentStream],
   );
+
+  const executeChatTask = useCallback(
+    async (text: string, mode: InputMode) => {
+      if (mode === "shell") {
+        await _executeShell(text);
+      } else if (mode === "ai") {
+        await _executeAi(text);
+      } else {
+        await _executeAgent(text);
+      }
+    },
+    [_executeAgent, _executeAi, _executeShell],
+  );
+
+  executeChatTaskRef.current = executeChatTask;
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    let unlistenAi: UnlistenFn | undefined;
+    let unlistenAgent: UnlistenFn | undefined;
+    const setup = async () => {
+      unlistenAi = await listen<AiStreamPayload>("ai_stream_delta", (event) => {
+        const p = event.payload;
+        const cur = aiStreamRef.current;
+        if (!cur || p.blockId !== cur.backendBlockId) return;
+        if (p.done) {
+          clearTimeout(cur.safetyTimer);
+          aiStreamRef.current = null;
+          aiStopBlockRef.current = null;
+          processChatQueueRef.current();
+          return;
+        }
+        if (p.delta) {
+          if (p.kind === "thinking") {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === cur.assistantMsgId ? { ...m, thinking: (m.thinking || "") + p.delta } : m,
+              ),
+            );
+          } else {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === cur.assistantMsgId ? { ...m, content: m.content + p.delta } : m,
+              ),
+            );
+          }
+        }
+      });
+      unlistenAgent = await listen<AgentStreamPayload>("agent_event", (event) => {
+        const p = event.payload;
+        const cur = agentStreamRef.current;
+        if (!cur || p.blockId !== cur.backendBlockId) return;
+        if (p.kind === "done") {
+          clearTimeout(cur.safetyTimer);
+          agentStreamRef.current = null;
+          processChatQueueRef.current();
+          return;
+        }
+        if (p.kind === "error" && p.data) {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === cur.assistantMsgId ? { ...m, content: `**Error:** ${p.data}` } : m,
+            ),
+          );
+          return;
+        }
+        if (p.kind === "text" && p.data) {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === cur.assistantMsgId ? { ...m, content: m.content + p.data } : m,
+            ),
+          );
+        }
+      });
+    };
+    setup().catch((err) => {
+      console.error("Failed to register Tauri event listeners:", err);
+    });
+    return () => {
+      void unlistenAi?.();
+      void unlistenAgent?.();
+    };
+  }, []);
 
   const handleSubmit = useCallback(
     (text: string, mode: InputMode, attachments?: Attachment[]) => {
@@ -321,6 +528,14 @@ export function useChatExecution({
 
   const handleStop = useCallback(() => {
     abortRef.current?.abort();
+    const aiBid = aiStopBlockRef.current;
+    if (aiBid != null) {
+      void stopAiStream(aiBid);
+    }
+    const agentBid = agentStreamRef.current?.backendBlockId;
+    if (agentBid != null) {
+      void stopAgent(agentBid);
+    }
   }, []);
 
   const handleSlashCommand = useCallback(
