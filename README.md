@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/andeya/aineer/main/assets/logo.svg" width="96" alt="">
+  <img src="https://raw.githubusercontent.com/andeya/aineer/main/docs/images/logo.svg" width="96" alt="">
 </p>
 <h1 align="center">aineer</h1>
 <p align="center">
@@ -10,19 +10,19 @@
   <a href="https://github.com/andeya/aineer/actions"><img src="https://github.com/andeya/aineer/workflows/CI/badge.svg" alt="CI"></a>
   <a href="https://github.com/andeya/aineer/releases"><img src="https://img.shields.io/github/v/release/andeya/aineer" alt="Release"></a>
   <a href="https://crates.io/crates/aineer"><img src="https://img.shields.io/crates/v/aineer.svg" alt="crates.io"></a>
-  <img src="https://raw.githubusercontent.com/andeya/aineer/main/assets/badge-platforms.svg" alt="macOS | Linux | Windows">
+  <img src="https://raw.githubusercontent.com/andeya/aineer/main/docs/images/badge-platforms.svg" alt="macOS | Linux | Windows">
   <br>
   <a href="README_CN.md">中文文档</a>
 </p>
 
 ---
 
-**Aineer** is an AI-native terminal application with an embedded model gateway and autonomous agent. It reads your workspace, understands project context, and helps you write, refactor, debug, and ship code — with a mixed shell/chat conversation flow, built-in Git diff viewer, and AI-powered tools.
+**Aineer** is the first **ADE (Agentic Development Environment)** — AI Agent is not a feature, it _is_ the environment. Shell commands, AI chat, and autonomous agent actions weave together in a single unified stream. It reads your workspace, understands project context, and helps you write, refactor, debug, and ship code.
 
-Built in safe Rust with `egui` + `wgpu`. Ships as a **single binary**. GUI mode by default, `--cli` for classic terminal mode. No daemon, no runtime dependency — bring any model and go.
+Built in safe Rust with **Tauri 2 + React 19 + shadcn/ui + Prompt Kit + xterm.js**. Desktop GUI by default, `--cli` for classic terminal mode. No daemon, no runtime dependency — bring any model and go.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/andeya/aineer/main/assets/ScreenShot_01.png" alt="Aineer REPL screenshot" width="780">
+  <img src="https://raw.githubusercontent.com/andeya/aineer/main/docs/images/ScreenShot_01.png" alt="Aineer REPL screenshot" width="780">
 </p>
 
 ## Why Aineer?
@@ -34,7 +34,7 @@ Most AI coding CLIs lock you into a single provider. Claude Code requires Anthro
 | **Multi-provider** (Anthropic, OpenAI, xAI, Ollama, …)                                                  | **All built-in** | Anthropic only | OpenAI + Ollama |     Yes      |
 | **Zero-token-cost** ([free access to major models](#token-free-gateway-free-access-to-major-ai-models)) |     **Yes**      |       No       |       No        |      No      |
 | **Zero-config local AI** (auto-detect Ollama)                                                           |     **Yes**      |       No       |  `--oss` flag   | Manual setup |
-| **Single binary** (no runtime deps)                                                                     |     **Rust**     |    Node.js     |     Node.js     |    Python    |
+| **Single app** (no runtime deps)                                                                        |  **Rust+Tauri**  |    Node.js     |     Node.js     |    Python    |
 | **Multimodal input** (`@image.png`, clipboard paste, drag-and-drop)                                     |     **Yes**      |      Yes       |     Limited     |   Limited    |
 | **MCP protocol** (external tool integration)                                                            |     **Yes**      |      Yes       |       Yes       |     Yes      |
 | **Plugin system** + agents + skills                                                                     |     **Yes**      |      Yes       |       No        |      No      |
@@ -83,28 +83,37 @@ Most AI coding CLIs lock you into a single provider. Claude Code requires Anthro
 
 ## Install
 
+**Desktop app (recommended):**
+
+Download the latest installer from [Releases](https://github.com/andeya/aineer/releases):
+
+| Platform              | File                               |
+| --------------------- | ---------------------------------- |
+| macOS (Apple Silicon) | `Aineer_*_aarch64.dmg`             |
+| macOS (Intel)         | `Aineer_*_x64.dmg`                 |
+| Linux (x86_64)        | `aineer_*_amd64.deb` / `.AppImage` |
+| Linux (ARM64)         | `aineer_*_arm64.deb`               |
+| Windows (x86_64)      | `Aineer_*_x64-setup.exe`           |
+
+**CLI-only mode:**
+
 ```bash
 brew install andeya/aineer/aineer            # Homebrew (macOS / Linux)
 cargo install aineer                           # Cargo (from crates.io)
 ```
-
-Or download a prebuilt binary from [Releases](https://github.com/andeya/aineer/releases):
-
-| Platform              | File                                        |
-| --------------------- | ------------------------------------------- |
-| macOS (Apple Silicon) | `aineer-*-aarch64-apple-darwin.tar.gz`      |
-| macOS (Intel)         | `aineer-*-x86_64-apple-darwin.tar.gz`       |
-| Linux (x86_64)        | `aineer-*-x86_64-unknown-linux-gnu.tar.gz`  |
-| Linux (ARM64)         | `aineer-*-aarch64-unknown-linux-gnu.tar.gz` |
-| Windows (x86_64)      | `aineer-*-x86_64-pc-windows-msvc.zip`       |
 
 <details><summary>Build from source</summary>
 
 ```bash
 git clone https://github.com/andeya/aineer.git
 cd aineer
-cargo install --path crates/app --locked
+bun install                                    # Install frontend dependencies
+cargo tauri build                              # Build Tauri desktop app
+# Or for CLI-only:
+cargo install --path crates/cli --locked
 ```
+
+**Prerequisites:** Rust toolchain, [Bun](https://bun.sh), and platform-specific [Tauri dependencies](https://v2.tauri.app/start/prerequisites/).
 
 </details>
 
@@ -788,23 +797,26 @@ Configure `geminiCache` in settings for intelligent context caching with Gemini 
 
 ### Crate structure
 
-All crates are published to crates.io. Install `aineer` — the others are internal dependencies.
+The `aineer` crate (in `app/`) is the Tauri 2 desktop application that bundles a GUI and CLI mode. All other crates are internal dependencies.
 
-| Crate             | Role                                                 |
-| ----------------- | ---------------------------------------------------- |
-| `aineer`          | Unified binary — GUI (default) or CLI (`--cli`) mode |
-| `aineer-cli`      | CLI mode library (embedded in `aineer`)              |
-| `aineer-core`     | Shared types, events, observer traits                |
-| `aineer-runtime`  | Core runtime engine                                  |
-| `aineer-api`      | AI provider API clients                              |
-| `aineer-gateway`  | Embedded OpenAI-compatible model gateway             |
-| `aineer-terminal` | Terminal emulator backend (alacritty_terminal + PTY) |
-| `aineer-ui`       | GUI components (egui widgets, theme, timeline, etc.) |
-| `aineer-mcp`      | MCP protocol client & transport                      |
-| `aineer-tools`    | Tool definitions & execution                         |
-| `aineer-plugins`  | Plugin system and hooks                              |
-| `aineer-commands` | Slash commands                                       |
-| `aineer-lsp`      | LSP client integration                               |
+| Crate                    | Role                                                              |
+| ------------------------ | ----------------------------------------------------------------- |
+| `aineer`                 | Tauri 2 desktop app — GUI (default) or CLI (`--cli`) mode, includes PTY manager (portable-pty) |
+| `aineer-cli`             | CLI mode library (embedded in `aineer`, provides REPL)            |
+| `aineer-protocol`        | Shared types, events, credentials                                 |
+| `aineer-api`             | AI provider API clients                                           |
+| `aineer-provider`        | Provider registry (multi-provider management)                     |
+| `aineer-engine`          | Agent engine (conversation, planning, execution)                  |
+| `aineer-gateway`         | Embedded OpenAI-compatible model gateway                          |
+| `aineer-settings`        | Unified settings system (3-layer merge: user/project/local)       |
+| `aineer-memory`          | Memory system (project knowledge, user preferences, decision log) |
+| `aineer-mcp`             | MCP protocol client & transport                                   |
+| `aineer-tools`           | Tool definitions & execution                                      |
+| `aineer-plugins`         | Plugin system and hooks                                           |
+| `aineer-lsp`             | LSP client integration                                            |
+| `aineer-channels`        | Multi-channel delivery (Lark/WeChat/WhatsApp bots)                |
+| `aineer-auto-update`     | Self-update mechanism                                             |
+| `aineer-release-channel` | Release channel management (dev/nightly/preview/stable)           |
 
 ---
 
