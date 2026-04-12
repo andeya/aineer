@@ -1,6 +1,7 @@
 #[allow(unused_imports)]
 use crate::error::{AppError, AppResult};
 use aineer_gateway::{GatewayConfig, GatewayServer, GatewayStatus};
+use aineer_webai::WebAiEngine;
 use serde::Serialize;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -42,7 +43,12 @@ pub async fn start_gateway(
 
     let config = GatewayConfig::default();
     let listen_addr = config.listen_addr.clone();
-    let server = Arc::new(GatewayServer::new(config));
+    let mut gateway = GatewayServer::new(config);
+
+    if let Some(handle) = crate::app_handle() {
+        gateway = gateway.with_webai(WebAiEngine::new(handle.clone()));
+    }
+    let server = Arc::new(gateway);
     let server_clone = Arc::clone(&server);
     tokio::spawn(async move {
         if let Err(e) = server_clone.start().await {

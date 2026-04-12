@@ -156,6 +156,12 @@ fn highlight_cli_hint(p: &style::Palette, line: &str) -> String {
 /// when `--cli` is passed, or when running in a non-GUI environment.
 pub fn run_cli() -> i32 {
     init_tracing();
+    run_cli_without_tracing()
+}
+
+/// Same as [`run_cli`] but assumes tracing is already initialized (e.g. by the
+/// Tauri host process). Used when CLI runs inside the Tauri event loop.
+pub fn run_cli_without_tracing() -> i32 {
     match run() {
         Ok(()) => 0,
         Err(error) => {

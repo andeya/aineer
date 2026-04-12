@@ -1,0 +1,30 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "webai-remote-ipc",
+  "description": "Grants WebAI hidden webviews IPC event-emit access on AI provider domains",
+  "windows": [
+    "webai-*"
+  ],
+  "local": false,
+  "remote": {
+    "urls": [
+      "https://*.claude.ai/*",
+      "https://*.chatgpt.com/*",
+      "https://*.deepseek.com/*",
+      "https://*.doubao.com/*",
+      "https://*.google.com/*",
+      "https://*.chatglm.cn/*",
+      "https://*.z.ai/*",
+      "https://*.grok.com/*",
+      "https://*.kimi.com/*",
+      "https://*.moonshot.cn/*",
+      "https://*.perplexity.ai/*",
+      "https://*.qwen.ai/*",
+      "https://*.qianwen.com/*",
+      "https://*.xiaomimimo.com/*"
+    ]
+  },
+  "permissions": [
+    "core:event:allow-emit"
+  ]
+}

@@ -10,12 +10,20 @@ use crate::error::{AppError, AppResult};
 use aineer_release_channel::ReleaseChannel;
 use commands::{
     agent, ai, auto_update, cache, channels, files, gateway, git, lsp, mcp, memory, plugins,
-    session as session_cmd, settings, shell, slash_commands,
+    session as session_cmd, settings, shell, slash_commands, webai,
 };
 use serde::Serialize;
+use std::sync::OnceLock;
 #[cfg(target_os = "macos")]
 use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
-use tauri::Manager;
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+
+/// Global AppHandle available for non-UI subsystems (e.g. WebAI in CLI mode).
+static APP_HANDLE: OnceLock<tauri::AppHandle> = OnceLock::new();
+
+pub fn app_handle() -> Option<&'static tauri::AppHandle> {
+    APP_HANDLE.get()
+}
 
 fn read_close_to_tray(app: &tauri::AppHandle) -> bool {
     let state = app.state::<settings::ManagedSettings>();
@@ -71,6 +79,18 @@ fn get_app_info() -> AppInfo {
     }
 }
 
+/// Create the main application window programmatically.
+/// (tauri.conf.json `windows` is empty so we control creation per mode.)
+fn create_main_window(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    let url = WebviewUrl::App("index.html".into());
+    WebviewWindowBuilder::new(app, "main", url)
+        .title(version::display_title())
+        .inner_size(1200.0, 800.0)
+        .min_inner_size(800.0, 600.0)
+        .build()?;
+    Ok(())
+}
+
 pub fn run_desktop() {
     init_logging();
 
@@ -99,9 +119,9 @@ pub fn run_desktop() {
             }
         })
         .setup(move |app| {
-            if let Some(w) = app.get_webview_window("main") {
-                let _ = w.set_title(&version::display_title());
-            }
+            let _ = APP_HANDLE.set(app.handle().clone());
+
+            create_main_window(app)?;
 
             #[cfg(target_os = "macos")]
             {
@@ -144,7 +164,6 @@ pub fn run_desktop() {
                 tracing::warn!("Failed to setup system tray: {e}");
             }
 
-            // Run scheduled auto-cleanup if due
             cache::maybe_run_auto_cleanup(app.handle());
             Ok(())
         })
@@ -222,6 +241,11 @@ pub fn run_desktop() {
             gateway::start_gateway,
             gateway::stop_gateway,
             gateway::get_gateway_status,
+            // WebAI
+            webai::webai_list_providers,
+            webai::webai_start_auth,
+            webai::webai_list_authenticated,
+            webai::webai_logout,
             // App-level
             get_close_to_tray,
             set_close_to_tray,
@@ -238,6 +262,37 @@ pub fn run_desktop() {
     });
 
     #[cfg(not(target_os = "macos"))]
+    app.run(|_app, _event| {});
+}
+
+/// CLI mode: start Tauri runtime (for WebView / WebAI) without showing any UI.
+/// The Tauri event loop runs on the main thread; CLI REPL runs on a background thread.
+///
+/// NOTE: this function must live in main.rs (not lib.rs) to avoid a duplicate
+/// `tauri::generate_context!()` symbol.  We keep the implementation here and
+/// accept the `tauri::Context` from the caller.
+pub fn run_cli_with_tauri(context: tauri::Context) {
+    let filter =
+        tracing_subscriber::EnvFilter::try_from_env("AINEER_LOG").unwrap_or_else(|_| "warn".into());
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr)
+        .init();
+
+    let app = tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .setup(|app| {
+            let _ = APP_HANDLE.set(app.handle().clone());
+
+            std::thread::spawn(|| {
+                let code = aineer_cli::run_cli_without_tracing();
+                std::process::exit(code);
+            });
+            Ok(())
+        })
+        .build(context)
+        .expect("error while building Aineer");
+
     app.run(|_app, _event| {});
 }
 

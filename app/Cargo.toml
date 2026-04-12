@@ -45,6 +45,7 @@ aineer-provider = { workspace = true }
 aineer-release-channel = { workspace = true }
 aineer-settings = { workspace = true }
 aineer-tools = { workspace = true }
+aineer-webai = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

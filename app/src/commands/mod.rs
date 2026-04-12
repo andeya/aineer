@@ -14,6 +14,7 @@ pub mod session;
 pub mod settings;
 pub mod shell;
 pub mod slash_commands;
+pub mod webai;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
