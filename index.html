@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <link rel="icon" type="image/svg+xml" href="/logo.svg">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aineer</title>
+  <script>
+    // Apply theme before first paint to prevent flash
+    (function(){
+      try {
+        var t = localStorage.getItem('aineer-theme');
+        if (t === 'light') return;
+        if (t === 'system' && !window.matchMedia('(prefers-color-scheme: dark)').matches) return;
+        document.documentElement.classList.add('dark');
+      } catch(e) { document.documentElement.classList.add('dark'); }
+    })();
+  </script>
+  <style>
+    :root {
+      --splash-bg: #ffffff;
+      --splash-text: #0f172a;
+      --splash-dot: #6366f1;
+    }
+    .dark {
+      --splash-bg: #0f1117;
+      --splash-text: #e4e4ec;
+      --splash-dot: #6366f1;
+    }
+    #splash{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:1.25rem;background:var(--splash-bg)}
+    #splash svg{width:64px;height:64px;animation:pulse 2s ease-in-out infinite}
+    #splash .name{font-size:1.125rem;font-weight:600;color:var(--splash-text);letter-spacing:0.02em;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+    #splash .dots{display:flex;gap:6px}
+    #splash .dots span{width:5px;height:5px;border-radius:50%;background:var(--splash-dot);animation:blink 1.4s ease-in-out infinite}
+    #splash .dots span:nth-child(2){animation-delay:0.2s}
+    #splash .dots span:nth-child(3){animation-delay:0.4s}
+    @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.7;transform:scale(.96)}}
+    @keyframes blink{0%,80%,100%{opacity:.25}40%{opacity:1}}
+  </style>
+</head>
+<body>
+  <div id="root">
+    <div id="splash">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+        <defs>
+          <linearGradient id="a-grad" x1="128" y1="64" x2="384" y2="448" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#818CF8"/><stop offset="45%" stop-color="#6366F1"/><stop offset="100%" stop-color="#06B6D4"/>
+          </linearGradient>
+          <linearGradient id="bg-grad" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#13132B"/><stop offset="100%" stop-color="#0D0D1F"/>
+          </linearGradient>
+          <filter id="a-glow"><feGaussianBlur stdDeviation="8" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+        </defs>
+        <rect width="512" height="512" rx="108" fill="url(#bg-grad)"/>
+        <rect x="2" y="2" width="508" height="508" rx="106" fill="none" stroke="rgba(99,102,241,0.12)" stroke-width="1.5"/>
+        <g filter="url(#a-glow)">
+          <path d="M 256 72 L 440 432 L 358 432 L 310 320 L 202 320 L 154 432 L 72 432 Z M 256 186 L 216 292 L 296 292 Z" fill="url(#a-grad)" fill-rule="evenodd"/>
+        </g>
+        <circle cx="330" cy="302" r="9" fill="#FBBF24" opacity="0.85">
+          <animate attributeName="opacity" values="0.85;0.15;0.85" dur="1.2s" repeatCount="indefinite"/>
+        </circle>
+      </svg>
+      <div class="name">Aineer</div>
+      <div class="dots"><span></span><span></span><span></span></div>
+    </div>
+  </div>
+  <script type="module" src="/ui/main.tsx"></script>
+</body>
+</html>
