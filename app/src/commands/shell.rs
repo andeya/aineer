@@ -99,11 +99,9 @@ pub async fn shell_complete(
 }
 
 fn complete_impl(partial: &str, cwd: Option<&str>, is_first_word: bool) -> Vec<CompletionItem> {
-    let base = cwd
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
-        });
+    let base = cwd.map(std::path::PathBuf::from).unwrap_or_else(|| {
+        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+    });
 
     let mut items = complete_files(partial, &base);
 
@@ -182,7 +180,11 @@ fn complete_commands(partial: &str) -> Vec<CompletionItem> {
     }
 
     let path_var = std::env::var("PATH").unwrap_or_default();
-    let sep = if cfg!(target_os = "windows") { ';' } else { ':' };
+    let sep = if cfg!(target_os = "windows") {
+        ';'
+    } else {
+        ':'
+    };
     let prefix_lower = partial.to_lowercase();
 
     let mut seen = std::collections::HashSet::new();
