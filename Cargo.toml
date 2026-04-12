@@ -1,6 +1,6 @@
 [workspace]
-members = ["crates/*"]
-default-members = ["crates/app"]
+members = ["crates/*", "app"]
+default-members = ["app"]
 resolver = "2"
 
 [workspace.package]
@@ -21,10 +21,6 @@ keywords = [
 categories = ["command-line-utilities", "development-tools"]
 
 [workspace.dependencies]
-# GPUI
-gpui = "0.2.2"
-gpui-component = "0.5.1"
-
 # Async
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
@@ -43,7 +39,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Terminal
-alacritty_terminal = "0.24"
+portable-pty = "0.9"
 
 # Git
 git2 = { version = "0.19", default-features = false }
@@ -58,16 +54,6 @@ syntect = "5"
 # Credentials
 keyring = "3"
 
-# Search
-tantivy = "0.22"
-
-# Platform (macOS dock icon, etc.)
-cocoa = "0.26"
-objc = "0.2"
-
-# Async executor (GPUI backend)
-smol = "2"
-
 # Utilities
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
@@ -76,24 +62,21 @@ base64 = "0.22"
 notify = "7"
 
 # Internal crates
-aineer-protocol = { path = "crates/protocol" }
-aineer-api = { path = "crates/api" }
-aineer-provider = { path = "crates/provider" }
-aineer-settings = { path = "crates/settings" }
-aineer-theme = { path = "crates/theme" }
-aineer-terminal = { path = "crates/terminal" }
-aineer-engine = { path = "crates/engine" }
-aineer-tools = { path = "crates/tools" }
-aineer-gateway = { path = "crates/gateway" }
-aineer-mcp = { path = "crates/mcp" }
-aineer-lsp = { path = "crates/lsp" }
-aineer-plugins = { path = "crates/plugins" }
-aineer-cli = { path = "crates/cli" }
-aineer-ui = { path = "crates/ui" }
-aineer-memory = { path = "crates/memory" }
-aineer-channels = { path = "crates/channels" }
-aineer-auto-update = { path = "crates/auto_update" }
-aineer-release-channel = { path = "crates/release_channel" }
+aineer-protocol = { version = "*", path = "crates/protocol" }
+aineer-api = { version = "*", path = "crates/api" }
+aineer-provider = { version = "*", path = "crates/provider" }
+aineer-settings = { version = "*", path = "crates/settings" }
+aineer-engine = { version = "*", path = "crates/engine" }
+aineer-tools = { version = "*", path = "crates/tools" }
+aineer-gateway = { version = "*", path = "crates/gateway" }
+aineer-mcp = { version = "*", path = "crates/mcp" }
+aineer-lsp = { version = "*", path = "crates/lsp" }
+aineer-plugins = { version = "*", path = "crates/plugins" }
+aineer-cli = { version = "*", path = "crates/cli" }
+aineer-memory = { version = "*", path = "crates/memory" }
+aineer-channels = { version = "*", path = "crates/channels" }
+aineer-auto-update = { version = "*", path = "crates/auto_update" }
+aineer-release-channel = { version = "*", path = "crates/release_channel" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
