@@ -6,16 +6,24 @@ use aineer_engine::ConfigLoader;
 use aineer_plugins::{PluginManager, PluginManagerConfig};
 use aineer_tools::GlobalToolRegistry;
 
-pub(crate) fn build_runtime_plugin_state(
+/// Load runtime config and tool registry using `cwd` as the project directory
+/// (for Tauri / desktop when the workspace root differs from `std::env::current_dir()`).
+pub(crate) fn build_runtime_plugin_state_for_cwd(
+    cwd: &Path,
 ) -> CliResult<(aineer_engine::RuntimeConfig, GlobalToolRegistry)> {
     crate::init::ensure_home_aineer_dirs();
-    let cwd = env::current_dir()?;
-    let loader = ConfigLoader::default_for(&cwd);
+    let loader = ConfigLoader::default_for(cwd);
     let runtime_config = loader.load()?;
     runtime_config.apply_env();
-    let plugin_manager = build_plugin_manager(&cwd, &loader, &runtime_config);
+    let plugin_manager = build_plugin_manager(cwd, &loader, &runtime_config);
     let tool_registry = GlobalToolRegistry::with_plugin_tools(plugin_manager.aggregated_tools()?)?;
     Ok((runtime_config, tool_registry))
+}
+
+pub(crate) fn build_runtime_plugin_state(
+) -> CliResult<(aineer_engine::RuntimeConfig, GlobalToolRegistry)> {
+    let cwd = env::current_dir()?;
+    build_runtime_plugin_state_for_cwd(&cwd)
 }
 
 pub(crate) fn build_plugin_manager(
@@ -67,5 +75,15 @@ pub(crate) fn build_system_prompt_with_lsp(
         env::consts::OS,
         "unknown",
         lsp_context,
+    )?)
+}
+
+pub(crate) fn build_system_prompt_for_cwd(cwd: &Path) -> CliResult<Vec<aineer_api::SystemBlock>> {
+    Ok(aineer_engine::load_system_prompt_with_lsp(
+        cwd.to_path_buf(),
+        super::current_date(),
+        env::consts::OS,
+        "unknown",
+        None,
     )?)
 }

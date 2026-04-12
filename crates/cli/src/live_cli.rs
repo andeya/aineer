@@ -76,6 +76,7 @@ impl LiveCli {
             permission_mode: self.permission_mode,
             progress_reporter: None,
             mcp_manager: Arc::clone(&self.mcp_manager),
+            preloaded_state: None,
         }
     }
 
@@ -98,6 +99,7 @@ impl LiveCli {
             permission_mode,
             progress_reporter: None,
             mcp_manager: Arc::clone(&mcp_manager),
+            preloaded_state: None,
         })?;
         let lsp_manager = env::current_dir()
             .ok()

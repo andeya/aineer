@@ -1,4 +1,6 @@
 use std::io::Write;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use aineer_api::{
     ContentBlockDelta, MessageResponse, OutputContentBlock, ProviderClient,
@@ -9,6 +11,14 @@ use aineer_engine::{AssistantEvent, RuntimeError, TokenUsage};
 use crate::progress::InternalPromptProgressReporter;
 use crate::render::{MarkdownStreamState, TerminalRenderer};
 use crate::tool_display::format_tool_call_start;
+
+/// Typed delta emitted during streaming — allows callers to distinguish
+/// model reasoning (thinking) from formal assistant output (text).
+#[derive(Debug, Clone, Copy)]
+pub enum StreamDelta<'a> {
+    Text(&'a str),
+    Thinking(&'a str),
+}
 
 pub(crate) struct StreamState {
     renderer: TerminalRenderer,
@@ -34,11 +44,19 @@ impl StreamState {
         event: ApiStreamEvent,
         progress: Option<&InternalPromptProgressReporter>,
         out: &mut dyn Write,
+        on_delta: &mut dyn FnMut(StreamDelta<'_>),
     ) -> Result<(), RuntimeError> {
         match event {
             ApiStreamEvent::MessageStart(start) => {
                 for block in start.message.content {
-                    push_output_block(block, out, &mut self.events, &mut self.pending_tool, true)?;
+                    push_output_block(
+                        block,
+                        out,
+                        &mut self.events,
+                        &mut self.pending_tool,
+                        true,
+                        on_delta,
+                    )?;
                 }
             }
             ApiStreamEvent::ContentBlockStart(start) => {
@@ -48,6 +66,7 @@ impl StreamState {
                     &mut self.events,
                     &mut self.pending_tool,
                     true,
+                    on_delta,
                 )?;
             }
             ApiStreamEvent::ContentBlockDelta(delta) => match delta.delta {
@@ -58,6 +77,7 @@ impl StreamState {
                     if let Some(rendered) = self.markdown_stream.push(&self.renderer, &text) {
                         write_flush(out, &rendered)?;
                     }
+                    on_delta(StreamDelta::Text(&text));
                     self.events.push(AssistantEvent::TextDelta(text));
                 }
                 ContentBlockDelta::InputJsonDelta { partial_json } => {
@@ -72,6 +92,7 @@ impl StreamState {
                     if let Some(rendered) = self.markdown_stream.push(&self.renderer, &thinking) {
                         write_flush(out, &rendered)?;
                     }
+                    on_delta(StreamDelta::Thinking(&thinking));
                     self.events.push(AssistantEvent::TextDelta(thinking));
                 }
                 ContentBlockDelta::SignatureDelta { .. } => {}
@@ -147,12 +168,13 @@ pub(super) async fn stream_with_client(
     let mut sink = std::io::sink();
     let out: &mut dyn Write = if emit_output { &mut gutter } else { &mut sink };
     let mut state = StreamState::new();
+    let mut noop_cb = |_: StreamDelta<'_>| {};
     while let Some(event) = stream
         .next_event()
         .await
         .map_err(aineer_api::ApiError::into_runtime_error)?
     {
-        state.handle_event(event, progress, out)?;
+        state.handle_event(event, progress, out, &mut noop_cb)?;
     }
 
     let events = state.ensure_stop_event();
@@ -173,7 +195,59 @@ pub(super) async fn stream_with_client(
         })
         .await
         .map_err(aineer_api::ApiError::into_runtime_error)?;
-    response_to_events(response, out)
+    response_to_events(response, out, &mut noop_cb)
+}
+
+/// Stream from `client`, invoking `on_delta` for each assistant text / thinking chunk.
+/// Stops reading when `cancel` is set; partial events are still returned.
+pub(crate) async fn stream_with_client_deltas<F>(
+    client: &ProviderClient,
+    message_request: &aineer_api::MessageRequest,
+    cancel: Arc<AtomicBool>,
+    mut on_delta: F,
+) -> Result<Vec<AssistantEvent>, RuntimeError>
+where
+    F: FnMut(StreamDelta<'_>),
+{
+    let mut stream = client
+        .stream_message(message_request)
+        .await
+        .map_err(aineer_api::ApiError::into_runtime_error)?;
+    let mut sink = std::io::sink();
+    let out: &mut dyn Write = &mut sink;
+    let mut state = StreamState::new();
+    while let Some(event) = stream
+        .next_event()
+        .await
+        .map_err(aineer_api::ApiError::into_runtime_error)?
+    {
+        if cancel.load(Ordering::Relaxed) {
+            break;
+        }
+        state.handle_event(event, None, out, &mut on_delta)?;
+    }
+
+    let events = state.ensure_stop_event();
+    let has_body = events.iter().any(|event| {
+        matches!(event, AssistantEvent::TextDelta(t) if !t.is_empty())
+            || matches!(event, AssistantEvent::ToolUse { .. })
+    });
+
+    if has_body {
+        return Ok(events);
+    }
+
+    // Fallback: non-streaming request. `on_delta` is intentionally passed here
+    // because this path only runs when streaming produced no content.
+    let response = client
+        .send_message(&aineer_api::MessageRequest {
+            stream: false,
+            thinking: None,
+            ..message_request.clone()
+        })
+        .await
+        .map_err(aineer_api::ApiError::into_runtime_error)?;
+    response_to_events(response, out, &mut on_delta)
 }
 
 pub(crate) fn push_output_block(
@@ -182,6 +256,7 @@ pub(crate) fn push_output_block(
     events: &mut Vec<AssistantEvent>,
     pending_tool: &mut Option<(String, String, String)>,
     streaming_tool_input: bool,
+    on_delta: &mut dyn FnMut(StreamDelta<'_>),
 ) -> Result<(), RuntimeError> {
     match block {
         OutputContentBlock::Text { text } if !text.is_empty() => {
@@ -189,6 +264,7 @@ pub(crate) fn push_output_block(
             write!(out, "{rendered}")
                 .and_then(|()| out.flush())
                 .map_err(|error| RuntimeError::new(error.to_string()))?;
+            on_delta(StreamDelta::Text(&text));
             events.push(AssistantEvent::TextDelta(text));
         }
         OutputContentBlock::ToolUse { id, name, input } => {
@@ -206,6 +282,7 @@ pub(crate) fn push_output_block(
             write!(out, "{rendered}")
                 .and_then(|()| out.flush())
                 .map_err(|error| RuntimeError::new(error.to_string()))?;
+            on_delta(StreamDelta::Thinking(&thinking));
             events.push(AssistantEvent::TextDelta(thinking));
         }
         OutputContentBlock::RedactedThinking { .. } => {}
@@ -217,12 +294,13 @@ pub(crate) fn push_output_block(
 pub(crate) fn response_to_events(
     response: MessageResponse,
     out: &mut (impl Write + ?Sized),
+    on_delta: &mut dyn FnMut(StreamDelta<'_>),
 ) -> Result<Vec<AssistantEvent>, RuntimeError> {
     let mut events = Vec::new();
     let mut pending_tool = None;
 
     for block in response.content {
-        push_output_block(block, out, &mut events, &mut pending_tool, false)?;
+        push_output_block(block, out, &mut events, &mut pending_tool, false, on_delta)?;
         if let Some((id, name, input)) = pending_tool.take() {
             events.push(AssistantEvent::ToolUse { id, name, input });
         }

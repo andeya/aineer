@@ -15,7 +15,7 @@ use crate::reports::{
     status_context, StatusContext, StatusUsage,
 };
 use crate::runtime_client::{
-    convert_messages, permission_policy, push_output_block, response_to_events,
+    convert_messages, permission_policy, push_output_block, response_to_events, StreamDelta,
 };
 use crate::tool_display::{format_tool_call_start, format_tool_result};
 use crate::workspace::parse_git_status_metadata;
@@ -1148,6 +1148,7 @@ fn push_output_block_renders_markdown_text() {
     let mut out = Vec::new();
     let mut events = Vec::new();
     let mut pending_tool = None;
+    let mut noop = |_: StreamDelta<'_>| {};
 
     push_output_block(
         OutputContentBlock::Text {
@@ -1157,6 +1158,7 @@ fn push_output_block_renders_markdown_text() {
         &mut events,
         &mut pending_tool,
         false,
+        &mut noop,
     )
     .expect("text block should render");
 
@@ -1172,6 +1174,7 @@ fn push_output_block_skips_empty_object_prefix_for_tool_streams() {
     let mut out = Vec::new();
     let mut events = Vec::new();
     let mut pending_tool = None;
+    let mut noop = |_: StreamDelta<'_>| {};
 
     push_output_block(
         OutputContentBlock::ToolUse {
@@ -1183,6 +1186,7 @@ fn push_output_block_skips_empty_object_prefix_for_tool_streams() {
         &mut events,
         &mut pending_tool,
         true,
+        &mut noop,
     )
     .expect("tool block should accumulate");
 
@@ -1196,6 +1200,7 @@ fn push_output_block_skips_empty_object_prefix_for_tool_streams() {
 #[test]
 fn response_to_events_preserves_empty_object_json_input_outside_streaming() {
     let mut out = Vec::new();
+    let mut noop = |_: StreamDelta<'_>| {};
     let events = response_to_events(
         MessageResponse {
             id: "msg-1".to_string(),
@@ -1218,6 +1223,7 @@ fn response_to_events_preserves_empty_object_json_input_outside_streaming() {
             request_id: None,
         },
         &mut out,
+        &mut noop,
     )
     .expect("response conversion should succeed");
 
@@ -1231,6 +1237,7 @@ fn response_to_events_preserves_empty_object_json_input_outside_streaming() {
 #[test]
 fn response_to_events_preserves_non_empty_json_input_outside_streaming() {
     let mut out = Vec::new();
+    let mut noop = |_: StreamDelta<'_>| {};
     let events = response_to_events(
         MessageResponse {
             id: "msg-2".to_string(),
@@ -1253,6 +1260,7 @@ fn response_to_events_preserves_non_empty_json_input_outside_streaming() {
             request_id: None,
         },
         &mut out,
+        &mut noop,
     )
     .expect("response conversion should succeed");
 
@@ -1266,6 +1274,7 @@ fn response_to_events_preserves_non_empty_json_input_outside_streaming() {
 #[test]
 fn response_to_events_maps_thinking_to_text_deltas() {
     let mut out = Vec::new();
+    let mut noop = |_: StreamDelta<'_>| {};
     let events = response_to_events(
         MessageResponse {
             id: "msg-3".to_string(),
@@ -1292,6 +1301,7 @@ fn response_to_events_maps_thinking_to_text_deltas() {
             request_id: None,
         },
         &mut out,
+        &mut noop,
     )
     .expect("response conversion should succeed");
 

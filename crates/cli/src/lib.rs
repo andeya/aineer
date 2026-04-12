@@ -4,6 +4,7 @@ mod banner;
 mod bootstrap;
 pub mod cli;
 mod config_cmd;
+pub mod desktop;
 pub mod error;
 mod help;
 mod image_util;

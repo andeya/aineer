@@ -34,6 +34,8 @@ pub(crate) use model::{
     ModelResolver,
 };
 pub(crate) use permission::{permission_policy, CliPermissionPrompter};
+pub(crate) use stream::stream_with_client_deltas;
+pub use stream::StreamDelta;
 #[allow(unused_imports)]
 pub(crate) use stream::{push_output_block, response_to_events, write_flush};
 pub(crate) use tool_executor::CliToolExecutor;
@@ -48,6 +50,9 @@ pub(crate) struct RuntimeParams {
     pub(crate) permission_mode: aineer_engine::PermissionMode,
     pub(crate) progress_reporter: Option<InternalPromptProgressReporter>,
     pub(crate) mcp_manager: SharedMcpManager,
+    /// Pre-loaded config + tool registry (skips `build_runtime_plugin_state`).
+    /// Used by the desktop path where `cwd` differs from `env::current_dir()`.
+    pub(crate) preloaded_state: Option<(aineer_engine::RuntimeConfig, GlobalToolRegistry)>,
 }
 
 pub(crate) struct RuntimeBuildResult {
@@ -69,8 +74,12 @@ pub(crate) fn build_runtime(params: RuntimeParams) -> CliResult<RuntimeBuildResu
         permission_mode,
         progress_reporter,
         mcp_manager,
+        preloaded_state,
     } = params;
-    let (runtime_config, tool_registry) = build_runtime_plugin_state()?;
+    let (runtime_config, tool_registry) = match preloaded_state {
+        Some(state) => state,
+        None => build_runtime_plugin_state()?,
+    };
     let model = if model == "auto" {
         runtime_config
             .model()
