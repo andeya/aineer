@@ -12,10 +12,10 @@
     "test": "cargo test --workspace && bun test",
     "test:rust": "cargo test --workspace",
     "test:ui": "bun test",
-    "lint": "cargo clippy --workspace -- -D warnings && bunx biome check .",
-    "lint:fix": "cargo clippy --workspace --fix --allow-dirty && bunx biome check --fix .",
+    "lint": "cargo clippy --workspace --all-targets -- -D warnings && bunx biome check .",
+    "lint:fix": "cargo clippy --workspace --all-targets --fix --allow-dirty && bunx biome check --fix .",
     "format": "cargo fmt --all && bunx biome format --write .",
-    "format:check": "cargo fmt --all --check && bunx biome format .",
+    "format:check": "cargo fmt --all -- --check && bunx biome format .",
     "check": "cargo check --workspace && bun run build",
     "version:bump": "bun run scripts/version-bump.ts"
   },
