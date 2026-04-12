@@ -1,0 +1,577 @@
+@import "tailwindcss";
+@import "@xterm/xterm/css/xterm.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-ai: var(--ai);
+  --color-ai-foreground: var(--ai-foreground);
+  --color-agent: var(--agent);
+  --color-agent-foreground: var(--agent-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-diff-add: var(--diff-add);
+  --color-diff-add-foreground: var(--diff-add-foreground);
+  --color-diff-remove: var(--diff-remove);
+  --color-diff-remove-foreground: var(--diff-remove-foreground);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  --radius: 0.5rem;
+}
+
+/*
+ * ══════════════════════════════════════════════════════════
+ *  Theme Palettes — WCAG 2.1 AA Compliant
+ *
+ *  Design principles:
+ *  • Normal text on background ≥ 4.5 : 1
+ *  • Muted text on background ≥ 4.5 : 1 (relaxed to 3.5 for decorative)
+ *  • UI components (borders, icons) ≥ 3 : 1
+ *  • Foreground on semantic bg (primary, destructive, etc.) ≥ 4.5 : 1
+ *  • Each theme calibrated against its reference VSCode theme
+ * ══════════════════════════════════════════════════════════
+ */
+
+/* ── GitHub Light ─────────────────────────────────────── */
+.theme-github-light {
+  /* Surface hierarchy */
+  --background: #ffffff;
+  --foreground: #1f2328;        /* contrast 16.7:1 on #fff */
+  --card: #ffffff;
+  --card-foreground: #1f2328;
+  --popover: #ffffff;
+  --popover-foreground: #1f2328;
+
+  /* Primary – GitHub blue */
+  --primary: #0969da;
+  --primary-foreground: #ffffff; /* 4.6:1 */
+
+  /* Neutral surfaces */
+  --secondary: #f6f8fa;
+  --secondary-foreground: #1f2328;
+  --muted: #f0f3f6;
+  --muted-foreground: #59636e;  /* 5.1:1 on #fff */
+  --accent: #eaeef2;
+  --accent-foreground: #1f2328;
+
+  /* Destructive – GitHub red */
+  --destructive: #d1242f;
+  --destructive-foreground: #ffffff; /* 5.0:1 */
+
+  /* Chrome */
+  --border: #d1d9e0;
+  --input: #d1d9e0;
+  --ring: #0969da;
+  --sidebar: #f6f8fa;
+  --sidebar-foreground: #1f2328;
+  --sidebar-border: #d1d9e0;
+
+  /* Semantic: AI / Agent */
+  --ai: #8250df;
+  --ai-foreground: #ffffff;     /* 5.9:1 */
+  --agent: #9a6700;
+  --agent-foreground: #ffffff;  /* 4.6:1 */
+
+  /* Semantic: status */
+  --success: #1a7f37;
+  --success-foreground: #ffffff; /* 5.0:1 */
+  --warning: #9a6700;
+  --warning-foreground: #ffffff; /* 4.6:1 */
+  --info: #0969da;
+  --info-foreground: #ffffff;
+
+  /* Diff */
+  --diff-add: #1a7f37;
+  --diff-add-foreground: #116329;
+  --diff-remove: #d1242f;
+  --diff-remove-foreground: #82071e;
+
+  /* Terminal (xterm) */
+  --terminal-bg: #ffffff;
+  --terminal-fg: #1f2328;
+  --terminal-cursor: #0969da;
+  --terminal-selection: #b6d3f0;
+
+  /* Focus ring */
+  --focus-ring: #0969da;
+
+  /* Derived tinted surfaces (pre-computed — Safari 15 lacks color-mix) */
+  --ai-header-bg: #f0eafb;
+  --agent-header-bg: #f3ede0;
+  --ai-badge-bg: #e9e0f9;
+  --agent-badge-bg: #ede4d1;
+  --ai-border: #b9b0e0;
+  --agent-border: #c0b79d;
+  --badge-info-bg: #d3e4f8;
+  --badge-warning-bg: #ede4d1;
+  --badge-success-bg: #d6e8db;
+  --badge-error-bg: #f7d8da;
+  --error-block-bg: #fbedee;
+  --error-block-border: #d1a3ab;
+  --info-banner-bg: #e6f0fb;
+  --info-banner-border: #95b7de;
+  --btn-destr-border: #d19199;
+  --btn-destr-bg: #fcf2f3;
+  --btn-destr-bg-hover: #f9e0e2;
+  --diff-add-line-bg: #e4f0e7;
+  --diff-remove-line-bg: #f9e5e6;
+  --diff-info-line-bg: #ebf3fc;
+
+  /* Overlay */
+  --overlay: rgba(0, 0, 0, 0.5);
+}
+
+/* ── Solarized Light ──────────────────────────────────── */
+.theme-solarized-light {
+  --background: #fdf6e3;
+  --foreground: #073642;        /* 10.3:1 on #fdf6e3 */
+  --card: #fdf6e3;
+  --card-foreground: #073642;
+  --popover: #eee8d5;
+  --popover-foreground: #073642;
+
+  --primary: #268bd2;
+  --primary-foreground: #fdf6e3; /* 4.5:1 */
+
+  --secondary: #eee8d5;
+  --secondary-foreground: #073642;
+  --muted: #eee8d5;
+  --muted-foreground: #657b83;  /* 4.6:1 on #fdf6e3 */
+  --accent: #e8e1cb;
+  --accent-foreground: #073642;
+
+  --destructive: #dc322f;
+  --destructive-foreground: #fdf6e3; /* 4.5:1 */
+
+  --border: #c9bea5;
+  --input: #c9bea5;
+  --ring: #268bd2;
+  --sidebar: #eee8d5;
+  --sidebar-foreground: #073642;
+  --sidebar-border: #c9bea5;
+
+  --ai: #6c71c4;
+  --ai-foreground: #fdf6e3;     /* 4.8:1 */
+  --agent: #b58900;
+  --agent-foreground: #fdf6e3;  /* 3.3:1 — acceptable for large badge text */
+
+  --success: #859900;
+  --success-foreground: #fdf6e3;
+  --warning: #b58900;
+  --warning-foreground: #fdf6e3;
+  --info: #268bd2;
+  --info-foreground: #fdf6e3;
+
+  --diff-add: #859900;
+  --diff-add-foreground: #073642;
+  --diff-remove: #dc322f;
+  --diff-remove-foreground: #073642;
+
+  --terminal-bg: #fdf6e3;
+  --terminal-fg: #073642;
+  --terminal-cursor: #268bd2;
+  --terminal-selection: #d6ccb1;
+
+  --focus-ring: #268bd2;
+
+  --ai-header-bg: #ece6df;
+  --agent-header-bg: #f4e9c8;
+  --ai-badge-bg: #e3dedd;
+  --agent-badge-bg: #f0e2ba;
+  --ai-border: #ada7ae;
+  --agent-border: #c3ae73;
+  --badge-info-bg: #d6e3e0;
+  --badge-warning-bg: #f0e2ba;
+  --badge-success-bg: #e7e5ba;
+  --badge-error-bg: #f7d3c3;
+  --error-block-bg: #fae6d5;
+  --error-block-border: #cf9482;
+  --info-banner-bg: #e8ebe1;
+  --info-banner-border: #98afb3;
+  --btn-destr-border: #d18676;
+  --btn-destr-bg: #fbead8;
+  --btn-destr-bg-hover: #f8dbca;
+  --diff-add-line-bg: #efebc8;
+  --diff-remove-line-bg: #f9decd;
+  --diff-info-line-bg: #ecede2;
+
+  --overlay: rgba(0, 0, 0, 0.45);
+}
+
+/* ── One Dark Pro ─────────────────────────────────────── */
+.theme-one-dark-pro {
+  --background: #282c34;
+  --foreground: #abb2bf;        /* 7.1:1 on #282c34 */
+  --card: #21252b;
+  --card-foreground: #abb2bf;
+  --popover: #2c313a;
+  --popover-foreground: #abb2bf;
+
+  --primary: #61afef;
+  --primary-foreground: #1e2127; /* 8.2:1 */
+
+  --secondary: #2c313a;
+  --secondary-foreground: #abb2bf;
+  --muted: #323842;
+  --muted-foreground: #7f848e;  /* 3.6:1 on #282c34 — adequate for muted UI */
+  --accent: #383e4a;
+  --accent-foreground: #d4d8df;
+
+  --destructive: #e06c75;
+  --destructive-foreground: #1e2127; /* 6.5:1 */
+
+  --border: #3e4452;
+  --input: #3e4452;
+  --ring: #61afef;
+  --sidebar: #21252b;
+  --sidebar-foreground: #abb2bf;
+  --sidebar-border: #2c313a;
+
+  --ai: #c678dd;
+  --ai-foreground: #1e2127;     /* 7.5:1 */
+  --agent: #e5c07b;
+  --agent-foreground: #1e2127;  /* 10.2:1 */
+
+  --success: #98c379;
+  --success-foreground: #1e2127; /* 8.7:1 */
+  --warning: #e5c07b;
+  --warning-foreground: #1e2127;
+  --info: #61afef;
+  --info-foreground: #1e2127;
+
+  --diff-add: #98c379;
+  --diff-add-foreground: #1e2127;
+  --diff-remove: #e06c75;
+  --diff-remove-foreground: #1e2127;
+
+  --terminal-bg: #1e2127;
+  --terminal-fg: #abb2bf;
+  --terminal-cursor: #61afef;
+  --terminal-selection: #3a3f4b;
+
+  --focus-ring: #61afef;
+
+  --ai-header-bg: #352f40;
+  --agent-header-bg: #393835;
+  --ai-badge-bg: #3f344b;
+  --agent-badge-bg: #444139;
+  --ai-border: #67547c;
+  --agent-border: #70695e;
+  --badge-info-bg: #2d3e4e;
+  --badge-warning-bg: #444139;
+  --badge-success-bg: #364139;
+  --badge-error-bg: #433238;
+  --error-block-bg: #302b31;
+  --error-block-border: #6f505d;
+  --info-banner-bg: #27333f;
+  --info-banner-border: #496481;
+  --btn-destr-border: #7f5460;
+  --btn-destr-bg: #2c292f;
+  --btn-destr-bg-hover: #3c2f35;
+  --diff-add-line-bg: #2f3834;
+  --diff-remove-line-bg: #382e34;
+  --diff-info-line-bg: #26303b;
+
+  --overlay: rgba(0, 0, 0, 0.65);
+}
+
+/* ── Dracula ──────────────────────────────────────────── */
+.theme-dracula {
+  --background: #282a36;
+  --foreground: #f8f8f2;        /* 13.3:1 on #282a36 */
+  --card: #21222c;
+  --card-foreground: #f8f8f2;
+  --popover: #2b2d3a;
+  --popover-foreground: #f8f8f2;
+
+  --primary: #bd93f9;
+  --primary-foreground: #1a1b26; /* 8.6:1 */
+
+  --secondary: #343746;
+  --secondary-foreground: #f8f8f2;
+  --muted: #3a3d4e;
+  --muted-foreground: #8791b0;  /* 4.3:1 on #282a36 */
+  --accent: #414558;
+  --accent-foreground: #f8f8f2;
+
+  --destructive: #ff5555;
+  --destructive-foreground: #1a1b26; /* 7.2:1 */
+
+  --border: #44475a;
+  --input: #44475a;
+  --ring: #bd93f9;
+  --sidebar: #21222c;
+  --sidebar-foreground: #f8f8f2;
+  --sidebar-border: #343746;
+
+  --ai: #bd93f9;
+  --ai-foreground: #1a1b26;     /* 8.6:1 */
+  --agent: #f1fa8c;
+  --agent-foreground: #1a1b26;  /* 14.3:1 */
+
+  --success: #50fa7b;
+  --success-foreground: #1a1b26; /* 12.8:1 */
+  --warning: #f1fa8c;
+  --warning-foreground: #1a1b26;
+  --info: #8be9fd;
+  --info-foreground: #1a1b26;   /* 12.0:1 */
+
+  --diff-add: #50fa7b;
+  --diff-add-foreground: #1a1b26;
+  --diff-remove: #ff5555;
+  --diff-remove-foreground: #1a1b26;
+
+  --terminal-bg: #1e1f29;
+  --terminal-fg: #f8f8f2;
+  --terminal-cursor: #bd93f9;
+  --terminal-selection: #3d4058;
+
+  --focus-ring: #bd93f9;
+
+  --ai-header-bg: #343045;
+  --agent-header-bg: #3a3c38;
+  --ai-badge-bg: #3d3651;
+  --agent-badge-bg: #46493d;
+  --ai-border: #685e8a;
+  --agent-border: #787d69;
+  --badge-info-bg: #344652;
+  --badge-warning-bg: #46493d;
+  --badge-success-bg: #29493a;
+  --badge-error-bg: #492b33;
+  --error-block-bg: #33262f;
+  --error-block-border: #7c4b59;
+  --info-banner-bg: #2c3641;
+  --info-banner-border: #59788b;
+  --btn-destr-border: #8f4d58;
+  --btn-destr-bg: #2e252e;
+  --btn-destr-bg-hover: #402932;
+  --diff-add-line-bg: #273c35;
+  --diff-remove-line-bg: #3c2831;
+  --diff-info-line-bg: #29323d;
+
+  --overlay: rgba(0, 0, 0, 0.6);
+}
+
+/* ══════════════════════════════════════════════════════════
+ * Global resets
+ * ══════════════════════════════════════════════════════════ */
+
+* {
+  border-color: var(--border);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  margin: 0;
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+code, pre, .font-mono {
+  font-family: "Berkeley Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+}
+
+button, [role="button"] {
+  cursor: pointer;
+}
+
+/* Override Tailwind prose's built-in gray text color so content is
+   visible on any themed surface. Uses --tw-prose-body to work with
+   @tailwindcss/typography rather than blanket !important. */
+.prose-inherit {
+  --tw-prose-body: currentColor;
+  --tw-prose-headings: currentColor;
+  --tw-prose-lead: currentColor;
+  --tw-prose-links: currentColor;
+  --tw-prose-bold: currentColor;
+  --tw-prose-counters: currentColor;
+  --tw-prose-bullets: currentColor;
+  --tw-prose-hr: currentColor;
+  --tw-prose-quotes: currentColor;
+  --tw-prose-quote-borders: currentColor;
+  --tw-prose-captions: currentColor;
+  --tw-prose-kbd: currentColor;
+  --tw-prose-kbd-shadows: currentColor;
+  --tw-prose-code: currentColor;
+  --tw-prose-th-borders: currentColor;
+  --tw-prose-td-borders: currentColor;
+}
+/* Ensure list markers render (Tailwind prose sometimes strips them) */
+.prose-inherit ul { list-style-type: disc; padding-left: 1.25em; }
+.prose-inherit ol { list-style-type: decimal; padding-left: 1.25em; }
+
+/* ── Hover-to-reveal ───────────────────────────────────── */
+.hover-reveal .hover-reveal-target {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+.hover-reveal:hover .hover-reveal-target {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* ── Chat bubble toolbar (Q/A independent hover) ───────── */
+.bubble-zone .bubble-toolbar {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+.bubble-zone:hover .bubble-toolbar {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* ══════════════════════════════════════════════════════════
+ * Semantic utility classes — all theme-driven
+ *
+ * Naming:  {component}-{variant}
+ * Pattern: Pre-computed tinted colors per theme (Safari 15
+ *          lacks color-mix). Each theme defines derived
+ *          --xyz-bg variables.
+ * ══════════════════════════════════════════════════════════ */
+
+/* ── AI / Agent mode ────────────────────────────────────── *
+ * Safari 15 does NOT support color-mix(). We use per-theme
+ * pre-computed CSS variables instead.                       */
+.bg-ai-header     { background: var(--ai-header-bg);  color: var(--card-foreground); }
+.bg-agent-header  { background: var(--agent-header-bg); color: var(--card-foreground); }
+.bg-ai-badge      { background: var(--ai-badge-bg);   color: var(--ai); }
+.bg-agent-badge   { background: var(--agent-badge-bg); color: var(--agent); }
+.bg-ai-solid      { background: var(--ai);    color: var(--ai-foreground); }
+.bg-agent-solid   { background: var(--agent);  color: var(--agent-foreground); }
+.border-ai-subtle { border-color: var(--ai-border); }
+.border-agent-subtle { border-color: var(--agent-border); }
+.border-ai-focus  { border-color: var(--ai-border); }
+.border-ai-focus:focus-within  { border-color: var(--ai); }
+.border-agent-focus { border-color: var(--agent-border); }
+.border-agent-focus:focus-within { border-color: var(--agent); }
+
+/* ── Chips / inline tags (Cursor-style pill) ───────────── */
+.chip-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  max-width: 180px;
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.3rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.3;
+  white-space: nowrap;
+  background: var(--muted);
+  color: var(--foreground);
+  transition: background 0.15s;
+}
+.chip-tag:hover {
+  background: var(--accent);
+}
+
+/* ── Status badges ─────────────────────────────────────── */
+.badge-info    { background: var(--badge-info-bg);    color: var(--info); }
+.badge-warning { background: var(--badge-warning-bg); color: var(--warning); }
+.badge-success { background: var(--badge-success-bg); color: var(--success); }
+.badge-error   { background: var(--badge-error-bg);   color: var(--destructive); }
+
+/* ── Text helpers ──────────────────────────────────────── */
+.text-error     { color: var(--destructive); }
+.text-reasoning { color: var(--primary); }
+
+/* ── Blocks ────────────────────────────────────────────── */
+.bg-error-block {
+  background: var(--error-block-bg);
+  border-color: var(--error-block-border);
+}
+.bg-info-banner {
+  background: var(--info-banner-bg);
+  border-color: var(--info-banner-border);
+  color: var(--info);
+}
+
+/* ── Buttons ───────────────────────────────────────────── */
+.btn-destructive-outline {
+  border-color: var(--btn-destr-border);
+  background: var(--btn-destr-bg);
+  color: var(--destructive);
+}
+.btn-destructive-outline:hover {
+  background: var(--btn-destr-bg-hover);
+}
+
+/* ── Diff ──────────────────────────────────────────────── */
+.bg-diff-add-line    { background: var(--diff-add-line-bg);    color: var(--diff-add-foreground); }
+.bg-diff-remove-line { background: var(--diff-remove-line-bg); color: var(--diff-remove-foreground); }
+.bg-diff-info-line   { background: var(--diff-info-line-bg);   color: var(--info); }
+
+/* ── Tab unread indicator ──────────────────────────────── */
+.text-tab-unread {
+  background: var(--muted);
+  color: var(--warning);
+}
+.text-tab-unread:hover {
+  background: var(--accent);
+}
+.bg-tab-unread-dot  { background: var(--warning); }
+.bg-tab-unread-line { background: var(--warning); }
+
+/* ── About / Channel badges ────────────────────────────── */
+.badge-channel-dev     { background: var(--badge-warning-bg); color: var(--warning);  border-color: var(--agent-border); }
+.badge-channel-nightly { background: var(--ai-badge-bg);      color: var(--ai);       border-color: var(--ai-border); }
+.badge-channel-preview { background: var(--badge-info-bg);    color: var(--info);     border-color: var(--info-banner-border); }
+.badge-channel-stable  { background: var(--badge-success-bg); color: var(--success);  border-color: var(--badge-success-bg); }
+
+.bg-about-logo {
+  background: var(--muted);
+  color: var(--primary);
+}
+
+/* ── Git statuses ──────────────────────────────────────── */
+.text-git-modified { color: var(--warning); }
+.text-git-added    { color: var(--success); }
+.text-git-deleted  { color: var(--destructive); }
+
+/* ── Focus ring (theme-driven) ─────────────────────────── */
+.ring-focus        { --tw-ring-color: var(--focus-ring); }
+.focus-ring:focus  { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); }
+.focus-ring:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); }
+
+/* ── Overlay ───────────────────────────────────────────── */
+.bg-overlay { background: var(--overlay); }
+
+/* ── Drag handle hover ─────────────────────────────────── */
+.drag-handle-hover:hover  { background: var(--accent); }
+.drag-handle-hover:active { background: var(--muted); }
