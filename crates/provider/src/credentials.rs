@@ -60,10 +60,7 @@ impl CredentialsManager {
         }
 
         // 3. Try system keychain
-        match self.get_from_keychain(provider_id) {
-            Ok(key) => return Ok(key),
-            Err(_) => {}
-        }
+        if let Ok(key) = self.get_from_keychain(provider_id) { return Ok(key) }
 
         Err(ProviderError::Credential(format!(
             "No credential found for provider '{}'. Set {} or configure in Settings.",
