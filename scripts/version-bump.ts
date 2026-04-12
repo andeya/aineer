@@ -3,13 +3,16 @@
  * Unified version bump for both package.json and Cargo workspace.
  *
  * Usage:
- *   bun run version:bump <patch|minor|major|x.y.z>
+ *   bun run version:patch          # 0.1.0 → 0.1.1
+ *   bun run version:minor          # 0.1.0 → 0.2.0
+ *   bun run version:major          # 0.1.0 → 1.0.0
+ *   bun run version:set -- 2.3.4   # explicit version
  */
 import { readFileSync, writeFileSync } from "node:fs";
 
 const arg = process.argv[2];
 if (!arg) {
-  console.error("Usage: bun run version:bump <patch|minor|major|x.y.z>");
+  console.error("Usage: bun run version:{patch|minor|major} or bun run version:set -- x.y.z");
   process.exit(1);
 }
 

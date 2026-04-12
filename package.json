@@ -17,7 +17,10 @@
     "format": "cargo fmt --all && bunx biome format --write .",
     "format:check": "cargo fmt --all -- --check && bunx biome format .",
     "check": "cargo check --workspace && bun run build",
-    "version:bump": "bun run scripts/version-bump.ts"
+    "version:patch": "bun run scripts/version-bump.ts patch",
+    "version:minor": "bun run scripts/version-bump.ts minor",
+    "version:major": "bun run scripts/version-bump.ts major",
+    "version:set": "bun run scripts/version-bump.ts"
   },
   "dependencies": {
     "@codemirror/lang-json": "^6.0.2",
