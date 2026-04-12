@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/andeya/aineer/main/assets/logo.svg" width="96" alt="">
+  <img src="https://raw.githubusercontent.com/andeya/aineer/main/docs/images/logo.svg" width="96" alt="">
 </p>
 <h1 align="center">aineer</h1>
 <p align="center">
@@ -9,44 +9,44 @@
 <p align="center">
   <a href="https://github.com/andeya/aineer/actions"><img src="https://github.com/andeya/aineer/workflows/CI/badge.svg" alt="CI"></a>
   <a href="https://github.com/andeya/aineer/releases"><img src="https://img.shields.io/github/v/release/andeya/aineer" alt="Release"></a>
-  <a href="https://crates.io/crates/aineer-cli"><img src="https://img.shields.io/crates/v/aineer-cli.svg" alt="crates.io"></a>
-  <img src="https://raw.githubusercontent.com/andeya/aineer/main/assets/badge-platforms.svg" alt="macOS | Linux | Windows">
+  <a href="https://crates.io/crates/aineer"><img src="https://img.shields.io/crates/v/aineer.svg" alt="crates.io"></a>
+  <img src="https://raw.githubusercontent.com/andeya/aineer/main/docs/images/badge-platforms.svg" alt="macOS | Linux | Windows">
   <br>
   <a href="README.md">English</a>
 </p>
 
 ---
 
-**Aineer** 将你的终端变成 AI 编程伙伴。它读取工作区、理解项目上下文，帮你编写、重构、调试和交付代码——全程无需离开命令行。
+**Aineer** 是首个 **ADE（代理式开发环境）**——AI Agent 不是功能，它**就是**环境。Shell 命令、AI 对话和 Agent 自主执行在统一信息流中自然交织。它读取工作区、理解项目上下文，帮你编写、重构、调试和交付代码。
 
-安全 Rust 构建，**单个约 15 MB 二进制文件**。无守护进程，无运行时依赖——带上任意模型即可开始。
+安全 Rust 构建，基于 **Tauri 2 + React 19 + shadcn/ui + Prompt Kit + xterm.js**。默认桌面 GUI 模式，`--cli` 可切换经典终端模式。无守护进程，无运行时依赖——带上任意模型即可开始。
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/andeya/aineer/main/assets/ScreenShot_01.png" alt="Aineer REPL 截图" width="780">
+  <img src="https://raw.githubusercontent.com/andeya/aineer/main/docs/images/ScreenShot_01.png" alt="Aineer REPL 截图" width="780">
 </p>
 
 ## 为什么选择 Aineer？
 
 大多数 AI 编程 CLI 将你绑定在单一 Provider 上。Claude Code 依赖 Anthropic，Codex CLI 依赖 OpenAI。**Aineer 支持所有 Provider——包括本地模型。**
 
-|                                                                                   |   Aineer   | Claude Code  |    Codex CLI    |   Aider    |
-| --------------------------------------------------------------------------------- | :----------: | :----------: | :-------------: | :--------: |
-| **多 Provider**（Anthropic、OpenAI、xAI、Ollama…）                                | **全部内置** | 仅 Anthropic | OpenAI + Ollama |    支持    |
-| **零 Token 成本**（[免费使用主流模型](#token-free-gateway免费使用主流-ai-模型)） |   **支持**   |    不支持    |     不支持      |   不支持   |
-| **零配置本地 AI**（自动检测 Ollama）                                              |   **支持**   |    不支持    |  `--oss` 参数   | 需手动配置 |
-| **单一二进制**（无运行时依赖）                                                    |   **Rust**   |   Node.js    |     Node.js     |   Python   |
-| **多模态输入**（`@image.png`、剪贴板粘贴、拖拽上传）                              |   **支持**   |     支持     |      有限       |    有限    |
-| **MCP 协议**（外部工具集成）                                                      |   **支持**   |     支持     |      支持       |    支持    |
-| **插件系统** + Agent + Skill                                                      |   **支持**   |     支持     |     不支持      |   不支持   |
-| **权限模式**（只读 → 完全访问）                                                   |   **支持**   |     支持     |      支持       |    部分    |
-| **工具调用降级**（优雅降级）                                                      |   **支持**   |    不适用    |     不适用      |   不适用   |
-| **Git 工作流**（/commit、/pr、/diff、/branch）                                    |   **内置**   |   通过工具   |    通过工具     |  自动提交  |
-| **Vim 模式**                                                                      |   **支持**   |    不支持    |     不支持      |   不支持   |
-| **CI/CD 就绪**（JSON 输出、工具白名单）                                           |   **支持**   |     支持     |      支持       |    有限    |
-| **上下文缓存**（Gemini cachedContents、Anthropic prompt cache）                   |   **支持**   | 仅 Anthropic |     不支持      |   不支持   |
-| **基于模型的压缩**（LLM 总结历史上下文）                                          |   **支持**   |     支持     |     不支持      |   不支持   |
-| **流式工具执行**（并行工具、兄弟中止、进度事件）                                  |   **支持**   |     支持     |     不支持      |   不支持   |
-| **权限规则矩阵**（按工具和输入的 glob 匹配 allow/deny 规则）                     |   **支持**   |     支持     |    白名单模式   |   不支持   |
+|                                                                                  |     Aineer     | Claude Code  |    Codex CLI    |   Aider    |
+| -------------------------------------------------------------------------------- | :------------: | :----------: | :-------------: | :--------: |
+| **多 Provider**（Anthropic、OpenAI、xAI、Ollama…）                               |  **全部内置**  | 仅 Anthropic | OpenAI + Ollama |    支持    |
+| **零 Token 成本**（[免费使用主流模型](#token-free-gateway免费使用主流-ai-模型)） |    **支持**    |    不支持    |     不支持      |   不支持   |
+| **零配置本地 AI**（自动检测 Ollama）                                             |    **支持**    |    不支持    |  `--oss` 参数   | 需手动配置 |
+| **单一应用**（无运行时依赖）                                                     | **Rust+Tauri** |   Node.js    |     Node.js     |   Python   |
+| **多模态输入**（`@image.png`、剪贴板粘贴、拖拽上传）                             |    **支持**    |     支持     |      有限       |    有限    |
+| **MCP 协议**（外部工具集成）                                                     |    **支持**    |     支持     |      支持       |    支持    |
+| **插件系统** + Agent + Skill                                                     |    **支持**    |     支持     |     不支持      |   不支持   |
+| **权限模式**（只读 → 完全访问）                                                  |    **支持**    |     支持     |      支持       |    部分    |
+| **工具调用降级**（优雅降级）                                                     |    **支持**    |    不适用    |     不适用      |   不适用   |
+| **Git 工作流**（/commit、/pr、/diff、/branch）                                   |    **内置**    |   通过工具   |    通过工具     |  自动提交  |
+| **Vim 模式**                                                                     |    **支持**    |    不支持    |     不支持      |   不支持   |
+| **CI/CD 就绪**（JSON 输出、工具白名单）                                          |    **支持**    |     支持     |      支持       |    有限    |
+| **上下文缓存**（Gemini cachedContents、Anthropic prompt cache）                  |    **支持**    | 仅 Anthropic |     不支持      |   不支持   |
+| **基于模型的压缩**（LLM 总结历史上下文）                                         |    **支持**    |     支持     |     不支持      |   不支持   |
+| **流式工具执行**（并行工具、兄弟中止、进度事件）                                 |    **支持**    |     支持     |     不支持      |   不支持   |
+| **权限规则矩阵**（按工具和输入的 glob 匹配 allow/deny 规则）                     |    **支持**    |     支持     |   白名单模式    |   不支持   |
 
 **核心优势：**
 
@@ -83,28 +83,37 @@
 
 ## 安装
 
+**桌面应用（推荐）：**
+
+从 [Releases](https://github.com/andeya/aineer/releases) 下载最新安装包：
+
+| 平台                  | 文件                               |
+| --------------------- | ---------------------------------- |
+| macOS (Apple Silicon) | `Aineer_*_aarch64.dmg`             |
+| macOS (Intel)         | `Aineer_*_x64.dmg`                 |
+| Linux (x86_64)        | `aineer_*_amd64.deb` / `.AppImage` |
+| Linux (ARM64)         | `aineer_*_arm64.deb`               |
+| Windows (x86_64)      | `Aineer_*_x64-setup.exe`           |
+
+**仅 CLI 模式：**
+
 ```bash
 brew install andeya/aineer/aineer            # Homebrew（macOS / Linux）
-cargo install aineer-cli                        # Cargo（从 crates.io）
+cargo install aineer                           # Cargo（从 crates.io）
 ```
-
-或从 [Releases](https://github.com/andeya/aineer/releases) 下载预编译包：
-
-| 平台                  | 文件                                          |
-| --------------------- | --------------------------------------------- |
-| macOS (Apple Silicon) | `aineer-*-aarch64-apple-darwin.tar.gz`      |
-| macOS (Intel)         | `aineer-*-x86_64-apple-darwin.tar.gz`       |
-| Linux (x86_64)        | `aineer-*-x86_64-unknown-linux-gnu.tar.gz`  |
-| Linux (ARM64)         | `aineer-*-aarch64-unknown-linux-gnu.tar.gz` |
-| Windows (x86_64)      | `aineer-*-x86_64-pc-windows-msvc.zip`       |
 
 <details><summary>从源码构建</summary>
 
 ```bash
 git clone https://github.com/andeya/aineer.git
 cd aineer
-cargo install --path crates/aineer-cli --locked
+bun install                                    # 安装前端依赖
+cargo tauri build                              # 构建 Tauri 桌面应用
+# 或仅构建 CLI：
+cargo install --path crates/cli --locked
 ```
+
+**前置条件：** Rust 工具链、[Bun](https://bun.sh)、以及平台相关的 [Tauri 依赖](https://v2.tauri.app/start/prerequisites/)。
 
 </details>
 
@@ -223,12 +232,12 @@ aineer --model gemini/gemini-2.5-pro "审查架构设计"
 
 **亮点：**
 
-| 传统方式             | Token Free Gateway 方式  |
-| -------------------- | ------------------------ |
-| 购买 API Token       | **完全免费**             |
-| 按请求付费           | 无强制配额               |
-| 需要绑定信用卡       | 仅需浏览器登录           |
-| API Token 有泄露风险 | 凭据仅本地存储           |
+| 传统方式             | Token Free Gateway 方式 |
+| -------------------- | ----------------------- |
+| 购买 API Token       | **完全免费**            |
+| 按请求付费           | 无强制配额              |
+| 需要绑定信用卡       | 仅需浏览器登录          |
+| API Token 有泄露风险 | 凭据仅本地存储          |
 
 **支持的模型：** Claude Web、ChatGPT Web、Gemini Web、DeepSeek Web、Qwen Web（国际/国内）、Kimi、Doubao、Grok Web、GLM Web、Xiaomi MiMo 等，其中 11/13 个 Web 模型支持工具调用。
 
@@ -343,7 +352,7 @@ aineer
 | **Agent** | `/agents` `/skills` `/plugin`                                            |
 | **高级**  | `/ultraplan` `/bughunter` `/teleport` `/debug-tool-call` `/vim`          |
 | **诊断**  | `/doctor`                                                                |
-| **更新**  | `/update [check\|apply\|dismiss\|status]`                               |
+| **更新**  | `/update [check\|apply\|dismiss\|status]`                                |
 | **导航**  | `/init` `/permissions` `/exit`                                           |
 
 **快捷键：**
@@ -398,15 +407,15 @@ aineer -p "列出所有 TODO" --output-format json
 aineer --model sonnet --permission-mode read-only "审计代码"
 ```
 
-| 参数                         | 说明                                                 |
-| ---------------------------- | ---------------------------------------------------- |
-| `-p <文本>`                  | 一次性提问                                           |
-| `--model <名称>`             | 选择模型                                             |
-| `--output-format text\|json\|stream-json` | 输出格式（`stream-json` 以换行分隔事件流输出） |
-| `--allowedTools <列表>`      | 限制工具访问（逗号分隔）                             |
-| `--permission-mode <模式>`   | `read-only`、`workspace-write`、`danger-full-access` |
-| `--resume <文件>`            | 恢复已保存的会话                                     |
-| `-V`、`--version`            | 显示版本                                             |
+| 参数                                      | 说明                                                 |
+| ----------------------------------------- | ---------------------------------------------------- |
+| `-p <文本>`                               | 一次性提问                                           |
+| `--model <名称>`                          | 选择模型                                             |
+| `--output-format text\|json\|stream-json` | 输出格式（`stream-json` 以换行分隔事件流输出）       |
+| `--allowedTools <列表>`                   | 限制工具访问（逗号分隔）                             |
+| `--permission-mode <模式>`                | `read-only`、`workspace-write`、`danger-full-access` |
+| `--resume <文件>`                         | 恢复已保存的会话                                     |
+| `-V`、`--version`                         | 显示版本                                             |
 
 ### 权限模式
 
@@ -433,8 +442,8 @@ aineer -p "检查安全问题" \
 
 Aineer 从多个 JSON 文件合并设置（优先级从高到低）：
 
-| 文件                            | 路径示意（相对项目根 / 家目录）          | 作用域          | 是否提交         |
-| ------------------------------- | ---------------------------------------- | --------------- | ---------------- |
+| 文件                          | 路径示意（相对项目根 / 家目录）        | 作用域          | 是否提交         |
+| ----------------------------- | -------------------------------------- | --------------- | ---------------- |
 | `.aineer/settings.local.json` | `<项目根>/.aineer/settings.local.json` | 项目 — 本地覆盖 | 否（gitignored） |
 | `.aineer/settings.json`       | `<项目根>/.aineer/settings.json`       | 项目配置        | 是               |
 | `~/.aineer/settings.json`     | `$HOME/.aineer/settings.json`          | 用户 — 全局配置 | —                |
@@ -471,23 +480,23 @@ Aineer 从多个 JSON 文件合并设置（优先级从高到低）：
 }
 ```
 
-| 字段             | 类型     | 说明                                                                                                                                                                                                                                |
-| ---------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `model`          | string   | 默认模型——别名或全名（如 `"sonnet"`、`"claude-sonnet-4-6"`、`"ollama/qwen3-coder"`）                                                                                                                                                |
-| `modelAliases`   | object   | 自定义模型短名映射到完整模型 ID（如 `{"sonnet": "claude-sonnet-4-6"}`）                                                                                                                                                             |
-| `fallbackModels` | string[] | 主模型不可用时依序尝试的回退模型列表                                                                                                                                                                                                |
-| `permissionMode` | string   | `"read-only"`、`"workspace-write"` 或 `"danger-full-access"`                                                                                                                                                                        |
-| `env`            | object   | 启动时注入的环境变量。Shell export 优先。                                                                                                                                                                                           |
-| `providers`      | object   | 自定义 OpenAI 兼容 Provider：`baseUrl`、`apiKey` / `apiKeyEnv`、可选 **`apiVersion`**（Azure 等）、**`headers`**（自定义请求头）、`defaultModel` 等（见[示例](https://github.com/andeya/aineer/blob/main/settings.example.json)） |
-| `oauth`          | object   | 自定义 OAuth 配置（clientId、authorizeUrl、tokenUrl、scopes 等）                                                                                                                                                                    |
-| `credentials`    | object   | 凭据链配置（defaultSource、autoDiscover、claudeCode）                                                                                                                                                                               |
-| `mcpServers`     | object   | MCP 服务器定义（stdio、sse、http、ws）                                                                                                                                                                                              |
-| `sandbox`        | object   | 沙箱安全设置（enabled、filesystemMode、allowedMounts）                                                                                                                                                                              |
-| `enabledPlugins` | object   | 插件启用/禁用覆盖（`name@marketplace` → 布尔值的映射）                                                                                                                                                                              |
-| `plugins`        | object   | 插件管理（externalDirectories、installRoot）                                                                                                                                                                                        |
-| `hooks`          | object   | `PreToolUse` / `PostToolUse` Hook 的 Shell 命令                                                                                                                                                                                     |
-| `geminiCache`    | object   | Gemini 上下文缓存：`{ "enabled": true, "ttlSeconds": 3600 }` — 通过 Google cachedContents API 缓存 system prompt + 工具定义                                                                                                        |
-| `permissionRules`| array    | 精细权限规则：`[{ "tool": "bash", "input": "rm *", "decision": "always-deny" }]`                                                                                                                                                    |
+| 字段              | 类型     | 说明                                                                                                                                                                                                                              |
+| ----------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `model`           | string   | 默认模型——别名或全名（如 `"sonnet"`、`"claude-sonnet-4-6"`、`"ollama/qwen3-coder"`）                                                                                                                                              |
+| `modelAliases`    | object   | 自定义模型短名映射到完整模型 ID（如 `{"sonnet": "claude-sonnet-4-6"}`）                                                                                                                                                           |
+| `fallbackModels`  | string[] | 主模型不可用时依序尝试的回退模型列表                                                                                                                                                                                              |
+| `permissionMode`  | string   | `"read-only"`、`"workspace-write"` 或 `"danger-full-access"`                                                                                                                                                                      |
+| `env`             | object   | 启动时注入的环境变量。Shell export 优先。                                                                                                                                                                                         |
+| `providers`       | object   | 自定义 OpenAI 兼容 Provider：`baseUrl`、`apiKey` / `apiKeyEnv`、可选 **`apiVersion`**（Azure 等）、**`headers`**（自定义请求头）、`defaultModel` 等（见[示例](https://github.com/andeya/aineer/blob/main/settings.example.json)） |
+| `oauth`           | object   | 自定义 OAuth 配置（clientId、authorizeUrl、tokenUrl、scopes 等）                                                                                                                                                                  |
+| `credentials`     | object   | 凭据链配置（defaultSource、autoDiscover、claudeCode）                                                                                                                                                                             |
+| `mcpServers`      | object   | MCP 服务器定义（stdio、sse、http、ws）                                                                                                                                                                                            |
+| `sandbox`         | object   | 沙箱安全设置（enabled、filesystemMode、allowedMounts）                                                                                                                                                                            |
+| `enabledPlugins`  | object   | 插件启用/禁用覆盖（`name@marketplace` → 布尔值的映射）                                                                                                                                                                            |
+| `plugins`         | object   | 插件管理（externalDirectories、installRoot）                                                                                                                                                                                      |
+| `hooks`           | object   | `PreToolUse` / `PostToolUse` Hook 的 Shell 命令                                                                                                                                                                                   |
+| `geminiCache`     | object   | Gemini 上下文缓存：`{ "enabled": true, "ttlSeconds": 3600 }` — 通过 Google cachedContents API 缓存 system prompt + 工具定义                                                                                                       |
+| `permissionRules` | array    | 精细权限规则：`[{ "tool": "bash", "input": "rm *", "decision": "always-deny" }]`                                                                                                                                                  |
 
 运行时查看合并配置：`/config`、`/config env`、`/config model`
 
@@ -495,31 +504,31 @@ Aineer 从多个 JSON 文件合并设置（优先级从高到低）：
 
 通过 Shell export **或** settings.json 的 `"env"` 字段设置（Shell export 优先）：
 
-| 变量                       | 用途                                                                              |
-| -------------------------- | --------------------------------------------------------------------------------- |
-| `ANTHROPIC_API_KEY`        | Claude API Key                                                                    |
-| `ANTHROPIC_AUTH_TOKEN`     | Bearer Token（替代方式）                                                          |
-| `XAI_API_KEY`              | xAI / Grok API Key                                                                |
-| `OPENAI_API_KEY`           | OpenAI API Key                                                                    |
-| `OPENROUTER_API_KEY`       | OpenRouter API Key                                                                |
-| `GROQ_API_KEY`             | Groq Cloud API Key                                                                |
-| `GEMINI_API_KEY`           | Google Gemini API Key（[AI Studio 免费申请](https://aistudio.google.com/apikey)） |
-| `DASHSCOPE_API_KEY`        | 阿里云通义 DashScope（OpenAI 兼容模式）                                           |
-| `OLLAMA_HOST`              | Ollama 端点（如 `http://192.168.1.100:11434`）                                    |
+| 变量                     | 用途                                                                              |
+| ------------------------ | --------------------------------------------------------------------------------- |
+| `ANTHROPIC_API_KEY`      | Claude API Key                                                                    |
+| `ANTHROPIC_AUTH_TOKEN`   | Bearer Token（替代方式）                                                          |
+| `XAI_API_KEY`            | xAI / Grok API Key                                                                |
+| `OPENAI_API_KEY`         | OpenAI API Key                                                                    |
+| `OPENROUTER_API_KEY`     | OpenRouter API Key                                                                |
+| `GROQ_API_KEY`           | Groq Cloud API Key                                                                |
+| `GEMINI_API_KEY`         | Google Gemini API Key（[AI Studio 免费申请](https://aistudio.google.com/apikey)） |
+| `DASHSCOPE_API_KEY`      | 阿里云通义 DashScope（OpenAI 兼容模式）                                           |
+| `OLLAMA_HOST`            | Ollama 端点（如 `http://192.168.1.100:11434`）                                    |
 | `AINEER_WORKSPACE_ROOT`  | 覆盖工作区根路径                                                                  |
-| `AINEER_CONFIG_HOME`     | 覆盖全局配置目录（默认 `~/.aineer`）；`settings.json` 从该目录读取              |
+| `AINEER_CONFIG_HOME`     | 覆盖全局配置目录（默认 `~/.aineer`）；`settings.json` 从该目录读取                |
 | `AINEER_PERMISSION_MODE` | 默认权限模式                                                                      |
-| `NO_COLOR`                 | 禁用 ANSI 颜色                                                                    |
-| `CLICOLOR=0`               | 禁用 ANSI 颜色（替代方式）                                                        |
+| `NO_COLOR`               | 禁用 ANSI 颜色                                                                    |
+| `CLICOLOR=0`             | 禁用 ANSI 颜色（替代方式）                                                        |
 
 **凭据链（按 Provider 分别管理，优先级从高到低）：**
 
-| Provider           | 凭据链                                                                                                  |
-| ------------------ | ------------------------------------------------------------------------------------------------------- |
+| Provider           | 凭据链                                                                                              |
+| ------------------ | --------------------------------------------------------------------------------------------------- |
 | Anthropic (Claude) | `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` → Aineer OAuth (`aineer login`) → Claude Code 自动发现 |
-| xAI (Grok)         | `XAI_API_KEY`                                                                                           |
-| OpenAI             | `OPENAI_API_KEY`                                                                                        |
-| 自定义 Provider    | 内联 `apiKey` → `apiKeyEnv` 环境变量                                                                    |
+| xAI (Grok)         | `XAI_API_KEY`                                                                                       |
+| OpenAI             | `OPENAI_API_KEY`                                                                                    |
+| 自定义 Provider    | 内联 `apiKey` → `apiKeyEnv` 环境变量                                                                |
 
 **Claude Code 自动发现：** 如果你已安装 Claude Code 并登录（`claude login`），Aineer 会自动从 `~/.claude/.credentials.json`（或 macOS 钥匙串）发现凭据。这意味着你可以直接使用已有的 Claude 订阅，无需单独获取 API Key。
 
@@ -558,9 +567,9 @@ aineer init        # 根据检测到的技术栈自动生成
 
 Aineer 沿目录树向上查找并加载所有匹配的指令文件：
 
-| 文件                        | 用途                       |
-| --------------------------- | -------------------------- |
-| `.aineer/AINEER.md`     | 主要上下文（建议提交）     |
+| 文件                      | 用途                       |
+| ------------------------- | -------------------------- |
+| `.aineer/AINEER.md`       | 主要上下文（建议提交）     |
 | `AINEER.md`               | 兼容旧版（同样支持）       |
 | `AINEER.local.md`         | 个人覆盖（加入 gitignore） |
 | `.aineer/instructions.md` | 附加指令                   |
@@ -633,13 +642,13 @@ aineer --resume /path/to/session.jsonl     # 从 CLI 恢复会话
 
 REPL 内操作：
 
-| 命令                   | 功能                           |
-| ---------------------- | ------------------------------ |
-| `/session`             | 显示当前会话路径               |
-| `/resume <路径>`       | 加载并恢复之前的会话           |
-| `/export [路径]`       | 导出会话记录                   |
-| `/compact`             | 总结压缩上下文以释放 Token     |
-| `/clear`               | 清空对话历史                   |
+| 命令             | 功能                       |
+| ---------------- | -------------------------- |
+| `/session`       | 显示当前会话路径           |
+| `/resume <路径>` | 加载并恢复之前的会话       |
+| `/export [路径]` | 导出会话记录               |
+| `/compact`       | 总结压缩上下文以释放 Token |
+| `/clear`         | 清空对话历史               |
 
 欢迎横幅中包含 `aineer --resume …` 一键恢复命令，方便随时回到任何会话。
 
@@ -655,12 +664,12 @@ aineer update                   # 检查更新并自动安装
 
 REPL 内操作：
 
-| 命令                 | 功能                                           |
-| -------------------- | ---------------------------------------------- |
-| `/update`            | 检查新版本                                     |
-| `/update apply`      | 下载并安装最新版                               |
-| `/update dismiss`    | 忽略当前版本的更新通知                         |
-| `/update status`     | 显示当前版本、上次检查时间和已忽略的版本       |
+| 命令              | 功能                                     |
+| ----------------- | ---------------------------------------- |
+| `/update`         | 检查新版本                               |
+| `/update apply`   | 下载并安装最新版                         |
+| `/update dismiss` | 忽略当前版本的更新通知                   |
+| `/update status`  | 显示当前版本、上次检查时间和已忽略的版本 |
 
 更新器自动下载当前平台（macOS、Linux、Windows）对应的预构建二进制，原子替换可执行文件并保留备份。若当前平台无预构建包，会显示手动安装指引。
 
@@ -792,19 +801,26 @@ Aineer 在接近模型上下文限制时自动压缩。也可手动触发：
 
 ### Crate 结构
 
-所有 crate 发布到 crates.io。安装 `aineer-cli`——其余为内部依赖。
+`aineer` crate（位于 `app/`）是 Tauri 2 桌面应用，同时包含 GUI 和 CLI 模式。其余 crate 为内部依赖。
 
-| Crate               | 角色                         |
-| ------------------- | ---------------------------- |
-| `aineer-cli`      | CLI 二进制（**安装这个**）   |
-| `aineer-core`     | 共享类型、事件、观察者 trait |
-| `aineer-runtime`  | 核心运行时引擎               |
-| `aineer-api`      | AI Provider API 客户端       |
-| `aineer-mcp`      | MCP 协议客户端与传输层       |
-| `aineer-tools`    | 工具定义与执行               |
-| `aineer-plugins`  | 插件系统和 Hook              |
-| `aineer-commands` | 斜杠命令                     |
-| `aineer-lsp`      | LSP 客户端集成               |
+| Crate                    | 角色                                                |
+| ------------------------ | --------------------------------------------------- |
+| `aineer`                 | Tauri 2 桌面应用 — GUI（默认）或 CLI（`--cli`）模式，内置 PTY 管理器（portable-pty） |
+| `aineer-cli`             | CLI 模式库（嵌入 `aineer`，提供 REPL 交互）         |
+| `aineer-protocol`        | 共享类型、事件、凭证                                |
+| `aineer-api`             | AI Provider API 客户端                              |
+| `aineer-provider`        | Provider 注册表（多 Provider 管理）                 |
+| `aineer-engine`          | Agent 引擎（对话、规划、执行）                      |
+| `aineer-gateway`         | 嵌入式 OpenAI 兼容网关                              |
+| `aineer-settings`        | 统一设置系统（3 层合并：user/project/local）        |
+| `aineer-memory`          | 记忆系统（项目知识 + 用户偏好 + 决策日志）          |
+| `aineer-mcp`             | MCP 协议客户端与传输层                              |
+| `aineer-tools`           | 工具定义与执行                                      |
+| `aineer-plugins`         | 插件系统和 Hook                                     |
+| `aineer-lsp`             | LSP 客户端集成                                      |
+| `aineer-channels`        | 多渠道触达（飞书/微信/WhatsApp bot）                |
+| `aineer-auto-update`     | 自动更新机制                                        |
+| `aineer-release-channel` | 发布渠道管理（dev/nightly/preview/stable）          |
 
 ---
 
