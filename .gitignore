@@ -1,7 +1,17 @@
-# Build artifacts
+# Rust build artifacts
 /target/
+app/target/
+**/*.rs.bk
 
-# Aineer local artifacts (fine-grained rules live in .aineer/.gitignore)
+# Node / Frontend
+node_modules/
+dist/
+bun.lock
+*.local
+
+# Tauri generated
+.tauri/
+app/gen/schemas
 
 # Environment
 .env
@@ -10,23 +20,19 @@
 
 # IDE
 .idea/
-.vscode/
+.vscode/*
+!.vscode/extensions.json
+.cursor/*
 *.swp
 *.swo
+*.sw?
 *.orig
 
 # macOS
 .DS_Store
-.AppleDouble
-.LSOverride
-
-# Rust
-**/*.rs.bk
 
 # Logs
 *.log
-*.txt
-*.out
 
 # Keys / secrets
 *.pem
