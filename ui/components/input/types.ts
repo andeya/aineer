@@ -29,6 +29,7 @@ export interface InputBarProps {
   isStreaming: boolean;
   slashCommands?: SlashCommandDef[];
   queueSize?: number;
+  projectRoot?: string;
 }
 
 export interface ModeDraft {

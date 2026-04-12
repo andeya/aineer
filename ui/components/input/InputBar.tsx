@@ -11,7 +11,7 @@ import {
   PromptInputTextarea,
 } from "@/components/ui/prompt-input";
 import { useI18n } from "@/lib/i18n";
-import type { FileEntry } from "@/lib/tauri";
+import type { CompletionItem, FileEntry } from "@/lib/tauri";
 import {
   AT_MENTIONS,
   type AtMention,
@@ -48,6 +48,7 @@ export function InputBar({
   isStreaming,
   slashCommands,
   queueSize = 0,
+  projectRoot,
 }: InputBarProps) {
   const { t } = useI18n();
 
@@ -116,7 +117,8 @@ export function InputBar({
   const [showMentions, setShowMentions] = useState(false);
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [showShellComplete, setShowShellComplete] = useState(false);
-  const [shellCompletions, setShellCompletions] = useState<string[]>([]);
+  const [shellCompletions, setShellCompletions] = useState<CompletionItem[]>([]);
+  const shellPrefixRef = useRef("");
 
   const [filePickerQuery, setFilePickerQuery] = useState("");
   const [filePickerEntries, setFilePickerEntries] = useState<FileEntry[]>([]);
@@ -463,26 +465,44 @@ export function InputBar({
   ]);
 
   const requestShellComplete = useCallback(
-    async (partial: string) => {
-      if (!partial.trim()) return;
+    async (input: string) => {
+      if (!input.trim()) return;
+      const lastSpace = input.lastIndexOf(" ");
+      const prefix = lastSpace >= 0 ? input.substring(0, lastSpace + 1) : "";
+      const word = lastSpace >= 0 ? input.substring(lastSpace + 1) : input;
+      const isFirstWord = lastSpace < 0;
+      shellPrefixRef.current = prefix;
       try {
         const { shellComplete } = await import("@/lib/tauri");
-        const results = await shellComplete(partial);
-        if (results.length > 0) {
-          if (results.length === 1) {
-            setValue(`${results[0]} `);
-            setShowShellComplete(false);
-          } else {
-            setShellCompletions(results);
-            setShowShellComplete(true);
-            setSelectedIdx(0);
-          }
+        const results = await shellComplete(word, projectRoot || undefined, isFirstWord);
+        if (results.length === 0) return;
+
+        if (results.length === 1) {
+          const r = results[0];
+          const suffix = r.isDir ? "/" : " ";
+          setValue(`${prefix}${r.value}${suffix}`);
+          setShowShellComplete(false);
+          return;
         }
+
+        // Auto-fill the longest common prefix before showing the menu
+        const values = results.map((r) => r.value);
+        let lcp = values[0];
+        for (const v of values) {
+          while (lcp && !v.startsWith(lcp)) lcp = lcp.slice(0, -1);
+        }
+        if (lcp.length > word.length) {
+          setValue(`${prefix}${lcp}`);
+        }
+
+        setShellCompletions(results);
+        setShowShellComplete(true);
+        setSelectedIdx(0);
       } catch {
         /* silently ignore */
       }
     },
-    [setValue],
+    [setValue, projectRoot],
   );
 
   const handlePickerKeyDown = useCallback(
@@ -561,15 +581,15 @@ export function InputBar({
       }
 
       if (activePopup) {
-        const items = showSlash
-          ? filteredSlash
+        const itemCount = showSlash
+          ? filteredSlash.length
           : showMentions
-            ? filteredMentions
-            : shellCompletions.map((c) => ({ name: c }));
+            ? filteredMentions.length
+            : shellCompletions.length;
 
         if (e.key === "ArrowDown") {
           e.preventDefault();
-          setSelectedIdx((i) => Math.min(i + 1, items.length - 1));
+          setSelectedIdx((i) => Math.min(i + 1, itemCount - 1));
           return;
         }
         if (e.key === "ArrowUp") {
@@ -579,14 +599,17 @@ export function InputBar({
         }
         if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
           e.preventDefault();
-          const item = items[selectedIdx];
-          if (item) {
-            if (showSlash) {
-              selectSlashCommand(item.name);
-            } else if (showMentions) {
-              selectMention(item as unknown as AtMention);
-            } else {
-              setValue(`${item.name} `);
+          if (showSlash) {
+            const item = filteredSlash[selectedIdx];
+            if (item) selectSlashCommand(item.name);
+          } else if (showMentions) {
+            const item = filteredMentions[selectedIdx];
+            if (item) selectMention(item as unknown as AtMention);
+          } else {
+            const comp = shellCompletions[selectedIdx];
+            if (comp) {
+              const suffix = comp.isDir ? "/" : " ";
+              setValue(`${shellPrefixRef.current}${comp.value}${suffix}`);
               setShowShellComplete(false);
             }
           }
@@ -734,7 +757,8 @@ export function InputBar({
           selectedIdx={selectedIdx}
           onHoverIndex={setSelectedIdx}
           onSelect={(comp) => {
-            setValue(`${comp} `);
+            const suffix = comp.isDir ? "/" : " ";
+            setValue(`${shellPrefixRef.current}${comp.value}${suffix}`);
             setShowShellComplete(false);
           }}
         />
@@ -761,7 +785,11 @@ export function InputBar({
           );
         })}
         <Badge variant="outline" className="ml-auto text-[10px] text-muted-foreground">
-          {mode === "shell" ? t.input.tabToComplete : t.input.emptyTabToSwitch}
+          {!value.trim()
+            ? t.input.emptyTabToSwitch
+            : mode === "shell"
+              ? t.input.tabToComplete
+              : null}
         </Badge>
       </div>
 

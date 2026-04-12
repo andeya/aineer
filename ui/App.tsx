@@ -264,6 +264,7 @@ function MainApp() {
             isStreaming={chat.isStreaming}
             slashCommands={workspace.slashCommands}
             queueSize={queuedTasks.length}
+            projectRoot={workspace.projectRoot}
           />
           <StatusBar
             cwd={workspace.projectRoot || "~"}

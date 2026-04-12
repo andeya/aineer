@@ -1,7 +1,8 @@
 "use client";
 
-import { Terminal } from "lucide-react";
+import { Folder, Terminal } from "lucide-react";
 import { forwardRef } from "react";
+import type { CompletionItem } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 
 export const CommandMenu = forwardRef<HTMLDivElement, { children: React.ReactNode }>(
@@ -87,26 +88,32 @@ export function ShellCompletionMenu({
   onSelect,
 }: {
   menuRef: React.RefObject<HTMLDivElement | null>;
-  completions: string[];
+  completions: CompletionItem[];
   selectedIdx: number;
   onHoverIndex: (i: number) => void;
-  onSelect: (value: string) => void;
+  onSelect: (item: CompletionItem) => void;
 }) {
   if (completions.length === 0) return null;
 
   return (
     <CommandMenu ref={menuRef}>
-      {completions.map((comp, i) => (
-        <CommandMenuItem
-          key={comp}
-          selected={i === selectedIdx}
-          onMouseEnter={() => onHoverIndex(i)}
-          onClick={() => onSelect(comp)}
-        >
-          <Terminal className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <span className="font-mono">{comp}</span>
-        </CommandMenuItem>
-      ))}
+      {completions.map((comp, i) => {
+        const Icon = comp.isDir ? Folder : Terminal;
+        return (
+          <CommandMenuItem
+            key={comp.value}
+            selected={i === selectedIdx}
+            onMouseEnter={() => onHoverIndex(i)}
+            onClick={() => onSelect(comp)}
+          >
+            <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <span className="font-mono">
+              {comp.value}
+              {comp.isDir ? "/" : ""}
+            </span>
+          </CommandMenuItem>
+        );
+      })}
     </CommandMenu>
   );
 }
