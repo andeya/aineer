@@ -33,6 +33,16 @@ impl ReleaseChannel {
         }
     }
 
+    /// Version suffix for display strings, e.g. "-dev", "-nightly", "" for stable.
+    pub fn version_suffix(self) -> &'static str {
+        match self {
+            Self::Dev => "-dev",
+            Self::Nightly => "-nightly",
+            Self::Preview => "-preview",
+            Self::Stable => "",
+        }
+    }
+
     pub fn app_id(self) -> &'static str {
         match self {
             Self::Dev => "dev.aineer.Aineer-Dev",
