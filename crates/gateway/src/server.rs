@@ -14,6 +14,7 @@ use aineer_api::{
     ContentBlockDelta, InputContentBlock, InputMessage, MessageRequest, ProviderClient,
     StreamEvent, SystemBlock,
 };
+use aineer_webai::{OpenAiStreamResult, WebAiEngine};
 
 use crate::config::GatewayConfig;
 use crate::types::*;
@@ -28,12 +29,14 @@ pub enum GatewayStatus {
 
 pub struct GatewayServer {
     config: GatewayConfig,
+    webai: Option<WebAiEngine>,
     status_tx: watch::Sender<GatewayStatus>,
     status_rx: watch::Receiver<GatewayStatus>,
 }
 
 struct AppState {
     config: GatewayConfig,
+    webai: Option<WebAiEngine>,
 }
 
 impl GatewayServer {
@@ -41,9 +44,15 @@ impl GatewayServer {
         let (status_tx, status_rx) = watch::channel(GatewayStatus::Stopped);
         Self {
             config,
+            webai: None,
             status_tx,
             status_rx,
         }
+    }
+
+    pub fn with_webai(mut self, engine: WebAiEngine) -> Self {
+        self.webai = Some(engine);
+        self
     }
 
     pub fn status(&self) -> GatewayStatus {
@@ -63,6 +72,7 @@ impl GatewayServer {
         let addr: SocketAddr = self.config.listen_addr.parse()?;
         let state = Arc::new(AppState {
             config: self.config.clone(),
+            webai: self.webai.clone(),
         });
 
         let app = Router::new()
@@ -91,11 +101,10 @@ async fn health_handler() -> &'static str {
     "ok"
 }
 
-async fn models_handler() -> Json<ModelListResponse> {
+async fn models_handler(State(state): State<Arc<AppState>>) -> Json<ModelListResponse> {
     let now = now_secs();
 
-    let known_models = aineer_api::list_known_models(None);
-    let data: Vec<ModelInfo> = known_models
+    let mut data: Vec<ModelInfo> = aineer_api::list_known_models(None)
         .into_iter()
         .map(|(id, kind)| ModelInfo {
             id: id.to_string(),
@@ -104,6 +113,20 @@ async fn models_handler() -> Json<ModelListResponse> {
             owned_by: format!("{kind:?}"),
         })
         .collect();
+
+    if let Some(ref engine) = state.webai {
+        for provider in engine.list_providers() {
+            for model in engine.list_models(&provider.id) {
+                let short_name = provider.id.strip_suffix("-web").unwrap_or(&provider.id);
+                data.push(ModelInfo {
+                    id: format!("webai/{}/{}", short_name, model.id),
+                    object: "model".to_string(),
+                    created: now,
+                    owned_by: format!("webai:{}", provider.name),
+                });
+            }
+        }
+    }
 
     Json(ModelListResponse {
         object: "list".to_string(),
@@ -124,6 +147,10 @@ async fn completions_handler(
     } else {
         req.model.clone()
     };
+
+    if WebAiEngine::parse_webai_model(&model).is_some() {
+        return handle_webai(state, &req, &model).await;
+    }
 
     let (system, messages) = convert_messages(&req.messages);
     let max_tokens = req
@@ -454,4 +481,268 @@ fn now_secs() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+// ── WebAI handler ───────────────────────────────────────────────────
+
+async fn handle_webai(
+    state: Arc<AppState>,
+    req: &ChatCompletionRequest,
+    model: &str,
+) -> axum::response::Response {
+    let engine = match &state.webai {
+        Some(e) => e,
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(ErrorResponse::new(
+                    "WebAI engine is not available (no Tauri runtime)".to_string(),
+                    "service_unavailable",
+                )),
+            )
+                .into_response();
+        }
+    };
+
+    let (provider_name, specific_model) = match WebAiEngine::parse_webai_model(model) {
+        Some(parsed) => parsed,
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse::new(
+                    format!("Invalid webai model format: {model}"),
+                    "invalid_request_error",
+                )),
+            )
+                .into_response();
+        }
+    };
+
+    let model_id = specific_model.unwrap_or("").to_string();
+
+    let chat_messages: Vec<aineer_webai::tool_calling::converter::ChatMessage> = req
+        .messages
+        .iter()
+        .map(|m| aineer_webai::tool_calling::converter::ChatMessage {
+            role: m.role.clone(),
+            content: m.content.clone(),
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        })
+        .collect();
+
+    let tools: Option<Vec<aineer_webai::tool_calling::converter::ToolDefinition>> =
+        req.tools.as_ref().map(|tools_val| {
+            tools_val
+                .iter()
+                .filter_map(|t| serde_json::from_value(t.clone()).ok())
+                .collect()
+        });
+
+    let tool_choice: Option<aineer_webai::tool_calling::converter::ToolChoice> = req
+        .tool_choice
+        .as_ref()
+        .and_then(|tc| serde_json::from_value(tc.clone()).ok());
+
+    let result = engine
+        .send_openai(
+            provider_name,
+            &model_id,
+            &chat_messages,
+            tools.as_deref(),
+            tool_choice.as_ref(),
+        )
+        .await;
+
+    let stream = req.stream.unwrap_or(false);
+    let now = now_secs();
+
+    match result {
+        Ok(OpenAiStreamResult::Streaming(rx)) => {
+            if stream {
+                webai_stream_sse(rx, model, now).into_response()
+            } else {
+                webai_collect_response(rx, model, now).await.into_response()
+            }
+        }
+        Ok(OpenAiStreamResult::Completed(parsed)) => {
+            webai_parsed_response(parsed, model, now, stream).into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse::new(format!("WebAI error: {e}"), "api_error")),
+        )
+            .into_response(),
+    }
+}
+
+fn webai_stream_sse(
+    mut rx: tokio::sync::mpsc::Receiver<String>,
+    model: &str,
+    now: u64,
+) -> Sse<impl futures_core::Stream<Item = Result<Event, anyhow::Error>>> {
+    let model = model.to_string();
+    let sse_stream = async_stream::stream! {
+        let id = format!("chatcmpl-webai-{now}");
+
+        let initial = ChatCompletionChunk {
+            id: id.clone(),
+            object: "chat.completion.chunk".into(),
+            created: now,
+            model: model.clone(),
+            choices: vec![ChatChunkChoice {
+                index: 0,
+                delta: ChatDelta { role: Some("assistant".into()), content: None },
+                finish_reason: None,
+            }],
+        };
+        yield Ok(Event::default().data(serde_json::to_string(&initial).unwrap_or_default()));
+
+        while let Some(chunk) = rx.recv().await {
+            let c = ChatCompletionChunk {
+                id: id.clone(),
+                object: "chat.completion.chunk".into(),
+                created: now,
+                model: model.clone(),
+                choices: vec![ChatChunkChoice {
+                    index: 0,
+                    delta: ChatDelta { role: None, content: Some(chunk) },
+                    finish_reason: None,
+                }],
+            };
+            yield Ok(Event::default().data(serde_json::to_string(&c).unwrap_or_default()));
+        }
+
+        let final_c = ChatCompletionChunk {
+            id: id.clone(),
+            object: "chat.completion.chunk".into(),
+            created: now,
+            model: model.clone(),
+            choices: vec![ChatChunkChoice {
+                index: 0,
+                delta: ChatDelta { role: None, content: None },
+                finish_reason: Some("stop".into()),
+            }],
+        };
+        yield Ok(Event::default().data(serde_json::to_string(&final_c).unwrap_or_default()));
+        yield Ok(Event::default().data("[DONE]"));
+    };
+
+    Sse::new(sse_stream).keep_alive(KeepAlive::default())
+}
+
+async fn webai_collect_response(
+    mut rx: tokio::sync::mpsc::Receiver<String>,
+    model: &str,
+    now: u64,
+) -> Json<ChatCompletionResponse> {
+    let mut text = String::new();
+    while let Some(chunk) = rx.recv().await {
+        text.push_str(&chunk);
+    }
+    let tokens = (text.len() as u32).div_ceil(4);
+    Json(ChatCompletionResponse {
+        id: format!("chatcmpl-webai-{now}"),
+        object: "chat.completion".into(),
+        created: now,
+        model: model.to_string(),
+        choices: vec![ChatChoice {
+            index: 0,
+            message: ChatMessage {
+                role: "assistant".into(),
+                content: Some(serde_json::Value::String(text)),
+            },
+            finish_reason: Some("stop".into()),
+        }],
+        usage: Some(UsageInfo {
+            prompt_tokens: 0,
+            completion_tokens: tokens,
+            total_tokens: tokens,
+        }),
+    })
+}
+
+fn webai_parsed_response(
+    parsed: aineer_webai::tool_calling::converter::ParsedResponse,
+    model: &str,
+    now: u64,
+    stream: bool,
+) -> axum::response::Response {
+    let model = model.to_string();
+    if stream {
+        let sse_stream = async_stream::stream! {
+            let id = format!("chatcmpl-webai-{now}");
+
+            let initial = ChatCompletionChunk {
+                id: id.clone(),
+                object: "chat.completion.chunk".into(),
+                created: now,
+                model: model.clone(),
+                choices: vec![ChatChunkChoice {
+                    index: 0,
+                    delta: ChatDelta { role: Some("assistant".into()), content: None },
+                    finish_reason: None,
+                }],
+            };
+            yield Ok::<_, anyhow::Error>(Event::default().data(serde_json::to_string(&initial).unwrap_or_default()));
+
+            if let Some(ref content) = parsed.content {
+                let c = ChatCompletionChunk {
+                    id: id.clone(),
+                    object: "chat.completion.chunk".into(),
+                    created: now,
+                    model: model.clone(),
+                    choices: vec![ChatChunkChoice {
+                        index: 0,
+                        delta: ChatDelta { role: None, content: Some(content.clone()) },
+                        finish_reason: None,
+                    }],
+                };
+                yield Ok(Event::default().data(serde_json::to_string(&c).unwrap_or_default()));
+            }
+
+            let final_c = ChatCompletionChunk {
+                id: id.clone(),
+                object: "chat.completion.chunk".into(),
+                created: now,
+                model: model.clone(),
+                choices: vec![ChatChunkChoice {
+                    index: 0,
+                    delta: ChatDelta { role: None, content: None },
+                    finish_reason: Some(parsed.finish_reason.clone()),
+                }],
+            };
+            yield Ok(Event::default().data(serde_json::to_string(&final_c).unwrap_or_default()));
+            yield Ok(Event::default().data("[DONE]"));
+        };
+        Sse::new(sse_stream)
+            .keep_alive(KeepAlive::default())
+            .into_response()
+    } else {
+        let content_val = parsed
+            .content
+            .map(serde_json::Value::String)
+            .unwrap_or(serde_json::Value::Null);
+        Json(ChatCompletionResponse {
+            id: format!("chatcmpl-webai-{now}"),
+            object: "chat.completion".into(),
+            created: now,
+            model,
+            choices: vec![ChatChoice {
+                index: 0,
+                message: ChatMessage {
+                    role: "assistant".into(),
+                    content: Some(content_val),
+                },
+                finish_reason: Some(parsed.finish_reason),
+            }],
+            usage: Some(UsageInfo {
+                prompt_tokens: 0,
+                completion_tokens: 0,
+                total_tokens: 0,
+            }),
+        })
+        .into_response()
+    }
 }

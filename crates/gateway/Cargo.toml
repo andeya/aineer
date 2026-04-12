@@ -11,6 +11,7 @@ repository.workspace = true
 [dependencies]
 aineer-api.workspace = true
 aineer-protocol.workspace = true
+aineer-webai.workspace = true
 axum = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
