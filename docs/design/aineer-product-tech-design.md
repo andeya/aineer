@@ -1333,6 +1333,14 @@ Block 间距 8px
 
 # 篇三 · 技术架构与实施
 
+> **实现状态快照（与仓库对齐）**
+>
+> - **CLI REPL**（`--cli`）：完整 Provider、工具、MCP、会话等与 `crates/cli` + `crates/engine` 一致，为能力基准。
+> - **桌面 GUI**：Shell/PTY、设置、主题在 `app/` + `ui/`；**AI 对话**通过 `send_ai_message` → `desktop` 模块流式转发 `ai_stream_delta` 事件（含 `kind: text|thinking` 分离）；**Agent** 通过 `start_agent` → `desktop` 模块运行工具回路（`PermissionMode::Allow`，GUI 审批待接），支持 `stop_agent` 取消。两者均使用 `spawn_blocking` + 统一 Block ID。
+> - **已合并/未单独成 crate**：主题与 Design Token 在 [`ui/lib/theme.ts`](../../ui/lib/theme.ts) 与 `globals.css`；桌面终端 PTY 在 `app` 内使用 **`portable-pty`**，无独立 `crates/terminal`、无 `crates/theme`。
+> - **当前限制**：桌面 AI 对话为 single-turn 无状态（每次重建 session）；multi-turn 持久会话为后续迭代。
+> - **规划中**：`tantivy` 跨 Session 全文检索、`crates/channels` 具体适配器实现、`desktop` 模块抽取为独立 crate。详细路线图见仓库根 `README.md` / `README_CN.md`。
+
 ---
 
 ## 3. 项目结构（Tauri 2 + React 架构）
@@ -1381,6 +1389,7 @@ aineer/
 │   │   └── globals.css             # Tailwind 4 + CSS variables (shadcn/ui theming)
 │   ├── lib/
 │   │   ├── utils.ts                # cn() 等工具函数
+│   │   ├── theme.ts                # 主题 / design token 与系统偏好
 │   │   ├── types.ts                # ChatMessage / SlashCommand / InputMode 等类型定义
 │   │   └── tauri.ts                # Tauri IPC 封装层 (invoke wrapper + graceful fallback)
 │   └── components/
@@ -1415,11 +1424,9 @@ aineer/
 │   ├── mcp/                         # MCP 客户端
 │   ├── lsp/                         # LSP 客户端
 │   ├── plugins/                     # 插件系统
-│   ├── cli/                         # TUI REPL (被 app crate 依赖，--cli 模式调用)
+│   ├── cli/                         # TUI REPL + desktop 桥接模块 (桌面 GUI 复用 Provider 流式 + 工具栈)
 │   ├── provider/                    # Provider 注册表
 │   ├── settings/                    # 统一设置系统
-│   ├── theme/                       # 主题系统 (CSS variables 映射)
-│   ├── terminal/                    # 终端后端 (PTY, alacritty_terminal)
 │   ├── memory/                      # 记忆系统
 │   ├── channels/                    # 多渠道触达
 │   ├── auto_update/                 # 自动更新
@@ -2733,8 +2740,8 @@ anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-# Terminal
-alacritty_terminal = "0.25"
+# Terminal (desktop PTY)
+portable-pty = "0.9"
 
 # Git
 git2 = { version = "0.19", default-features = false }
@@ -2749,8 +2756,8 @@ syntect = "5"
 # Credentials
 keyring = "3"
 
-# Search
-tantivy = "0.22"
+# Search（规划中：跨 Session 全文索引，当前仓库未加入 workspace 依赖）
+# tantivy = "0.22"
 
 # Utilities
 chrono = { version = "0.4", features = ["serde"] }
@@ -2764,8 +2771,6 @@ aineer-protocol = { version = "*", path = "crates/protocol" }
 aineer-api = { version = "*", path = "crates/api" }
 aineer-provider = { version = "*", path = "crates/provider" }
 aineer-settings = { version = "*", path = "crates/settings" }
-aineer-theme = { version = "*", path = "crates/theme" }
-aineer-terminal = { version = "*", path = "crates/terminal" }
 aineer-engine = { version = "*", path = "crates/engine" }
 aineer-tools = { version = "*", path = "crates/tools" }
 aineer-gateway = { version = "*", path = "crates/gateway" }
@@ -2902,21 +2907,29 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
+thiserror.workspace = true
+portable-pty.workspace = true
+dirs = "6"
 
 # Workspace crates (business logic)
-aineer-engine.workspace = true
-aineer-terminal.workspace = true
-aineer-provider.workspace = true
-aineer-settings.workspace = true
-aineer-memory.workspace = true
-aineer-cli.workspace = true
-aineer-release-channel.workspace = true
-aineer-tools.workspace = true
-aineer-protocol.workspace = true
 aineer-api.workspace = true
+aineer-auto-update.workspace = true
+aineer-channels.workspace = true
+aineer-cli.workspace = true
+aineer-engine.workspace = true
+aineer-gateway.workspace = true
+aineer-lsp.workspace = true
+aineer-mcp.workspace = true
+aineer-memory.workspace = true
+aineer-plugins.workspace = true
+aineer-provider.workspace = true
+aineer-protocol.workspace = true
+aineer-release-channel.workspace = true
+aineer-settings.workspace = true
+aineer-tools.workspace = true
 ```
 
-> **注意**：`crates/ui` crate 已删除。Block 数据模型和 Session 持久化逻辑直接在 `app/src/blocks/` 和 `app/src/session.rs` 中实现。
+> **注意**：`crates/ui` crate 已删除。Block 数据模型和 Session 持久化逻辑直接在 `app/src/blocks/` 和 `app/src/session.rs` 中实现。桌面终端使用 **`portable-pty`**（非独立 `aineer-terminal` crate）；主题在前端 `ui/`。
 
 ---
 
