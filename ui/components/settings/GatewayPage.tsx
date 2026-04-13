@@ -69,7 +69,8 @@ const STATUS_STYLE: Record<StatusKey, { dot: string; badge: string }> = {
   },
   stopped: {
     dot: "bg-zinc-400 dark:bg-zinc-500",
-    badge: "border border-zinc-300 dark:border-zinc-600 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400",
+    badge:
+      "border border-zinc-300 dark:border-zinc-600 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400",
   },
   error: {
     dot: "bg-red-500",

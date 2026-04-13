@@ -1,103 +1,110 @@
-import { Check, Globe, Loader2, LogIn, LogOut, X } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
+import { Loader2, LogIn, LogOut, PowerOff, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/lib/i18n";
 import {
+  type AppSettings,
+  type WebAiPageStatus,
   type WebAiProviderInfo,
+  webaiCloseAllPages,
+  webaiClosePage,
   webaiListAuthenticated,
+  webaiListPages,
   webaiListProviders,
   webaiLogout,
   webaiStartAuth,
 } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
-import { Section } from "./shared";
+import { NumberInput, Section } from "./shared";
 
-function ProviderCard({
+/* ── Compact provider row ─────────────────────────────────────────── */
+
+function ProviderRow({
   provider,
   authenticated,
   loggingIn,
+  pageActive,
   onLogin,
   onLogout,
+  onClosePage,
   disabled,
+  closingPage,
 }: {
   provider: WebAiProviderInfo;
   authenticated: boolean;
   loggingIn: boolean;
+  pageActive: boolean;
   onLogin: () => void;
   onLogout: () => void;
+  onClosePage: () => void;
   disabled: boolean;
+  closingPage: boolean;
 }) {
   const { t } = useI18n();
 
   return (
     <div
       className={cn(
-        "flex items-center gap-3 rounded-lg border px-3 py-2.5 transition-colors",
-        loggingIn ? "border-amber-500/40 bg-amber-500/5" : "border-border",
+        "group flex items-center gap-2.5 rounded-md px-2 py-1.5 transition-colors",
+        loggingIn && "bg-amber-500/5",
       )}
     >
+      {/* Status dot: amber=logging-in, green=logged-in (pulse if webview active), gray=not-logged-in */}
       <span
         className={cn(
-          "flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold",
+          "h-2 w-2 shrink-0 rounded-full",
           loggingIn
-            ? "bg-amber-500/10 text-amber-500"
+            ? "bg-amber-500 animate-pulse"
             : authenticated
-              ? "bg-success/10 text-success"
-              : "bg-muted-foreground/10 text-muted-foreground",
+              ? pageActive
+                ? "bg-emerald-500 animate-pulse"
+                : "bg-emerald-500"
+              : "bg-muted-foreground/25",
         )}
-      >
-        {loggingIn ? (
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-        ) : authenticated ? (
-          <Check className="h-3.5 w-3.5" />
-        ) : (
-          <Globe className="h-3.5 w-3.5" />
-        )}
+      />
+
+      {/* Name + model count */}
+      <span className="flex-1 min-w-0 text-xs font-medium leading-tight">{provider.name}</span>
+      <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[9px] tabular-nums text-muted-foreground">
+        {provider.models.length}
       </span>
 
-      <div className="flex-1">
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-medium">{provider.name}</span>
-          <span className="text-[10px] text-muted-foreground">
-            {t.settings.nModels.replace("{0}", String(provider.models.length))}
-          </span>
-        </div>
-        <span
-          className={cn(
-            "text-[10px]",
-            loggingIn ? "text-amber-500" : authenticated ? "text-success" : "text-muted-foreground",
-          )}
+      {/* WebView close button — only when page is active */}
+      {pageActive && (
+        <button
+          type="button"
+          disabled={closingPage}
+          onClick={onClosePage}
+          className="shrink-0 rounded p-0.5 text-muted-foreground/60 hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
+          title={t.settings.closePage}
         >
-          {loggingIn
-            ? t.settings.loggingIn
-            : authenticated
-              ? t.settings.loggedIn
-              : t.settings.notLoggedIn}
-        </span>
-      </div>
+          <PowerOff className="h-3 w-3" />
+        </button>
+      )}
 
+      {/* Auth action */}
       {loggingIn ? (
-        <span className="flex items-center gap-1.5 rounded-md bg-amber-500/10 px-2 py-1 text-[10px] font-medium text-amber-500">
+        <span className="shrink-0 flex items-center gap-1 text-[10px] text-amber-500">
           <Loader2 className="h-3 w-3 animate-spin" />
-          {t.settings.waitingForBrowser}
         </span>
       ) : authenticated ? (
         <button
           type="button"
           disabled={disabled}
           onClick={onLogout}
-          className="flex items-center gap-1 rounded-md px-2.5 py-1 text-[10px] text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+          className="shrink-0 rounded p-0.5 text-muted-foreground/60 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
+          title={t.settings.logout}
         >
           <LogOut className="h-3 w-3" />
-          {t.settings.logout}
         </button>
       ) : (
         <button
           type="button"
           disabled={disabled}
           onClick={onLogin}
-          className="flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-[10px] text-primary-foreground disabled:opacity-50"
+          className="shrink-0 flex items-center gap-1 rounded-md bg-primary/90 px-2 py-0.5 text-[10px] font-medium text-primary-foreground hover:bg-primary disabled:opacity-40"
         >
-          <LogIn className="h-3 w-3" />
+          <LogIn className="h-2.5 w-2.5" />
           {t.settings.login}
         </button>
       )}
@@ -105,17 +112,32 @@ function ProviderCard({
   );
 }
 
-export function WebAiPage() {
+/* ── Main page ────────────────────────────────────────────────────── */
+
+export function WebAiPage({
+  settings,
+  onSave,
+}: {
+  settings: AppSettings;
+  onSave: (patch: Partial<AppSettings>) => void;
+}) {
   const { t } = useI18n();
   const [providers, setProviders] = useState<WebAiProviderInfo[]>([]);
   const [authenticated, setAuthenticated] = useState<Set<string>>(new Set());
   const [loggingInId, setLoggingInId] = useState<string | null>(null);
+  const [pages, setPages] = useState<WebAiPageStatus[]>([]);
+  const [closingPage, setClosingPage] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
-      const [pList, aList] = await Promise.all([webaiListProviders(), webaiListAuthenticated()]);
+      const [pList, aList, pgList] = await Promise.all([
+        webaiListProviders(),
+        webaiListAuthenticated(),
+        webaiListPages(),
+      ]);
       setProviders(pList);
       setAuthenticated(new Set(aList));
+      setPages(pgList);
     } catch {
       /* backend may not be ready */
     }
@@ -123,7 +145,14 @@ export function WebAiPage() {
 
   useEffect(() => {
     refresh();
+    let unlisten: (() => void) | undefined;
+    listen("webai-auth-changed", () => refresh()).then((fn) => {
+      unlisten = fn;
+    });
+    return () => unlisten?.();
   }, [refresh]);
+
+  /* ── handlers ── */
 
   const handleLogin = useCallback(
     async (providerId: string) => {
@@ -181,54 +210,169 @@ export function WebAiPage() {
     setLoggingInId(null);
   }, [authenticated, refresh]);
 
+  const handleClosePage = useCallback(
+    async (providerId: string) => {
+      setClosingPage(true);
+      try {
+        await webaiClosePage(providerId);
+      } catch (err) {
+        console.error("WebAI close page failed:", err);
+      }
+      await refresh();
+      setClosingPage(false);
+    },
+    [refresh],
+  );
+
+  const handleCloseAllPages = useCallback(async () => {
+    setClosingPage(true);
+    try {
+      await webaiCloseAllPages();
+    } catch (err) {
+      console.error("WebAI close all pages failed:", err);
+    }
+    await refresh();
+    setClosingPage(false);
+  }, [refresh]);
+
+  /* ── derived data ── */
+
   const busy = loggingInId !== null;
-  const loggedCount = providers.filter((p) => authenticated.has(p.id)).length;
+  const pageMap = useMemo(() => new Map(pages.map((p) => [p.providerId, p])), [pages]);
+
+  const loggedIn = useMemo(
+    () => providers.filter((p) => authenticated.has(p.id)),
+    [providers, authenticated],
+  );
+  const notLoggedIn = useMemo(
+    () => providers.filter((p) => !authenticated.has(p.id)),
+    [providers, authenticated],
+  );
+  const activePageCount = pages.filter((p) => p.active).length;
+
+  /* ── render helper ── */
+
+  const renderRow = (p: WebAiProviderInfo) => (
+    <ProviderRow
+      key={p.id}
+      provider={p}
+      authenticated={authenticated.has(p.id)}
+      loggingIn={loggingInId === p.id}
+      pageActive={pageMap.get(p.id)?.active ?? false}
+      onLogin={() => handleLogin(p.id)}
+      onLogout={() => handleLogout(p.id)}
+      onClosePage={() => handleClosePage(p.id)}
+      disabled={busy}
+      closingPage={closingPage}
+    />
+  );
 
   return (
     <Section title={t.settings.webAi}>
-      <p className="mb-4 text-[10px] text-muted-foreground">{t.settings.webAiDesc}</p>
+      <p className="mb-3 text-[10px] leading-relaxed text-muted-foreground">
+        {t.settings.webAiDesc}
+      </p>
 
-      <div className="mb-4 flex items-center justify-between">
-        <span className="text-xs text-muted-foreground">
-          {t.settings.loggedIn}: {loggedCount}/{providers.length}
-        </span>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            disabled={busy || loggedCount === providers.length}
-            onClick={handleLoginAll}
-            className="flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[10px] hover:bg-accent disabled:opacity-50"
-          >
-            <LogIn className="h-3 w-3" />
-            {t.settings.loginAll}
-          </button>
-          <button
-            type="button"
-            disabled={busy || loggedCount === 0}
-            onClick={handleLogoutAll}
-            className="flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[10px] text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
-          >
-            <X className="h-3 w-3" />
-            {t.settings.logoutAll}
-          </button>
+      {/* ── Logged-in group ── */}
+      {loggedIn.length > 0 && (
+        <div className="mb-3">
+          <div className="mb-1 flex items-center justify-between">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+              {t.settings.loggedIn} ({loggedIn.length})
+            </span>
+            <div className="flex items-center gap-1.5">
+              {activePageCount > 0 && (
+                <button
+                  type="button"
+                  disabled={closingPage}
+                  onClick={handleCloseAllPages}
+                  className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
+                >
+                  <X className="h-2.5 w-2.5" />
+                  {t.settings.closeAll}
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={busy || loggedIn.length === 0}
+                onClick={handleLogoutAll}
+                className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
+              >
+                <LogOut className="h-2.5 w-2.5" />
+                {t.settings.logoutAll}
+              </button>
+            </div>
+          </div>
+          <div className="rounded-lg border border-border bg-card/50">
+            {loggedIn.map(renderRow)}
+          </div>
         </div>
-      </div>
+      )}
 
-      <div className="space-y-2">
-        {providers.map((p) => (
-          <ProviderCard
-            key={p.id}
-            provider={p}
-            authenticated={authenticated.has(p.id)}
-            loggingIn={loggingInId === p.id}
-            onLogin={() => handleLogin(p.id)}
-            onLogout={() => handleLogout(p.id)}
-            disabled={busy}
+      {/* ── Not-logged-in group ── */}
+      {notLoggedIn.length > 0 && (
+        <div className="mb-3">
+          <div className="mb-1 flex items-center justify-between">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              {t.settings.notLoggedIn} ({notLoggedIn.length})
+            </span>
+            <button
+              type="button"
+              disabled={busy || notLoggedIn.length === 0}
+              onClick={handleLoginAll}
+              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] text-muted-foreground hover:bg-accent disabled:opacity-40"
+            >
+              <LogIn className="h-2.5 w-2.5" />
+              {t.settings.loginAll}
+            </button>
+          </div>
+          <div className="rounded-lg border border-border bg-card/50">
+            {notLoggedIn.map(renderRow)}
+          </div>
+        </div>
+      )}
+
+      {providers.length === 0 && (
+        <p className="py-6 text-center text-xs text-muted-foreground">{t.common.loading}</p>
+      )}
+
+      {/* ── Settings ── */}
+      <div className="mt-1 space-y-px rounded-lg border border-border bg-card/50">
+        <div className="flex items-center justify-between px-3 py-2">
+          <div className="min-w-0 pr-3">
+            <div className="text-[10px] font-medium text-foreground/80">
+              {t.settings.webAiIdleTimeout}
+            </div>
+            <div className="text-[9px] text-muted-foreground">
+              {t.settings.webAiIdleTimeoutHint}
+            </div>
+          </div>
+          <NumberInput
+            value={settings.webaiIdleTimeout ?? 300}
+            onChange={(v) => onSave({ webaiIdleTimeout: v })}
+            min={60}
+            max={1800}
+            step={60}
           />
-        ))}
-        {providers.length === 0 && (
-          <p className="py-4 text-center text-xs text-muted-foreground">{t.common.loading}</p>
-        )}
+        </div>
+        <div className="border-t border-border" />
+        <div className="flex items-center justify-between px-3 py-2">
+          <div className="min-w-0 pr-3">
+            <div className="text-[10px] font-medium text-foreground/80">
+              {t.settings.webAiPageLoadTimeout}
+            </div>
+            <div className="text-[9px] text-muted-foreground">
+              {t.settings.webAiPageLoadTimeoutHint}
+            </div>
+          </div>
+          <NumberInput
+            value={settings.webaiPageLoadTimeout ?? 60}
+            onChange={(v) => onSave({ webaiPageLoadTimeout: v })}
+            min={10}
+            max={300}
+            step={10}
+          />
+        </div>
       </div>
     </Section>
   );

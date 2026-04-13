@@ -37,18 +37,20 @@ export function SettingsShell({
   dirty,
   settings,
   save,
+  refresh,
 }: {
   page: SettingsPage;
   setPage: (p: SettingsPage) => void;
   dirty: boolean;
   settings: AppSettings;
   save: (updates: Partial<AppSettings>) => Promise<void>;
+  refresh: () => void;
 }) {
   const { t } = useI18n();
   const navItems = useNavItems();
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full" spellCheck={false}>
       <nav className="flex w-44 shrink-0 flex-col gap-0.5 border-r border-border p-2">
         {navItems.map(({ id, label, icon: Icon }) => (
           <button
@@ -75,8 +77,8 @@ export function SettingsShell({
           </div>
         )}
         {page === "appearance" && <AppearancePage settings={settings} onSave={save} />}
-        {page === "models" && <ModelsPage settings={settings} onSave={save} />}
-        {page === "webai" && <WebAiPage />}
+        {page === "models" && <ModelsPage settings={settings} onSave={save} onRefresh={refresh} />}
+        {page === "webai" && <WebAiPage settings={settings} onSave={save} />}
         {page === "gateway" && <GatewayPage settings={settings} onSave={save} />}
         {page === "terminal" && <TerminalPage settings={settings} onSave={save} />}
         {page === "safety" && <SafetyPage settings={settings} onSave={save} />}
@@ -93,9 +95,13 @@ export function SettingsPanel() {
   const [settings, setSettings] = useState<AppSettings>({});
   const [dirty, setDirty] = useState(false);
 
-  useEffect(() => {
+  const refresh = useCallback(() => {
     tryInvoke(getSettings, {} as AppSettings).then(setSettings);
   }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   const save = useCallback(
     async (updates: Partial<AppSettings>) => {
@@ -114,6 +120,13 @@ export function SettingsPanel() {
   );
 
   return (
-    <SettingsShell page={page} setPage={setPage} dirty={dirty} settings={settings} save={save} />
+    <SettingsShell
+      page={page}
+      setPage={setPage}
+      dirty={dirty}
+      settings={settings}
+      save={save}
+      refresh={refresh}
+    />
   );
 }

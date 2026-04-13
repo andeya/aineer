@@ -21,6 +21,8 @@ interface SelectProps {
   menuAlign?: "start" | "end";
   /** Extra classes for the trigger button (compact / borderless variants). */
   triggerClassName?: string;
+  /** Optional id for the trigger button (pair with <label htmlFor>). */
+  triggerId?: string;
   /** Extra classes for the dropdown panel (min-width, max-height). */
   menuClassName?: string;
   /**
@@ -42,6 +44,7 @@ export function Select({
   triggerClassName,
   menuClassName,
   triggerLabel,
+  triggerId,
 }: SelectProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -86,6 +89,7 @@ export function Select({
       className={cn("relative", fullWidth ? "block w-full min-w-0" : "inline-block", className)}
     >
       <button
+        id={triggerId}
         type="button"
         onClick={() => setOpen(!open)}
         className={cn(

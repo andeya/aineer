@@ -91,6 +91,8 @@ export type ReasoningContentProps = {
   className?: string;
   markdown?: boolean;
   contentClassName?: string;
+  /** When true, do not apply default `prose` on the inner wrapper (for custom Markdown inside). */
+  disableOuterProse?: boolean;
 } & React.HTMLAttributes<HTMLDivElement>;
 
 function ReasoningContent({
@@ -98,6 +100,7 @@ function ReasoningContent({
   className,
   contentClassName,
   markdown = false,
+  disableOuterProse = false,
   ...props
 }: ReasoningContentProps) {
   const contentRef = useRef<HTMLDivElement>(null);
@@ -135,7 +138,10 @@ function ReasoningContent({
     >
       <div
         ref={innerRef}
-        className={cn("text-muted-foreground prose prose-sm dark:prose-invert", contentClassName)}
+        className={cn(
+          !disableOuterProse && "text-muted-foreground prose prose-sm dark:prose-invert",
+          contentClassName,
+        )}
       >
         {content}
       </div>

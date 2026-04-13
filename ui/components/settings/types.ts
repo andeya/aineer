@@ -18,6 +18,7 @@ export type SettingsPage =
 export interface PageProps {
   settings: AppSettings;
   onSave: (updates: Partial<AppSettings>) => void;
+  onRefresh?: () => void;
 }
 
 export const PERMISSION_MODE_LABELS: Record<Locale, Record<string, string>> = {

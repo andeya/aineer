@@ -2,12 +2,21 @@ import type { ReactNode } from "react";
 import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
-export function Section({ title, children }: { title: string; children: ReactNode }) {
+export function Section({
+  title,
+  action,
+  children,
+}: {
+  title: string;
+  action?: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <div className="mb-6">
-      <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-foreground">
-        {title}
-      </h3>
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-foreground">{title}</h3>
+        {action}
+      </div>
       {children}
     </div>
   );
@@ -16,14 +25,16 @@ export function Section({ title, children }: { title: string; children: ReactNod
 export function Field({
   label,
   hint,
+  className,
   children,
 }: {
   label: string;
   hint?: string;
+  className?: string;
   children: ReactNode;
 }) {
   return (
-    <div className="mb-3">
+    <div className={cn("mb-3", className)}>
       <span className="mb-1 block text-xs font-medium text-foreground">{label}</span>
       {hint && <p className="mb-1.5 text-[10px] text-muted-foreground">{hint}</p>}
       {children}
