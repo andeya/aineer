@@ -59,6 +59,7 @@ pub async fn start_gateway(
         gateway = gateway.with_webai(WebAiEngine::new(handle.clone()));
     }
     let server = Arc::new(gateway);
+    server.mark_starting();
     let server_clone = Arc::clone(&server);
     tokio::spawn(async move {
         if let Err(e) = server_clone.start().await {

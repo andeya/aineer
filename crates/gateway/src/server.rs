@@ -63,9 +63,14 @@ impl GatewayServer {
         self.status_rx.clone()
     }
 
+    pub fn mark_starting(&self) {
+        self.status_tx.send_replace(GatewayStatus::Starting);
+    }
+
     pub async fn start(&self) -> anyhow::Result<()> {
         if !self.config.enabled {
             tracing::info!("Gateway is disabled in config");
+            self.status_tx.send_replace(GatewayStatus::Stopped);
             return Ok(());
         }
 
