@@ -95,12 +95,30 @@ impl GatewayServer {
 
         self.status_tx.send_replace(GatewayStatus::Starting);
 
-        let listener = match tokio::net::TcpListener::bind(addr).await {
-            Ok(l) => l,
-            Err(e) => {
-                tracing::error!("Gateway failed to bind {addr}: {e}");
-                self.status_tx.send_replace(GatewayStatus::Error);
-                return Err(e.into());
+        let listener = {
+            const MAX_RETRIES: u32 = 5;
+            const RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(2);
+            let mut result = tokio::net::TcpListener::bind(addr).await;
+            for attempt in 1..MAX_RETRIES {
+                if result.is_ok() {
+                    break;
+                }
+                tracing::warn!(
+                    "Gateway bind {addr} failed (attempt {attempt}/{MAX_RETRIES}): {}, retrying...",
+                    result.as_ref().unwrap_err()
+                );
+                tokio::time::sleep(RETRY_DELAY).await;
+                result = tokio::net::TcpListener::bind(addr).await;
+            }
+            match result {
+                Ok(l) => l,
+                Err(e) => {
+                    tracing::error!(
+                        "Gateway failed to bind {addr} after {MAX_RETRIES} attempts: {e}"
+                    );
+                    self.status_tx.send_replace(GatewayStatus::Error);
+                    return Err(e.into());
+                }
             }
         };
 
