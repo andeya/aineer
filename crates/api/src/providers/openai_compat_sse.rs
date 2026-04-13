@@ -139,9 +139,14 @@ pub(super) struct ChunkDelta {
 }
 
 impl ChunkDelta {
-    pub fn stream_text_fragment(&self) -> Option<String> {
+    /// Visible assistant output only (not chain-of-thought fields).
+    pub fn stream_content_fragment(&self) -> Option<String> {
+        self.content.as_ref().filter(|s| !s.is_empty()).cloned()
+    }
+
+    /// Reasoning / thinking tokens from OpenAI-compatible providers (e.g. DashScope, DeepSeek).
+    pub fn stream_reasoning_fragment(&self) -> Option<String> {
         first_non_empty_field(&[
-            &self.content,
             &self.reasoning_content,
             &self.reasoning,
             &self.thought,

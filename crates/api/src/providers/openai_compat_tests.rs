@@ -114,9 +114,10 @@ fn sse_parses_delta_with_reasoning_content_only() {
     let parsed = parse_sse_frame(frame).expect("parse").expect("chunk");
     assert_eq!(parsed.choices.len(), 1);
     assert_eq!(
-        parsed.choices[0].delta.stream_text_fragment(),
+        parsed.choices[0].delta.stream_reasoning_fragment(),
         Some("2".to_string())
     );
+    assert_eq!(parsed.choices[0].delta.stream_content_fragment(), None);
 }
 
 #[test]
@@ -124,9 +125,10 @@ fn sse_parses_delta_with_thought_field() {
     let frame = "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"thought\":\"x\"}}]}\n\n";
     let parsed = parse_sse_frame(frame).expect("parse").expect("chunk");
     assert_eq!(
-        parsed.choices[0].delta.stream_text_fragment(),
+        parsed.choices[0].delta.stream_reasoning_fragment(),
         Some("x".to_string())
     );
+    assert_eq!(parsed.choices[0].delta.stream_content_fragment(), None);
 }
 
 #[test]
@@ -137,9 +139,10 @@ fn sse_parses_delta_with_content_array() {
             + "\n\n";
     let parsed = parse_sse_frame(&frame).expect("parse").expect("chunk");
     assert_eq!(
-        parsed.choices[0].delta.stream_text_fragment(),
+        parsed.choices[0].delta.stream_content_fragment(),
         Some("hi".to_string())
     );
+    assert_eq!(parsed.choices[0].delta.stream_reasoning_fragment(), None);
 }
 
 #[test]
