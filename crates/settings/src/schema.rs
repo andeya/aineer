@@ -63,6 +63,12 @@ pub struct SettingsContent {
     // Advanced
     pub auto_compact: Option<bool>,
     pub max_context_tokens: Option<u32>,
+    /// Safety timeout (seconds) for AI/agent streaming responses.
+    pub stream_timeout: Option<u32>,
+    /// Idle timeout (seconds) for WebAI hidden browser pages. Default 300 (5 min).
+    pub webai_idle_timeout: Option<u32>,
+    /// Page load timeout (seconds) for WebAI pages to become ready. Default 60.
+    pub webai_page_load_timeout: Option<u32>,
 
     // Forward-compatible: preserve unknown keys
     #[serde(flatten)]
@@ -84,6 +90,7 @@ pub struct TerminalSettings {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CustomProviderConfig {
+    pub display_name: Option<String>,
     pub base_url: String,
     pub api_version: Option<String>,
     pub api_key: Option<String>,
