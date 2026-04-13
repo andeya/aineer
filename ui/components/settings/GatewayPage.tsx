@@ -59,10 +59,22 @@ function useGatewayStatus() {
 }
 
 const STATUS_STYLE: Record<StatusKey, { dot: string; badge: string }> = {
-  running: { dot: "bg-success", badge: "bg-success/10 text-success" },
-  starting: { dot: "bg-amber-500 animate-pulse", badge: "bg-amber-500/10 text-amber-600" },
-  stopped: { dot: "bg-muted-foreground", badge: "bg-muted-foreground/10 text-muted-foreground" },
-  error: { dot: "bg-destructive", badge: "bg-destructive/10 text-destructive" },
+  running: {
+    dot: "bg-emerald-500",
+    badge: "border border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+  },
+  starting: {
+    dot: "bg-amber-500 animate-pulse",
+    badge: "border border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  },
+  stopped: {
+    dot: "bg-zinc-400 dark:bg-zinc-500",
+    badge: "border border-zinc-300 dark:border-zinc-600 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400",
+  },
+  error: {
+    dot: "bg-red-500",
+    badge: "border border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400",
+  },
 };
 
 export function GatewayPage({
@@ -84,13 +96,23 @@ export function GatewayPage({
   const baseUrl = `http://${listenAddr}/v1`;
 
   useEffect(() => {
-    refresh().then((s) => {
-      if (s?.status === "starting") startPolling();
+    refresh().then(async (s) => {
+      const key = s?.status as StatusKey | undefined;
+      if (key === "starting") {
+        startPolling();
+      } else if (enabled && (!key || key === "stopped")) {
+        try {
+          await startGateway();
+          startPolling();
+        } catch {
+          await refresh();
+        }
+      }
     });
     listModelGroups()
       .then(setModelGroups)
       .catch(() => setModelGroups([]));
-  }, [refresh, startPolling]);
+  }, [enabled, refresh, startPolling]);
 
   const catalogModelOptions = useMemo(
     () => modelGroupsToSelectOptions(modelGroups, true),
