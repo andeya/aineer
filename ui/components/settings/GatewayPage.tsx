@@ -92,6 +92,8 @@ export function GatewayPage({
   const { status, refresh, startPolling } = useGatewayStatus();
   const [copied, setCopied] = useState(false);
   const [modelGroups, setModelGroups] = useState<ModelGroupData[]>([]);
+  const enabledRef = useRef(enabled);
+  enabledRef.current = enabled;
 
   const baseUrl = `http://${listenAddr}/v1`;
 
@@ -100,7 +102,7 @@ export function GatewayPage({
       const key = s?.status as StatusKey | undefined;
       if (key === "starting") {
         startPolling();
-      } else if (enabled && (!key || key === "stopped")) {
+      } else if (enabledRef.current && (!key || key === "stopped")) {
         try {
           await startGateway();
           startPolling();
@@ -112,7 +114,7 @@ export function GatewayPage({
     listModelGroups()
       .then(setModelGroups)
       .catch(() => setModelGroups([]));
-  }, [enabled, refresh, startPolling]);
+  }, [refresh, startPolling]);
 
   const catalogModelOptions = useMemo(
     () => modelGroupsToSelectOptions(modelGroups, true),
