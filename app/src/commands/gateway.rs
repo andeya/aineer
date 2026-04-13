@@ -42,15 +42,21 @@ pub async fn start_gateway(
         }
     }
 
+    // start_gateway is an explicit user action, so always force enabled=true
+    // regardless of what the persisted config says (it may not have been
+    // flushed yet when this command fires).
     let config = if let Ok(merged) = settings_state.merged() {
         let gw = merged.gateway.unwrap_or_default();
         GatewayConfig {
-            enabled: gw.enabled.unwrap_or(true),
+            enabled: true,
             listen_addr: gw.listen_addr.unwrap_or_else(|| "127.0.0.1:8090".into()),
             default_model: gw.default_model,
         }
     } else {
-        GatewayConfig::default()
+        GatewayConfig {
+            enabled: true,
+            ..GatewayConfig::default()
+        }
     };
     let listen_addr = config.listen_addr.clone();
     let mut gateway = GatewayServer::new(config);

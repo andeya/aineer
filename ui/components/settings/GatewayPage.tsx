@@ -104,7 +104,7 @@ export function GatewayPage({
   const handleToggle = useCallback(
     async (on: boolean) => {
       const next = { ...gw, enabled: on };
-      onSave({ gateway: next });
+      await onSave({ gateway: next });
       try {
         if (on) {
           await startGateway();
