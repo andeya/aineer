@@ -43,6 +43,10 @@ export interface ChatMessage {
   model?: string;
   shell?: ShellResult;
   thinking?: string;
+  /** Wall time when first reasoning token arrived (cleared when duration is frozen). */
+  thinkingStartedAt?: number;
+  /** Milliseconds from first reasoning token to first answer token or stream end. */
+  thinkingDurationMs?: number;
   agentSteps?: AgentStep[];
   toolCalls?: ToolPart[];
   attachments?: Attachment[];

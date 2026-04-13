@@ -5,11 +5,18 @@ export interface ShellContextSnippet {
   output: string;
 }
 
+export interface ChatHistoryTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
 export interface AiMessageRequest {
   message: string;
   model?: string;
   cwd?: string;
   shell_context?: ShellContextSnippet[];
+  /** Completed prior turns for multi-turn chat (same tab). */
+  chat_history?: ChatHistoryTurn[];
 }
 
 export interface AgentRequest {
@@ -17,6 +24,8 @@ export interface AgentRequest {
   cwd?: string;
   model?: string;
   shell_context?: ShellContextSnippet[];
+  /** Completed prior turns for multi-turn agent (same tab, agent mode only). */
+  chat_history?: ChatHistoryTurn[];
 }
 
 export const sendAiMessage = (req: AiMessageRequest) =>

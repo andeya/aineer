@@ -11,6 +11,7 @@ export interface TerminalSettings {
 }
 
 export interface CustomProviderConfig {
+  displayName?: string;
   baseUrl: string;
   apiVersion?: string;
   apiKey?: string;
@@ -75,6 +76,9 @@ export interface AppSettings {
   rules?: RulesConfig;
   autoCompact?: boolean;
   maxContextTokens?: number;
+  streamTimeout?: number;
+  webaiIdleTimeout?: number;
+  webaiPageLoadTimeout?: number;
 }
 
 export interface AppInfo {
@@ -104,6 +108,15 @@ export const setApiKey = (provider: string, key: string) =>
   call<void>("set_api_key", { provider, key });
 export const listModelGroups = () => call<ModelGroupData[]>("list_model_groups");
 
+export const upsertProvider = (id: string, config: CustomProviderConfig) =>
+  call<void>("upsert_provider", { id, config });
+export const removeProvider = (id: string) => call<void>("remove_provider", { id });
+export const fetchProviderModels = (
+  baseUrl: string,
+  apiKey?: string,
+  headers?: Record<string, string>,
+) => call<string[]>("fetch_provider_models", { baseUrl, apiKey, headers });
+
 // ── WebAI ──
 
 export interface WebAiProviderInfo {
@@ -123,3 +136,14 @@ export const webaiListAuthenticated = () => call<string[]>("webai_list_authentic
 export const webaiStartAuth = (providerId: string) =>
   call<string>("webai_start_auth", { providerId });
 export const webaiLogout = (providerId: string) => call<void>("webai_logout", { providerId });
+
+export interface WebAiPageStatus {
+  providerId: string;
+  providerName: string;
+  active: boolean;
+}
+
+export const webaiListPages = () => call<WebAiPageStatus[]>("webai_list_pages");
+export const webaiClosePage = (providerId: string) =>
+  call<void>("webai_close_page", { providerId });
+export const webaiCloseAllPages = () => call<void>("webai_close_all_pages");

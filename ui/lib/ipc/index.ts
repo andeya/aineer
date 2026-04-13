@@ -1,4 +1,9 @@
-export type { AgentRequest, AiMessageRequest, ShellContextSnippet } from "./ai";
+export type {
+  AgentRequest,
+  AiMessageRequest,
+  ChatHistoryTurn,
+  ShellContextSnippet,
+} from "./ai";
 export {
   approveTool,
   denyTool,
@@ -74,18 +79,25 @@ export type {
   SandboxConfig,
   TerminalSettings,
   WebAiModelInfo,
+  WebAiPageStatus,
   WebAiProviderInfo,
 } from "./settings";
 export {
+  fetchProviderModels,
   getApiKey,
   getAppInfo,
   getCloseToTray,
   getSettings,
   listModelGroups,
+  removeProvider,
   setApiKey,
   setCloseToTray,
   updateSettings,
+  upsertProvider,
+  webaiCloseAllPages,
+  webaiClosePage,
   webaiListAuthenticated,
+  webaiListPages,
   webaiListProviders,
   webaiLogout,
   webaiStartAuth,

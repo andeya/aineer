@@ -21,13 +21,8 @@ interface AiStreamPayload {
   done: boolean;
 }
 
-interface AgentStreamPayload {
-  blockId: number;
-  kind: string;
-  data: string;
-}
-
 interface StreamBinding {
+  kind: "ai" | "agent";
   backendBlockId: number;
   assistantMsgId: number;
   safetyTimer: ReturnType<typeof setTimeout>;
@@ -47,9 +42,24 @@ interface UseChatExecutionOptions {
   } | null>;
   termCommandActive: React.MutableRefObject<boolean>;
   setTerminalVisible: (v: boolean) => void;
+  streamTimeoutMs: number;
 }
 
-const STREAM_SAFETY_TIMEOUT_MS = 120_000;
+const DEFAULT_STREAM_TIMEOUT_MS = 300_000;
+
+/** Freeze wall-clock reasoning duration when the first answer token arrives or the stream ends. */
+function freezeThinkingDuration(
+  m: ChatMessage,
+  now: number,
+): Partial<Pick<ChatMessage, "thinkingDurationMs" | "thinkingStartedAt">> {
+  if (m.thinkingStartedAt == null || !m.thinking?.trim() || m.thinkingDurationMs != null) {
+    return {};
+  }
+  return {
+    thinkingDurationMs: now - m.thinkingStartedAt,
+    thinkingStartedAt: undefined,
+  };
+}
 
 function recentShellContext(msgs: ChatMessage[], max: number): ShellContextSnippet[] {
   const out: ShellContextSnippet[] = [];
@@ -60,6 +70,37 @@ function recentShellContext(msgs: ChatMessage[], max: number): ShellContextSnipp
     }
   }
   return out.reverse();
+}
+
+const MAX_CHAT_HISTORY_PAIRS = 24;
+
+function assistantHistoryText(m: ChatMessage): string {
+  const t = m.thinking?.trim();
+  const c = m.content?.trim();
+  if (t && c) return `${t}\n\n${c}`;
+  return c || t || "";
+}
+
+/** Build OpenAI-style history from completed Chat or Agent turns (excludes the in-flight user message). */
+function buildChatHistoryForApi(
+  msgs: ChatMessage[],
+  mode: "ai" | "agent",
+): { role: "user" | "assistant"; content: string }[] {
+  const out: { role: "user" | "assistant"; content: string }[] = [];
+  for (let i = 0; i < msgs.length; i++) {
+    const m = msgs[i];
+    if (m.mode !== mode || m.role !== "user") continue;
+    const next = msgs[i + 1];
+    if (!next || next.role !== "assistant" || next.mode !== mode) continue;
+    const u = m.content.trim();
+    const a = assistantHistoryText(next);
+    if (!u || !a) continue;
+    out.push({ role: "user", content: u });
+    out.push({ role: "assistant", content: a });
+    i++;
+  }
+  const maxMsgs = MAX_CHAT_HISTORY_PAIRS * 2;
+  return out.length > maxMsgs ? out.slice(-maxMsgs) : out;
 }
 
 export function useChatExecution({
@@ -73,7 +114,9 @@ export function useChatExecution({
   terminalRef,
   termCommandActive,
   setTerminalVisible,
+  streamTimeoutMs,
 }: UseChatExecutionOptions) {
+  const safetyTimeoutMs = streamTimeoutMs > 0 ? streamTimeoutMs : DEFAULT_STREAM_TIMEOUT_MS;
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const nextIdRef = useRef(1);
@@ -104,24 +147,13 @@ export function useChatExecution({
   const projectRootRef = useRef(projectRoot);
   projectRootRef.current = projectRoot;
 
-  const aiStreamRef = useRef<StreamBinding | null>(null);
-  const agentStreamRef = useRef<StreamBinding | null>(null);
-  const aiStopBlockRef = useRef<number | null>(null);
+  const assistantStreamRef = useRef<StreamBinding | null>(null);
 
-  const clearAiStream = useCallback(() => {
-    const cur = aiStreamRef.current;
+  const clearAssistantStream = useCallback(() => {
+    const cur = assistantStreamRef.current;
     if (cur) {
       clearTimeout(cur.safetyTimer);
-      aiStreamRef.current = null;
-    }
-    aiStopBlockRef.current = null;
-  }, []);
-
-  const clearAgentStream = useCallback(() => {
-    const cur = agentStreamRef.current;
-    if (cur) {
-      clearTimeout(cur.safetyTimer);
-      agentStreamRef.current = null;
+      assistantStreamRef.current = null;
     }
   }, []);
 
@@ -284,25 +316,40 @@ export function useChatExecution({
       if (isTauri()) {
         try {
           const shellContext = recentShellContext(messagesRef.current, 5);
+          const chatHistory = buildChatHistoryForApi(messagesRef.current, "ai");
           const assistantId = allocId();
           const blockId = await sendAiMessage({
             message: text,
             model: modelNameRef.current || undefined,
             cwd: sessionCwdRef.current || projectRootRef.current || undefined,
             shell_context: shellContext.length > 0 ? shellContext : undefined,
+            chat_history: chatHistory.length > 0 ? chatHistory : undefined,
           });
           const safetyTimer = setTimeout(() => {
-            if (aiStreamRef.current?.backendBlockId === blockId) {
-              clearAiStream();
+            if (assistantStreamRef.current?.backendBlockId === blockId) {
+              const msgId = assistantStreamRef.current.assistantMsgId;
+              clearAssistantStream();
+              const now = Date.now();
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === msgId && !m.content
+                    ? {
+                        ...m,
+                        content: "**Error:** Request timed out. Please try again.",
+                        ...freezeThinkingDuration(m, now),
+                      }
+                    : m,
+                ),
+              );
               processChatQueueRef.current();
             }
-          }, STREAM_SAFETY_TIMEOUT_MS);
-          aiStreamRef.current = {
+          }, safetyTimeoutMs);
+          assistantStreamRef.current = {
+            kind: "ai",
             backendBlockId: blockId,
             assistantMsgId: assistantId,
             safetyTimer,
           };
-          aiStopBlockRef.current = blockId;
           setMessages((prev) => [
             ...prev,
             {
@@ -315,8 +362,19 @@ export function useChatExecution({
             },
           ]);
           return;
-        } catch {
-          clearAiStream();
+        } catch (err) {
+          clearAssistantStream();
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: allocId(),
+              role: "assistant",
+              mode: "ai",
+              content: `**Error:** ${err}`,
+              timestamp: Date.now(),
+              model: modelNameRef.current || undefined,
+            },
+          ]);
           setIsStreaming(false);
           processChatQueueRef.current();
           return;
@@ -338,7 +396,7 @@ export function useChatExecution({
         processChatQueueRef.current();
       }, 1200);
     },
-    [allocId, clearAiStream],
+    [allocId, clearAssistantStream, safetyTimeoutMs],
   );
 
   const _executeAgent = useCallback(
@@ -362,20 +420,36 @@ export function useChatExecution({
       if (isTauri()) {
         try {
           const shellContext = recentShellContext(messagesRef.current, 5);
+          const chatHistory = buildChatHistoryForApi(messagesRef.current, "agent");
           const assistantId = allocId();
           const blockId = await startAgent({
             goal: text,
             cwd: sessionCwdRef.current || projectRootRef.current || undefined,
             model: modelNameRef.current || undefined,
             shell_context: shellContext.length > 0 ? shellContext : undefined,
+            chat_history: chatHistory.length > 0 ? chatHistory : undefined,
           });
           const safetyTimer = setTimeout(() => {
-            if (agentStreamRef.current?.backendBlockId === blockId) {
-              clearAgentStream();
+            if (assistantStreamRef.current?.backendBlockId === blockId) {
+              const msgId = assistantStreamRef.current.assistantMsgId;
+              clearAssistantStream();
+              const now = Date.now();
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === msgId && !m.content
+                    ? {
+                        ...m,
+                        content: "**Error:** Request timed out. Please try again.",
+                        ...freezeThinkingDuration(m, now),
+                      }
+                    : m,
+                ),
+              );
               processChatQueueRef.current();
             }
-          }, STREAM_SAFETY_TIMEOUT_MS);
-          agentStreamRef.current = {
+          }, safetyTimeoutMs);
+          assistantStreamRef.current = {
+            kind: "agent",
             backendBlockId: blockId,
             assistantMsgId: assistantId,
             safetyTimer,
@@ -392,8 +466,19 @@ export function useChatExecution({
             },
           ]);
           return;
-        } catch {
-          clearAgentStream();
+        } catch (err) {
+          clearAssistantStream();
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: allocId(),
+              role: "assistant",
+              mode: "agent",
+              content: `**Error:** ${err}`,
+              timestamp: Date.now(),
+              model: modelNameRef.current || undefined,
+            },
+          ]);
           setIsStreaming(false);
           processChatQueueRef.current();
           return;
@@ -430,7 +515,7 @@ export function useChatExecution({
         processChatQueueRef.current();
       }, 1800);
     },
-    [allocId, clearAgentStream],
+    [allocId, clearAssistantStream, safetyTimeoutMs],
   );
 
   const executeChatTask = useCallback(
@@ -450,69 +535,63 @@ export function useChatExecution({
 
   useEffect(() => {
     if (!isTauri()) return;
-    let unlistenAi: UnlistenFn | undefined;
-    let unlistenAgent: UnlistenFn | undefined;
+    let cancelled = false;
+    let unlisten: UnlistenFn | undefined;
     const setup = async () => {
-      unlistenAi = await listen<AiStreamPayload>("ai_stream_delta", (event) => {
+      /** Chat and Agent share the same payload and event (desktop protocol). */
+      const u = await listen<AiStreamPayload>("ai_stream_delta", (event) => {
         const p = event.payload;
-        const cur = aiStreamRef.current;
+        const cur = assistantStreamRef.current;
         if (!cur || p.blockId !== cur.backendBlockId) return;
-        if (p.done) {
-          clearTimeout(cur.safetyTimer);
-          aiStreamRef.current = null;
-          aiStopBlockRef.current = null;
-          processChatQueueRef.current();
-          return;
-        }
         if (p.delta) {
           if (p.kind === "thinking") {
             setMessages((prev) =>
-              prev.map((m) =>
-                m.id === cur.assistantMsgId ? { ...m, thinking: (m.thinking || "") + p.delta } : m,
-              ),
+              prev.map((m) => {
+                if (m.id !== cur.assistantMsgId) return m;
+                const nextThinking = (m.thinking || "") + p.delta;
+                const thinkingStartedAt =
+                  m.thinkingStartedAt ?? (nextThinking.trim().length > 0 ? Date.now() : undefined);
+                return { ...m, thinking: nextThinking, thinkingStartedAt };
+              }),
             );
           } else {
+            const now = Date.now();
             setMessages((prev) =>
-              prev.map((m) =>
-                m.id === cur.assistantMsgId ? { ...m, content: m.content + p.delta } : m,
-              ),
+              prev.map((m) => {
+                if (m.id !== cur.assistantMsgId) return m;
+                return {
+                  ...m,
+                  content: m.content + p.delta,
+                  ...freezeThinkingDuration(m, now),
+                };
+              }),
             );
           }
         }
-      });
-      unlistenAgent = await listen<AgentStreamPayload>("agent_event", (event) => {
-        const p = event.payload;
-        const cur = agentStreamRef.current;
-        if (!cur || p.blockId !== cur.backendBlockId) return;
-        if (p.kind === "done") {
+        if (p.done) {
+          const now = Date.now();
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === cur.assistantMsgId ? { ...m, ...freezeThinkingDuration(m, now) } : m,
+            ),
+          );
           clearTimeout(cur.safetyTimer);
-          agentStreamRef.current = null;
+          assistantStreamRef.current = null;
           processChatQueueRef.current();
-          return;
-        }
-        if (p.kind === "error" && p.data) {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === cur.assistantMsgId ? { ...m, content: `**Error:** ${p.data}` } : m,
-            ),
-          );
-          return;
-        }
-        if (p.kind === "text" && p.data) {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === cur.assistantMsgId ? { ...m, content: m.content + p.data } : m,
-            ),
-          );
         }
       });
+      if (cancelled) {
+        u();
+        return;
+      }
+      unlisten = u;
     };
     setup().catch((err) => {
       console.error("Failed to register Tauri event listeners:", err);
     });
     return () => {
-      void unlistenAi?.();
-      void unlistenAgent?.();
+      cancelled = true;
+      unlisten?.();
     };
   }, []);
 
@@ -545,13 +624,12 @@ export function useChatExecution({
 
   const handleStop = useCallback(() => {
     abortRef.current?.abort();
-    const aiBid = aiStopBlockRef.current;
-    if (aiBid != null) {
-      void stopAiStream(aiBid);
-    }
-    const agentBid = agentStreamRef.current?.backendBlockId;
-    if (agentBid != null) {
-      void stopAgent(agentBid);
+    const cur = assistantStreamRef.current;
+    if (cur == null) return;
+    if (cur.kind === "agent") {
+      void stopAgent(cur.backendBlockId);
+    } else {
+      void stopAiStream(cur.backendBlockId);
     }
   }, []);
 
@@ -591,24 +669,28 @@ export function useChatExecution({
   );
 
   const handleForceExecute = useCallback(
-    (
-      taskId: number,
-      queuedTasks: { id: number; channel: string; content: string; mode: InputMode }[],
-    ) => {
-      const task = queuedTasks.find((t) => t.id === taskId);
-      if (!task) return;
-
+    (task: { channel: string; content: string; mode: InputMode }) => {
       if (task.channel === "terminal") {
         terminalRef.current?.runCommand(task.content);
         termCommandActive.current = true;
         setTerminalVisible(true);
       } else {
         abortRef.current?.abort();
+        const cur = assistantStreamRef.current;
+        if (cur != null) {
+          const bid = cur.backendBlockId;
+          clearAssistantStream();
+          if (cur.kind === "agent") {
+            void stopAgent(bid);
+          } else {
+            void stopAiStream(bid);
+          }
+        }
         setIsStreaming(false);
         executeChatTask(task.content, task.mode);
       }
     },
-    [executeChatTask, terminalRef, termCommandActive, setTerminalVisible],
+    [executeChatTask, clearAssistantStream, terminalRef, termCommandActive, setTerminalVisible],
   );
 
   return {
