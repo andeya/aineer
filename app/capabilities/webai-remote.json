@@ -3,7 +3,8 @@
   "identifier": "webai-remote-ipc",
   "description": "Grants WebAI hidden webviews IPC event-emit access on AI provider domains",
   "windows": [
-    "webai-*"
+    "webai-*",
+    "webauth-*"
   ],
   "local": false,
   "remote": {
