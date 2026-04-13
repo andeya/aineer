@@ -66,8 +66,8 @@ export function Sidebar({
   const dragging = useRef(false);
 
   const isSettings = panel === "settings";
-  const minW = isSettings ? 480 : 200;
-  const maxW = isSettings ? 800 : 500;
+  const minW = isSettings ? 600 : 200;
+  const maxW = isSettings ? 960 : 500;
   const effectiveWidth = isSettings ? Math.max(width, minW) : width;
 
   const handleMouseDown = useCallback(

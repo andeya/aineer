@@ -11,7 +11,7 @@ import {
   Terminal,
   XCircle,
 } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AttachmentLightbox } from "@/components/input/AttachmentStrip";
 import { Logo } from "@/components/Logo";
 import { Badge } from "@/components/ui/badge";
@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/chat-container";
 import { Loader } from "@/components/ui/loader";
 import { Markdown } from "@/components/ui/markdown";
-import { Reasoning } from "@/components/ui/reasoning";
+import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ui/reasoning";
 import { Steps, StepsContent, StepsItem, StepsTrigger } from "@/components/ui/steps";
 import { Tool } from "@/components/ui/tool";
 import { useCopyAction } from "@/hooks/useCopyAction";
@@ -36,6 +36,12 @@ interface ChatViewProps {
   streamingMode?: "shell" | "ai" | "agent";
 }
 
+function isLastAssistantEmpty(messages: ChatMessage[]): boolean {
+  if (messages.length === 0) return false;
+  const last = messages[messages.length - 1];
+  return last.role === "assistant" && !last.content && !last.shell;
+}
+
 export function ChatView({ messages, isStreaming, streamingMode }: ChatViewProps) {
   if (messages.length === 0) {
     return <WelcomeScreen />;
@@ -47,40 +53,45 @@ export function ChatView({ messages, isStreaming, streamingMode }: ChatViewProps
 }
 
 function ChatViewMessages({ messages, isStreaming, streamingMode }: ChatViewProps) {
-  const { t } = useI18n();
+  const showInlineThinking =
+    isStreaming && streamingMode !== "shell" && isLastAssistantEmpty(messages);
 
   return (
     <ChatContainerRoot className="flex-1">
       <ChatContainerContent className="gap-3 px-4 pt-4 pb-2">
-        {renderGroupedMessages(messages)}
-        {isStreaming && streamingMode !== "shell" && (
-          <div className="flex items-center gap-2 px-4 py-3">
-            <Loader variant="typing" size="sm" />
-            <span className="text-xs text-muted-foreground">{t.common.thinking}</span>
-          </div>
-        )}
+        {renderGroupedMessages(messages, showInlineThinking)}
         <ChatContainerScrollAnchor />
       </ChatContainerContent>
     </ChatContainerRoot>
   );
 }
 
-function renderGroupedMessages(messages: ChatMessage[]) {
+function renderGroupedMessages(messages: ChatMessage[], lastIsThinking = false) {
   const cards: React.ReactNode[] = [];
   let i = 0;
   while (i < messages.length) {
     const msg = messages[i];
+    const isLast = i >= messages.length - 2;
     if (msg.role === "user") {
       const response = messages[i + 1];
       if (response && response.role !== "user") {
-        cards.push(<MessageCard key={msg.id} userMessage={msg} responseMessage={response} />);
+        cards.push(
+          <MessageCard
+            key={msg.id}
+            userMessage={msg}
+            responseMessage={response}
+            isThinking={lastIsThinking && i + 2 >= messages.length}
+          />,
+        );
         i += 2;
         continue;
       }
       cards.push(<MessageCard key={msg.id} userMessage={msg} />);
       i += 1;
     } else {
-      cards.push(<MessageCard key={msg.id} responseMessage={msg} />);
+      cards.push(
+        <MessageCard key={msg.id} responseMessage={msg} isThinking={lastIsThinking && isLast} />,
+      );
       i += 1;
     }
   }
@@ -154,6 +165,173 @@ function BubbleToolbar({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** Typewriter-style reveal while reasoning streams; show full text when done. */
+function useReasoningTypewriter(fullText: string, streaming: boolean): string {
+  const fullRef = useRef(fullText);
+  fullRef.current = fullText;
+  const [n, setN] = useState(0);
+
+  useEffect(() => {
+    if (!streaming) {
+      setN(fullRef.current.length);
+      return;
+    }
+    let cancelled = false;
+    const loop = () => {
+      if (cancelled) return;
+      setN((prev) => {
+        const cap = fullRef.current.length;
+        if (prev >= cap) return prev;
+        return Math.min(prev + 2, cap);
+      });
+      requestAnimationFrame(loop);
+    };
+    const id = requestAnimationFrame(loop);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(id);
+    };
+  }, [streaming]);
+
+  if (!streaming) return fullText;
+  return fullText.slice(0, n);
+}
+
+/** Collapsible model reasoning: expanded while only thinking streams; folds when answer/UI appears. */
+function AssistantThinkingBlock({
+  thinking,
+  live,
+  answerVisible,
+  thinkingStartedAt,
+  thinkingDurationMs,
+}: {
+  thinking: string;
+  live: boolean;
+  answerVisible: boolean;
+  thinkingStartedAt?: number;
+  thinkingDurationMs?: number;
+}) {
+  const { t } = useI18n();
+  const displayThinking = useReasoningTypewriter(thinking, live);
+  const [open, setOpen] = useState(() => !answerVisible);
+  const [, setTick] = useState(0);
+
+  useEffect(() => {
+    if (!live || thinkingStartedAt == null) return;
+    const id = setInterval(() => setTick((x) => x + 1), 250);
+    return () => clearInterval(id);
+  }, [live, thinkingStartedAt]);
+
+  useEffect(() => {
+    if (answerVisible) setOpen(false);
+  }, [answerVisible]);
+
+  useEffect(() => {
+    if (!answerVisible && thinking.length > 0) setOpen(true);
+  }, [answerVisible, thinking]);
+
+  const headerLabel = (() => {
+    if (thinkingDurationMs != null) {
+      const s = Math.max(1, Math.round(thinkingDurationMs / 1000));
+      return t.chat.reasoningDurationTpl.replace("{seconds}", String(s));
+    }
+    if (live && thinkingStartedAt != null) {
+      const s = Math.max(0, Math.floor((Date.now() - thinkingStartedAt) / 1000));
+      return t.chat.reasoningLiveForTpl.replace("{seconds}", String(s));
+    }
+    if (live) return t.chat.reasoningLive;
+    return t.chat.reasoning;
+  })();
+
+  return (
+    <Reasoning open={open} onOpenChange={setOpen} isStreaming={false}>
+      <div className="rounded-md border border-border/50 bg-muted/25">
+        <ReasoningTrigger className="w-full rounded-t-md px-3 py-2 text-left text-xs hover:bg-muted/40">
+          <span className="flex min-w-0 items-center gap-2 font-medium text-muted-foreground">
+            {live && thinkingStartedAt == null && (
+              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+            )}
+            <span className="truncate">{headerLabel}</span>
+          </span>
+        </ReasoningTrigger>
+        <ReasoningContent
+          className="border-t border-border/40"
+          contentClassName="!max-w-none px-0 py-0"
+          disableOuterProse
+        >
+          <div className="text-reasoning max-h-[min(40vh,320px)] overflow-y-auto px-3 py-2.5">
+            <Markdown
+              className={cn(
+                "prose prose-sm max-w-none dark:prose-invert",
+                "text-[13px] leading-relaxed",
+                "prose-headings:mb-2 prose-headings:mt-3 prose-headings:font-semibold prose-headings:text-reasoning",
+                "prose-p:my-2 prose-li:my-0.5",
+                "prose-code:rounded prose-code:bg-primary/10 prose-code:px-1 prose-code:py-px prose-code:font-mono prose-code:text-[12px] prose-code:before:content-none prose-code:after:content-none",
+                "prose-pre:bg-muted/40 prose-pre:border prose-pre:border-border/50",
+              )}
+            >
+              {displayThinking}
+            </Markdown>
+            {live && displayThinking.length < thinking.length && (
+              <span className="ml-px inline-block h-3.5 w-0.5 animate-pulse bg-primary/60 align-text-bottom" />
+            )}
+          </div>
+        </ReasoningContent>
+      </div>
+    </Reasoning>
+  );
+}
+
+function ChatAIBody({
+  message,
+  showRaw,
+  thinkingOnlyPhase,
+}: {
+  message: ChatMessage;
+  showRaw: boolean;
+  thinkingOnlyPhase: boolean;
+}) {
+  const { t } = useI18n();
+  const thinking = message.thinking ?? "";
+  const hasThinking = thinking.length > 0;
+  const hasContent = !!message.content?.trim();
+
+  return (
+    <div className="space-y-3 px-3 py-3">
+      {message.model && <div className="text-[10px] text-muted-foreground">{message.model}</div>}
+      {hasThinking && (
+        <AssistantThinkingBlock
+          thinking={thinking}
+          live={thinkingOnlyPhase && !hasContent}
+          answerVisible={hasContent}
+          thinkingStartedAt={message.thinkingStartedAt}
+          thinkingDurationMs={message.thinkingDurationMs}
+        />
+      )}
+      {thinkingOnlyPhase && !hasThinking && (
+        <div className="flex items-center gap-2 py-1">
+          <Loader variant="typing" size="sm" />
+          <span className="text-xs text-muted-foreground">{t.common.responding}</span>
+        </div>
+      )}
+      {hasContent &&
+        (showRaw ? (
+          <div className={cn(hasThinking && "border-t border-border/40 pt-3")}>
+            <pre className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+              {message.content}
+            </pre>
+          </div>
+        ) : (
+          <div className={cn(hasThinking && "border-t border-border/40 pt-3")}>
+            <Markdown className="prose prose-sm prose-inherit max-w-none break-words text-sm leading-relaxed text-foreground">
+              {message.content}
+            </Markdown>
+          </div>
+        ))}
+    </div>
+  );
+}
+
 function RawToggle({ showRaw, onToggle }: { showRaw: boolean; onToggle: () => void }) {
   const { t } = useI18n();
   return (
@@ -181,9 +359,11 @@ function RawToggle({ showRaw, onToggle }: { showRaw: boolean; onToggle: () => vo
 function MessageCard({
   userMessage,
   responseMessage,
+  isThinking,
 }: {
   userMessage?: ChatMessage;
   responseMessage?: ChatMessage;
+  isThinking?: boolean;
 }) {
   const { t } = useI18n();
   const mode = userMessage?.mode ?? responseMessage?.mode ?? "ai";
@@ -245,16 +425,29 @@ function MessageCard({
       )}
 
       {/* ── A: content area ── */}
-      {responseMessage && (
+      {(responseMessage || isThinking) && (
         <div className="bubble-zone relative">
           <div className="text-sm">
-            {mode === "shell" && responseMessage.shell ? (
+            {responseMessage && mode === "shell" && responseMessage.shell ? (
               <ShellOutput shell={responseMessage.shell} />
-            ) : mode === "agent" ? (
-              <AgentBody message={responseMessage} showRaw={aRaw} />
-            ) : (
-              <AIBody message={responseMessage} showRaw={aRaw} />
-            )}
+            ) : responseMessage && mode === "agent" ? (
+              <AgentBody
+                message={responseMessage}
+                showRaw={aRaw}
+                thinkingOnlyPhase={!!(isThinking && !responseMessage.content)}
+              />
+            ) : responseMessage ? (
+              <ChatAIBody
+                message={responseMessage}
+                showRaw={aRaw}
+                thinkingOnlyPhase={!!(isThinking && !responseMessage.content)}
+              />
+            ) : isThinking && !responseMessage ? (
+              <div className="flex items-center gap-2 px-3 py-3">
+                <Loader variant="typing" size="sm" />
+                <span className="text-xs text-muted-foreground">{t.common.responding}</span>
+              </div>
+            ) : null}
           </div>
           <BubbleToolbar>
             {mode !== "shell" && <RawToggle showRaw={aRaw} onToggle={() => setARaw((v) => !v)} />}
@@ -361,36 +554,37 @@ function ShellOutput({ shell }: { shell: NonNullable<ChatMessage["shell"]> }) {
 // AI / Agent body with raw/md toggle
 // ────────────────────────────────────────────────────────
 
-function AIBody({ message, showRaw }: { message: ChatMessage; showRaw: boolean }) {
-  return (
-    <div className="px-3 py-3">
-      {message.model && (
-        <div className="mb-1 text-[10px] text-muted-foreground">{message.model}</div>
-      )}
-      {showRaw ? (
-        <pre className="whitespace-pre-wrap text-sm text-foreground">{message.content}</pre>
-      ) : (
-        <Markdown className="prose prose-sm prose-inherit break-words text-sm text-foreground">
-          {message.content}
-        </Markdown>
-      )}
-    </div>
-  );
-}
-
-function AgentBody({ message, showRaw }: { message: ChatMessage; showRaw: boolean }) {
+function AgentBody({
+  message,
+  showRaw,
+  thinkingOnlyPhase = false,
+}: {
+  message: ChatMessage;
+  showRaw: boolean;
+  thinkingOnlyPhase?: boolean;
+}) {
   const { t } = useI18n();
+  const thinking = message.thinking ?? "";
+  const hasThinking = thinking.length > 0;
+  const hasContent = !!message.content?.trim();
+  const hasAgentChrome = Boolean(
+    (message.agentSteps && message.agentSteps.length > 0) ||
+      (message.toolCalls && message.toolCalls.length > 0),
+  );
+  const answerVisible = hasContent || hasAgentChrome;
 
   return (
     <div className="space-y-2 px-3 py-3">
       {message.model && <div className="text-[10px] text-muted-foreground">{message.model}</div>}
 
-      {message.thinking && (
-        <Reasoning>
-          <pre className="whitespace-pre-wrap text-xs text-muted-foreground">
-            {message.thinking}
-          </pre>
-        </Reasoning>
+      {hasThinking && (
+        <AssistantThinkingBlock
+          thinking={thinking}
+          live={Boolean(thinkingOnlyPhase && !answerVisible)}
+          answerVisible={answerVisible}
+          thinkingStartedAt={message.thinkingStartedAt}
+          thinkingDurationMs={message.thinkingDurationMs}
+        />
       )}
 
       {message.agentSteps && message.agentSteps.length > 0 && (
@@ -418,11 +612,17 @@ function AgentBody({ message, showRaw }: { message: ChatMessage; showRaw: boolea
 
       {message.content &&
         (showRaw ? (
-          <pre className="whitespace-pre-wrap text-sm text-foreground">{message.content}</pre>
+          <div className={cn(hasThinking && "border-t border-border/40 pt-3")}>
+            <pre className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+              {message.content}
+            </pre>
+          </div>
         ) : (
-          <Markdown className="prose prose-sm prose-inherit break-words text-sm text-foreground">
-            {message.content}
-          </Markdown>
+          <div className={cn(hasThinking && "border-t border-border/40 pt-3")}>
+            <Markdown className="prose prose-sm prose-inherit max-w-none break-words text-sm leading-relaxed text-foreground">
+              {message.content}
+            </Markdown>
+          </div>
         ))}
     </div>
   );

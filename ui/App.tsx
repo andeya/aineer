@@ -100,6 +100,7 @@ function MainApp() {
     terminalRef,
     termCommandActive,
     setTerminalVisible,
+    streamTimeoutMs: workspace.streamTimeoutMs,
   });
 
   // ── Init ──
@@ -173,12 +174,15 @@ function MainApp() {
     setTerminalVisible(true);
   }, [dequeue]);
 
+  const forceExecuteChat = chat.handleForceExecute;
   const handleForceExecute = useCallback(
     (taskId: number) => {
+      const task = queuedTasks.find((t) => t.id === taskId);
+      if (!task) return;
       cancel(taskId);
-      chat.handleForceExecute(taskId, queuedTasks);
+      forceExecuteChat(task);
     },
-    [queuedTasks, cancel, chat],
+    [queuedTasks, cancel, forceExecuteChat],
   );
 
   return (

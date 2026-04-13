@@ -57,7 +57,7 @@ export function TaskQueueBar({
   const chatTasks = tasks.filter((task) => task.channel === "chat");
 
   return (
-    <div className="border-t border-border bg-background px-4 py-1.5">
+    <div className="relative z-[1] border-t border-border bg-background px-4 py-1.5">
       <div className="mb-1 flex items-center justify-between">
         <span className="text-[11px] font-medium text-muted-foreground">
           {t.taskQueue.queued.replace("{count}", String(tasks.length))}
@@ -207,10 +207,10 @@ function QueueItem({
         {task.editing ? (
           <>
             <IconBtn title={t.taskQueue.confirmEdit} onClick={commitEdit}>
-              <Check className="h-2.5 w-2.5 text-success" />
+              <Check className="h-3 w-3 text-success" />
             </IconBtn>
             <IconBtn title={t.taskQueue.cancelEdit} onClick={cancelEdit}>
-              <X className="h-2.5 w-2.5" />
+              <X className="h-3 w-3" />
             </IconBtn>
           </>
         ) : (
@@ -218,34 +218,34 @@ function QueueItem({
             {/* Run Next (terminal first item only) */}
             {showRunNext && onRunNext && (
               <IconBtn title={t.taskQueue.runNow} onClick={onRunNext}>
-                <Play className="h-2.5 w-2.5 fill-current text-success" />
+                <Play className="h-3 w-3 fill-current text-success" />
               </IconBtn>
             )}
 
             {/* Force execute (jump queue) */}
             {onForceExecute && (
               <IconBtn title={t.taskQueue.forceExecute} onClick={() => onForceExecute(task.id)}>
-                <Zap className="h-2.5 w-2.5 text-warning" />
+                <Zap className="h-3 w-3 text-warning" />
               </IconBtn>
             )}
 
             {/* Edit */}
             {onUpdateContent && (
               <IconBtn title={t.taskQueue.editCommand} onClick={startEdit}>
-                <Pencil className="h-2.5 w-2.5" />
+                <Pencil className="h-3 w-3" />
               </IconBtn>
             )}
 
             {/* Move up */}
             {onMoveUp && (
               <IconBtn title={t.taskQueue.moveUp} onClick={() => onMoveUp(task.id)}>
-                <ArrowUp className="h-2.5 w-2.5" />
+                <ArrowUp className="h-3 w-3" />
               </IconBtn>
             )}
 
             {/* Delete */}
             <IconBtn title={t.taskQueue.removeFromQueue} onClick={() => onCancel(task.id)}>
-              <X className="h-2.5 w-2.5" />
+              <X className="h-3 w-3" />
             </IconBtn>
           </>
         )}
@@ -267,8 +267,11 @@ function IconBtn({
     <button
       type="button"
       title={title}
-      onClick={onClick}
-      className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      className="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
     >
       {children}
     </button>
