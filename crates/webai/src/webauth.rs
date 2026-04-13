@@ -12,6 +12,36 @@ pub struct WebAuthCredentials {
     pub provider_id: String,
 }
 
+/// JS injected into the webauth page that adds a floating banner telling
+/// the user to close the window after login.  Uses only basic DOM APIs
+/// compatible with all WKWebView versions.  The IIFE guard prevents double
+/// injection on SPA navigations.
+const BANNER_INIT_JS: &str = r#"
+(function(){
+  if(window.__aineer_banner) return;
+  window.__aineer_banner=true;
+  function inject(){
+    if(!document.body){setTimeout(inject,200);return;}
+    var b=document.createElement('div');
+    b.style.cssText='position:fixed;bottom:0;left:0;right:0;z-index:2147483647;background:linear-gradient(135deg,#1e293b,#0f172a);color:#e2e8f0;padding:10px 20px;display:flex;align-items:center;justify-content:space-between;font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:13px;box-shadow:0 -2px 12px rgba(0,0,0,0.4);border-top:1px solid rgba(255,255,255,0.08);gap:12px;';
+    var t=document.createElement('span');
+    t.style.cssText='flex:1;opacity:0.9;';
+    t.textContent='\u2139\uFE0F  Log in to your account, then close this window or click Done.';
+    var d=document.createElement('button');
+    d.textContent='\u2714  Done';
+    d.style.cssText='background:#16a34a;color:#fff;border:none;padding:6px 20px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;transition:background 0.15s;';
+    d.onmouseenter=function(){d.style.background='#15803d';};
+    d.onmouseleave=function(){d.style.background='#16a34a';};
+    d.onclick=function(){window.close();};
+    b.appendChild(t);b.appendChild(d);
+    document.body.appendChild(b);
+  }
+  inject();
+  var _pushState=history.pushState;
+  history.pushState=function(){_pushState.apply(history,arguments);inject();};
+})();
+"#;
+
 /// Launch the WebAuth flow.
 ///
 /// Opens the provider login page **directly inside a visible WKWebView window**.
@@ -46,6 +76,7 @@ pub async fn start_webauth(
         .inner_size(1024.0, 768.0)
         .resizable(true)
         .center()
+        .initialization_script(BANNER_INIT_JS)
         .build()
         .map_err(|e| WebAiError::WindowCreation(e.to_string()))?;
 

@@ -160,7 +160,7 @@ const zhCN: Translations = {
     loggedIn: "已登录",
     loggingIn: "登录中...",
     notLoggedIn: "未登录",
-    waitingForBrowser: "等待浏览器登录...",
+    waitingForBrowser: "等待登录完成...",
     nModels: "{0} 个模型",
     webAiDesc: "使用现有网页账号免费访问 AI 模型 — 无需 API 密钥。",
 

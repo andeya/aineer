@@ -32,14 +32,14 @@ function ProviderCard({
     <div
       className={cn(
         "flex items-center gap-3 rounded-lg border px-3 py-2.5 transition-colors",
-        loggingIn ? "border-primary/40 bg-primary/5" : "border-border",
+        loggingIn ? "border-amber-500/40 bg-amber-500/5" : "border-border",
       )}
     >
       <span
         className={cn(
           "flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold",
           loggingIn
-            ? "bg-primary/10 text-primary"
+            ? "bg-amber-500/10 text-amber-500"
             : authenticated
               ? "bg-success/10 text-success"
               : "bg-muted-foreground/10 text-muted-foreground",
@@ -64,7 +64,7 @@ function ProviderCard({
         <span
           className={cn(
             "text-[10px]",
-            loggingIn ? "text-primary" : authenticated ? "text-success" : "text-muted-foreground",
+            loggingIn ? "text-amber-500" : authenticated ? "text-success" : "text-muted-foreground",
           )}
         >
           {loggingIn
@@ -76,8 +76,8 @@ function ProviderCard({
       </div>
 
       {loggingIn ? (
-        <span className="flex items-center gap-1 text-[10px] text-primary">
-          <ExternalLink className="h-3 w-3" />
+        <span className="flex items-center gap-1.5 rounded-md bg-amber-500/10 px-2 py-1 text-[10px] font-medium text-amber-500">
+          <Loader2 className="h-3 w-3 animate-spin" />
           {t.settings.waitingForBrowser}
         </span>
       ) : authenticated ? (

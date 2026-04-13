@@ -170,7 +170,7 @@ const en = {
     loggedIn: "Logged in",
     loggingIn: "Logging in...",
     notLoggedIn: "Not logged in",
-    waitingForBrowser: "Waiting for browser...",
+    waitingForBrowser: "Waiting for login...",
     nModels: "{0} models",
     webAiDesc: "Use your existing web accounts to access AI models for free — no API key needed.",
 

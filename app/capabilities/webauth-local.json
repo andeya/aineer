@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "webauth-local",
+  "description": "Grants WebAuth login windows basic IPC permissions so Tauri init scripts work without errors",
+  "windows": [
+    "webauth-*"
+  ],
+  "permissions": [
+    "core:default",
+    "core:event:allow-listen",
+    "core:event:allow-emit",
+    "core:window:allow-close",
+    "core:window:allow-set-focus"
+  ]
+}
