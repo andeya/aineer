@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use tokio::sync::mpsc;
 
 use crate::error::WebAiResult;
-use crate::page::WebAiPage;
+use crate::page::{extract_stream_error, WebAiPage};
 use crate::provider::{ModelInfo, ProviderConfig, WebProviderClient};
 use crate::sse_parser::SseLineParser;
 
@@ -72,6 +72,10 @@ impl WebProviderClient for QwenProvider {
             let mut sse = SseLineParser::new();
             let mut raw_rx = rx;
             while let Some(chunk) = raw_rx.recv().await {
+                if let Some(err) = extract_stream_error(&chunk) {
+                    let _ = tx.send(err).await;
+                    return;
+                }
                 sse.push(&chunk);
                 for ev in sse.drain_events() {
                     if let Some(d) = extract_delta(&ev) {

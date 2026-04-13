@@ -11,7 +11,22 @@ use crate::error::{WebAiError, WebAiResult};
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(120);
 const STREAM_EVENT: &str = "webai-stream-chunk";
 const STREAM_DONE_EVENT: &str = "webai-stream-done";
+const STREAM_ERROR_EVENT: &str = "webai-stream-error";
 const EVAL_RESULT_EVENT: &str = "webai-eval-result";
+
+/// Sentinel prefix injected by the error listener so provider-level parsers
+/// can detect and surface JS errors that would otherwise be silently dropped
+/// by format-specific parsers (SSE, JSON-lines, etc.).
+const STREAM_ERROR_PREFIX: &str = "\x00__WEBAI_ERR__";
+
+/// If `chunk` is an error injected by `evaluate_streaming`, return the
+/// human-readable error text.  Provider stream loops should call this
+/// before feeding chunks to their parser.
+pub fn extract_stream_error(chunk: &str) -> Option<String> {
+    chunk
+        .strip_prefix(STREAM_ERROR_PREFIX)
+        .map(|msg| format!("**Error:** {msg}"))
+}
 
 #[derive(Debug, Deserialize)]
 struct EvalResultPayload {
@@ -35,6 +50,13 @@ struct StreamChunkPayload {
 struct StreamDonePayload {
     #[serde(rename = "requestId")]
     request_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct StreamErrorPayload {
+    #[serde(rename = "requestId")]
+    request_id: String,
+    error: String,
 }
 
 /// A handle to a hidden WebView page loaded on a provider's domain.
@@ -144,6 +166,19 @@ impl WebAiPage {
         });
 
         let expected_id = req_id.clone();
+        let tx_err = tx_shared.clone();
+        let error_listener = self.window.listen(STREAM_ERROR_EVENT, move |event| {
+            if let Ok(payload) = serde_json::from_str::<StreamErrorPayload>(event.payload()) {
+                if payload.request_id == expected_id {
+                    if let Some(ref sender) = *tx_err.lock().unwrap() {
+                        let msg = format!("{}{}", STREAM_ERROR_PREFIX, payload.error);
+                        let _ = sender.try_send(msg);
+                    }
+                }
+            }
+        });
+
+        let expected_id = req_id.clone();
         let tx_done = tx_shared;
         let done_listener = self.window.listen(STREAM_DONE_EVENT, move |event| {
             if let Ok(payload) = serde_json::from_str::<StreamDonePayload>(event.payload()) {
@@ -156,6 +191,7 @@ impl WebAiPage {
         let wrapped = Self::wrap_streaming_js(&req_id, js);
         if let Err(e) = self.window.eval(&wrapped) {
             self.window.unlisten(chunk_listener);
+            self.window.unlisten(error_listener);
             self.window.unlisten(done_listener);
             return Err(WebAiError::Eval(e.to_string()));
         }
@@ -163,6 +199,7 @@ impl WebAiPage {
         let handle = StreamHandle {
             window: self.window.clone(),
             chunk_listener,
+            error_listener,
             done_listener,
         };
         Ok((rx, handle))
@@ -196,6 +233,9 @@ impl WebAiPage {
     }
 
     /// Wrap streaming JS — injects `__webai_stream` and `__webai_stream_done` helpers.
+    ///
+    /// On JS error the message is sent via a dedicated error event so it
+    /// bypasses provider-specific parsers (e.g. SSE) and reaches the caller.
     fn wrap_streaming_js(req_id: &str, js: &str) -> String {
         format!(
             r#"(async () => {{
@@ -212,8 +252,8 @@ impl WebAiPage {
     await (async () => {{ {js} }})();
     await __webai_stream_done();
   }} catch(__e) {{
-    await window.__TAURI__.event.emit('{EVAL_RESULT_EVENT}',
-      {{ requestId: __reqId, ok: false, error: __e.message || String(__e) }});
+    await window.__TAURI__.event.emit('{STREAM_ERROR_EVENT}',
+      {{ requestId: __reqId, error: __e.message || String(__e) }});
     await __webai_stream_done();
   }}
 }})();"#
@@ -225,12 +265,14 @@ impl WebAiPage {
 pub struct StreamHandle {
     window: WebviewWindow,
     chunk_listener: tauri::EventId,
+    error_listener: tauri::EventId,
     done_listener: tauri::EventId,
 }
 
 impl Drop for StreamHandle {
     fn drop(&mut self) {
         self.window.unlisten(self.chunk_listener);
+        self.window.unlisten(self.error_listener);
         self.window.unlisten(self.done_listener);
     }
 }

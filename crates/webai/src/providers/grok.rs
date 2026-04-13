@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use tokio::sync::mpsc;
 
 use crate::error::WebAiResult;
-use crate::page::WebAiPage;
+use crate::page::{extract_stream_error, WebAiPage};
 use crate::provider::{ModelInfo, ProviderConfig, WebProviderClient};
 
 pub struct GrokProvider {
@@ -66,6 +66,10 @@ impl WebProviderClient for GrokProvider {
             let mut buf = String::new();
             let mut raw_rx = rx;
             while let Some(chunk) = raw_rx.recv().await {
+                if let Some(err) = extract_stream_error(&chunk) {
+                    let _ = parsed_tx.send(err).await;
+                    return;
+                }
                 buf.push_str(&chunk);
                 let mut consumed = 0;
                 while let Some(rel) = buf[consumed..].find('\n') {

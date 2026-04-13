@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
 use crate::error::{WebAiError, WebAiResult};
-use crate::page::WebAiPage;
+use crate::page::{extract_stream_error, WebAiPage};
 use crate::provider::{ModelInfo, ProviderConfig, WebProviderClient};
 use crate::sse_parser::SseLineParser;
 
@@ -131,6 +131,10 @@ impl WebProviderClient for ClaudeProvider {
             let mut sse = SseLineParser::new();
             let mut raw_rx = rx;
             while let Some(chunk) = raw_rx.recv().await {
+                if let Some(err) = extract_stream_error(&chunk) {
+                    let _ = parsed_tx.send(err).await;
+                    return;
+                }
                 sse.push(&chunk);
                 for event_data in sse.drain_events() {
                     if let Some(delta) = extract_claude_delta(&event_data) {

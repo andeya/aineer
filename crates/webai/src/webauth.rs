@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Listener, Manager, WebviewUrl, WebviewWindowBuilder};
 use tokio::sync::oneshot;
 
 use crate::auth_store;
@@ -141,7 +141,7 @@ const WEBAUTH_INIT_JS: &str = r#"
     closeBtn.style.cssText='background:#27272a;color:#e4e4e7;border:1px solid #3f3f46;padding:7px 18px;border-radius:8px;font-size:0.78rem;font-weight:600;cursor:pointer;transition:background 0.15s;';
     closeBtn.onmouseenter=function(){closeBtn.style.background='#3f3f46';};
     closeBtn.onmouseleave=function(){closeBtn.style.background='#27272a';};
-    closeBtn.onclick=function(){window.close();};
+    closeBtn.onclick=closeWindow;
 
     btns.appendChild(applyBtn);btns.appendChild(closeBtn);
 
@@ -151,6 +151,17 @@ const WEBAUTH_INIT_JS: &str = r#"
 
     c.appendChild(icon);c.appendChild(h);c.appendChild(p1);c.appendChild(steps);c.appendChild(url);c.appendChild(copyUrlBtn);c.appendChild(cookieLabel);c.appendChild(cookieInput);c.appendChild(feedback);c.appendChild(btns);c.appendChild(note);
     o.appendChild(c);document.body.appendChild(o);
+  }
+
+  /* ── close via Tauri IPC (window.close() is blocked for non-JS-opened windows) ── */
+  function closeWindow(){
+    try{
+      if(window.__TAURI__&&window.__TAURI__.event){
+        window.__TAURI__.event.emit('webauth-close',{});
+        return;
+      }
+    }catch(e){}
+    window.close();
   }
 
   /* ── normal login banner ── */
@@ -165,7 +176,7 @@ const WEBAUTH_INIT_JS: &str = r#"
     d.style.cssText='background:#16a34a;color:#fff;border:none;padding:6px 20px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;transition:background 0.15s;';
     d.onmouseenter=function(){d.style.background='#15803d';};
     d.onmouseleave=function(){d.style.background='#16a34a';};
-    d.onclick=function(){window.close();};
+    d.onclick=closeWindow;
     b.appendChild(t);b.appendChild(d);document.body.appendChild(b);
   }
 
@@ -223,6 +234,13 @@ pub async fn start_webauth(
         .build()
         .map_err(|e| WebAiError::WindowCreation(e.to_string()))?;
 
+    // Listen for the JS-emitted close event and destroy the window.
+    let win_for_close = window.clone();
+    let _close_listener = window.listen("webauth-close", move |_| {
+        tracing::info!("webauth-close event received, destroying window");
+        let _ = win_for_close.destroy();
+    });
+
     // Wait for the user to close the window (signals login completion).
     let (tx, rx) = oneshot::channel::<()>();
     let tx = std::sync::Mutex::new(Some(tx));
@@ -246,6 +264,8 @@ pub async fn start_webauth(
 
     auth_store::save_credentials(&config.id, &creds)?;
     tracing::info!(provider = %config.id, "WebAuth credentials saved");
+
+    let _ = app_handle.emit("webai-auth-changed", &config.id);
 
     Ok(creds)
 }

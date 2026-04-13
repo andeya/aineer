@@ -1,5 +1,7 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use tauri::AppHandle;
 use tokio::sync::{mpsc, Mutex};
@@ -19,6 +21,9 @@ use crate::tool_calling::converter::{
     ToolDefinition,
 };
 
+const DEFAULT_IDLE_TIMEOUT_SECS: u64 = 300;
+const DEFAULT_PAGE_LOAD_TIMEOUT_SECS: u64 = 60;
+
 /// High-level facade that owns the WebView page manager, provider registry,
 /// and tool-calling layer.  Thread-safe and cheaply cloneable via `Arc`.
 #[derive(Clone)]
@@ -29,6 +34,8 @@ pub struct WebAiEngine {
 struct Inner {
     page_manager: Mutex<WebAiPageManager>,
     providers: HashMap<String, Arc<dyn WebProviderClient>>,
+    idle_timeout_secs: AtomicU64,
+    page_load_timeout_secs: AtomicU64,
 }
 
 impl WebAiEngine {
@@ -55,6 +62,8 @@ impl WebAiEngine {
             inner: Arc::new(Inner {
                 page_manager: Mutex::new(WebAiPageManager::new(app_handle)),
                 providers: p,
+                idle_timeout_secs: AtomicU64::new(DEFAULT_IDLE_TIMEOUT_SECS),
+                page_load_timeout_secs: AtomicU64::new(DEFAULT_PAGE_LOAD_TIMEOUT_SECS),
             }),
         }
     }
@@ -75,6 +84,16 @@ impl WebAiEngine {
             .get(provider_id)
             .map(|p| p.list_models())
             .unwrap_or_default()
+    }
+
+    pub fn set_idle_timeout_secs(&self, secs: u64) {
+        self.inner.idle_timeout_secs.store(secs, Ordering::Relaxed);
+    }
+
+    pub fn set_page_load_timeout_secs(&self, secs: u64) {
+        self.inner
+            .page_load_timeout_secs
+            .store(secs, Ordering::Relaxed);
     }
 
     /// Resolve `webai/<provider>` or `webai/<provider>/<model>` into (provider_id, model).
@@ -121,6 +140,24 @@ impl WebAiEngine {
         }
     }
 
+    /// Return the list of provider IDs that currently have an active WebView page.
+    pub async fn list_active_pages(&self) -> Vec<String> {
+        let mgr = self.inner.page_manager.lock().await;
+        mgr.list_pages()
+    }
+
+    /// Close the WebView page for a specific provider.
+    pub async fn close_page(&self, provider_id: &str) {
+        let mut mgr = self.inner.page_manager.lock().await;
+        mgr.close(provider_id);
+    }
+
+    /// Close all active WebView pages.
+    pub async fn close_all_pages(&self) {
+        let mut mgr = self.inner.page_manager.lock().await;
+        mgr.close_all();
+    }
+
     /// Send a plain-text message (no tool handling) and get streaming response.
     pub async fn send_raw(
         &self,
@@ -128,6 +165,7 @@ impl WebAiEngine {
         model: &str,
         message: &str,
     ) -> WebAiResult<mpsc::Receiver<String>> {
+        tracing::info!(%provider_name, %model, "send_raw: resolving provider");
         let provider_id = self
             .resolve_provider_id(provider_name)
             .ok_or_else(|| WebAiError::Provider(format!("unknown provider: {provider_name}")))?;
@@ -135,15 +173,23 @@ impl WebAiEngine {
         let provider = self.inner.providers[&provider_id].clone();
         let start_url = provider.config().start_url.clone();
 
+        tracing::info!(%provider_id, %start_url, "send_raw: acquiring page manager lock");
         let mut mgr = self.inner.page_manager.lock().await;
+        let idle_secs = self.inner.idle_timeout_secs.load(Ordering::Relaxed);
+        let load_secs = self.inner.page_load_timeout_secs.load(Ordering::Relaxed);
+        mgr.cleanup_idle(Duration::from_secs(idle_secs));
+        mgr.set_page_load_timeout(Duration::from_secs(load_secs));
         let needs_init = !mgr.has_page(&provider_id);
+        tracing::info!(%provider_id, needs_init, "send_raw: get_or_create page");
         let page = mgr.get_or_create(&provider_id, &start_url).await?.clone();
         drop(mgr);
 
         if needs_init {
+            tracing::info!(%provider_id, "send_raw: running provider init");
             provider.init(&page).await?;
         }
 
+        tracing::info!(%provider_id, %model, "send_raw: sending message");
         provider.send_message(&page, message, model).await
     }
 
