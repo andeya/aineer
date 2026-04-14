@@ -29,6 +29,13 @@ pub struct ProviderConfig {
     pub start_url: String,
     pub host_key: String,
     pub models: Vec<ModelInfo>,
+    /// Names of HTTP cookies whose presence indicates a valid session.
+    ///
+    /// Used by the cookie-based session check: if **any** of these cookies
+    /// exist in the WebView's cookie store for the provider domain, the user
+    /// is considered "probably logged in" (the JS fetch probe then confirms).
+    #[serde(default)]
+    pub session_cookie_names: Vec<String>,
 }
 
 /// Core trait that every web AI provider must implement.
@@ -66,9 +73,18 @@ pub trait WebProviderClient: Send + Sync {
         model: &str,
     ) -> WebAiResult<mpsc::Receiver<String>>;
 
-    /// List models available for this provider.
+    /// List models available for this provider (static fallback).
     fn list_models(&self) -> Vec<ModelInfo> {
         self.config().models.clone()
+    }
+
+    /// Fetch the current model list from the provider's API at runtime.
+    ///
+    /// Falls back to `list_models()` (static config) on error or if the
+    /// provider does not override this method.
+    async fn fetch_models(&self, page: &WebAiPage) -> WebAiResult<Vec<ModelInfo>> {
+        let _ = page;
+        Ok(self.list_models())
     }
 
     /// Check if the current session (cookies) is valid.
