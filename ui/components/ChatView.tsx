@@ -34,6 +34,7 @@ interface ChatViewProps {
   messages: ChatMessage[];
   isStreaming: boolean;
   streamingMode?: "shell" | "ai" | "agent";
+  onModeChange?: (mode: "shell" | "ai" | "agent") => void;
 }
 
 function isLastAssistantEmpty(messages: ChatMessage[]): boolean {
@@ -42,9 +43,9 @@ function isLastAssistantEmpty(messages: ChatMessage[]): boolean {
   return last.role === "assistant" && !last.content && !last.shell;
 }
 
-export function ChatView({ messages, isStreaming, streamingMode }: ChatViewProps) {
+export function ChatView({ messages, isStreaming, streamingMode, onModeChange }: ChatViewProps) {
   if (messages.length === 0) {
-    return <WelcomeScreen />;
+    return <WelcomeScreen onModeChange={onModeChange} />;
   }
 
   return (
@@ -645,7 +646,11 @@ function StepIcon({ status }: { status: string }) {
 // Welcome screen
 // ────────────────────────────────────────────────────────
 
-function WelcomeScreen() {
+function WelcomeScreen({
+  onModeChange,
+}: {
+  onModeChange?: (mode: "shell" | "ai" | "agent") => void;
+}) {
   const { t } = useI18n();
 
   return (
@@ -656,21 +661,33 @@ function WelcomeScreen() {
         <p className="mt-1 text-sm text-muted-foreground">{t.chat.subtitle}</p>
       </div>
       <div className="grid max-w-lg grid-cols-3 gap-3 text-xs">
-        <div className="rounded-xl border border-border bg-card p-4">
+        <button
+          type="button"
+          onClick={() => onModeChange?.("shell")}
+          className="cursor-pointer rounded-xl border border-border bg-card p-4 transition-colors hover:bg-secondary"
+        >
           <Terminal className="mx-auto mb-2 h-5 w-5 text-foreground" />
           <div className="mb-0.5 font-medium text-foreground">{t.mode.shell}</div>
           <div className="text-muted-foreground">{t.chat.shellDesc}</div>
-        </div>
-        <div className="rounded-xl border border-ai-subtle bg-card p-4">
+        </button>
+        <button
+          type="button"
+          onClick={() => onModeChange?.("ai")}
+          className="cursor-pointer rounded-xl border border-ai-subtle bg-card p-4 transition-colors hover:bg-secondary"
+        >
           <Sparkles className="mx-auto mb-2 h-5 w-5 text-ai" />
           <div className="mb-0.5 font-medium text-ai">{t.mode.chat}</div>
           <div className="text-muted-foreground">{t.chat.chatDesc}</div>
-        </div>
-        <div className="rounded-xl border border-agent-subtle bg-card p-4">
+        </button>
+        <button
+          type="button"
+          onClick={() => onModeChange?.("agent")}
+          className="cursor-pointer rounded-xl border border-agent-subtle bg-card p-4 transition-colors hover:bg-secondary"
+        >
           <Bot className="mx-auto mb-2 h-5 w-5 text-agent" />
           <div className="mb-0.5 font-medium text-agent">{t.mode.agent}</div>
           <div className="text-muted-foreground">{t.chat.agentDesc}</div>
-        </div>
+        </button>
       </div>
       <div className="space-y-1 text-[11px] text-muted-foreground">
         <p>

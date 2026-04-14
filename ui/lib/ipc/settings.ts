@@ -133,6 +133,8 @@ export interface WebAiModelInfo {
 
 export const webaiListProviders = () => call<WebAiProviderInfo[]>("webai_list_providers");
 export const webaiListAuthenticated = () => call<string[]>("webai_list_authenticated");
+export const webaiCheckSession = (providerId: string) =>
+  call<boolean>("webai_check_session", { providerId });
 export const webaiStartAuth = (providerId: string) =>
   call<string>("webai_start_auth", { providerId });
 export const webaiLogout = (providerId: string) => call<void>("webai_logout", { providerId });

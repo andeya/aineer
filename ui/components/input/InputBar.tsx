@@ -133,6 +133,17 @@ export function InputBar({
   const menuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pickerInputRef = useRef<HTMLInputElement>(null);
+  const barRef = useRef<HTMLDivElement>(null);
+
+  const focusTextareaAtEnd = useCallback(() => {
+    requestAnimationFrame(() => {
+      const ta = barRef.current?.querySelector("textarea");
+      if (!ta) return;
+      ta.focus();
+      const len = ta.value.length;
+      ta.setSelectionRange(len, len);
+    });
+  }, []);
 
   const prevModeRef = useRef(mode);
   useEffect(() => {
@@ -144,8 +155,9 @@ export function InputBar({
       setShowShellComplete(false);
       setShellCompletions([]);
       setSelectedIdx(0);
+      focusTextareaAtEnd();
     }
-  }, [mode]);
+  }, [mode, focusTextareaAtEnd]);
 
   const canAttach = mode !== "shell";
 
@@ -702,7 +714,7 @@ export function InputBar({
   const showMentionPopup = showMentions && !showFilePicker && filteredMentions.length > 0;
 
   return (
-    <div className="relative border-t border-border bg-background px-4 py-2">
+    <div ref={barRef} className="relative border-t border-border bg-background px-4 py-2">
       {showSlashPopup && (
         <SlashMenu
           menuRef={menuRef}
@@ -772,7 +784,10 @@ export function InputBar({
             <button
               key={m.id}
               type="button"
-              onClick={() => onModeChange(m.id)}
+              onClick={() => {
+                onModeChange(m.id);
+                focusTextareaAtEnd();
+              }}
               className={cn(
                 "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs transition-colors",
                 mode === m.id

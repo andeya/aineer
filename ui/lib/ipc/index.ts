@@ -94,6 +94,7 @@ export {
   setCloseToTray,
   updateSettings,
   upsertProvider,
+  webaiCheckSession,
   webaiCloseAllPages,
   webaiClosePage,
   webaiListAuthenticated,

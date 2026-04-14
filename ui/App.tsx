@@ -239,6 +239,7 @@ function MainApp() {
                 messages={chat.messages}
                 isStreaming={chat.isStreaming}
                 streamingMode={chat.inputMode}
+                onModeChange={chat.setInputMode}
               />
             )}
           </div>
