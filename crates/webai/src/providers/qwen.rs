@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use serde::Deserialize;
 use tokio::sync::mpsc;
 
 use crate::error::WebAiResult;
@@ -36,6 +37,7 @@ impl QwenProvider {
                         default: false,
                     },
                 ],
+                session_cookie_names: vec!["token".into(), "cna".into()],
             },
         }
     }
@@ -95,9 +97,55 @@ impl WebProviderClient for QwenProvider {
         Ok(parsed_rx)
     }
 
-    async fn check_session(&self, page: &WebAiPage) -> WebAiResult<bool> {
-        page.evaluate::<bool>("const r = await fetch('https://chat.qwen.ai/api/v2/user/info', { credentials: 'include' }); return r.ok;", None).await
+    async fn fetch_models(&self, page: &WebAiPage) -> WebAiResult<Vec<ModelInfo>> {
+        let js = r#"
+const r = await fetch('https://chat.qwen.ai/api/models', { credentials: 'include' });
+if (!r.ok) return null;
+const data = await r.json();
+return data;
+"#;
+        let result: Option<QwenModelsResponse> = page.evaluate(js, None).await.unwrap_or(None);
+        match result {
+            Some(resp) => {
+                let models: Vec<ModelInfo> = resp
+                    .data
+                    .into_iter()
+                    .filter(|m| m.status == "active")
+                    .map(|m| ModelInfo {
+                        id: m.id.clone(),
+                        name: m.name.unwrap_or(m.id),
+                        default: false,
+                    })
+                    .collect();
+                if models.is_empty() {
+                    Ok(self.list_models())
+                } else {
+                    Ok(models)
+                }
+            }
+            None => Ok(self.list_models()),
+        }
     }
+
+    async fn check_session(&self, page: &WebAiPage) -> WebAiResult<bool> {
+        page.check_session_via_fetch("https://chat.qwen.ai/api/v2/user/info")
+            .await
+    }
+}
+
+#[derive(Deserialize)]
+struct QwenModelsResponse {
+    #[serde(default)]
+    data: Vec<QwenModelEntry>,
+}
+
+#[derive(Deserialize)]
+struct QwenModelEntry {
+    id: String,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    status: String,
 }
 
 fn build_send_js(message: &str, model: &str) -> String {

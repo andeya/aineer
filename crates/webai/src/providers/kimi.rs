@@ -40,6 +40,7 @@ impl KimiProvider {
                         default: false,
                     },
                 ],
+                session_cookie_names: vec!["session_id".into()],
             },
         }
     }
@@ -93,11 +94,7 @@ impl WebProviderClient for KimiProvider {
     }
 
     async fn check_session(&self, page: &WebAiPage) -> WebAiResult<bool> {
-        page.evaluate::<bool>(
-            "const r = await fetch('https://www.kimi.com/', { credentials: 'include', method: 'GET' }); return r.ok;",
-            None,
-        )
-        .await
+        page.check_session_via_fetch("https://www.kimi.com/").await
     }
 }
 

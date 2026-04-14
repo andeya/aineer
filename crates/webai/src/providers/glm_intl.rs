@@ -37,6 +37,7 @@ impl GlmIntlWebProvider {
                         default: false,
                     },
                 ],
+                session_cookie_names: vec!["chatglm_token".into()],
             },
         }
     }
@@ -78,10 +79,6 @@ return (nodes[nodes.length - 1].innerText || '').trim();
     }
 
     async fn check_session(&self, page: &WebAiPage) -> WebAiResult<bool> {
-        page.evaluate::<bool>(
-            "const r = await fetch('https://chat.z.ai/', { credentials: 'include' }); return r.ok;",
-            None,
-        )
-        .await
+        page.check_session_via_fetch("https://chat.z.ai/").await
     }
 }

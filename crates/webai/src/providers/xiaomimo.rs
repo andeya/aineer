@@ -29,6 +29,7 @@ impl XiaomimoProvider {
                     name: "MiMo Chat".into(),
                     default: true,
                 }],
+                session_cookie_names: vec!["session_id".into()],
             },
         }
     }
@@ -87,11 +88,8 @@ impl WebProviderClient for XiaomimoProvider {
     }
 
     async fn check_session(&self, page: &WebAiPage) -> WebAiResult<bool> {
-        page.evaluate::<bool>(
-            "const r = await fetch('https://aistudio.xiaomimimo.com/', { credentials: 'include', method: 'GET' }); return r.ok;",
-            None,
-        )
-        .await
+        page.check_session_via_fetch("https://aistudio.xiaomimimo.com/")
+            .await
     }
 }
 

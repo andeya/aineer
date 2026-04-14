@@ -68,6 +68,7 @@ impl ClaudeProvider {
                         default: false,
                     },
                 ],
+                session_cookie_names: vec!["sessionKey".into()],
             },
             organization_id: std::sync::Mutex::new(None),
         }
@@ -158,7 +159,7 @@ impl WebProviderClient for ClaudeProvider {
 
     async fn check_session(&self, page: &WebAiPage) -> WebAiResult<bool> {
         let result: CheckResult = page
-            .evaluate(JS_CHECK_SESSION, None)
+            .evaluate(JS_CHECK_SESSION, Some(std::time::Duration::from_secs(10)))
             .await
             .map_err(|e| WebAiError::Provider(format!("session check failed: {e}")))?;
         Ok(result.ok)
@@ -182,8 +183,16 @@ return orgs[0]?.uuid ?? null;
 "#;
 
 const JS_CHECK_SESSION: &str = r#"
-const res = await fetch('https://claude.ai/api/organizations', { credentials: 'include' });
-return { ok: res.ok, status: res.status };
+const c = new AbortController();
+const t = setTimeout(() => c.abort(), 8000);
+try {
+    const res = await fetch('https://claude.ai/api/organizations', { credentials: 'include', signal: c.signal });
+    clearTimeout(t);
+    return { ok: res.ok, status: res.status };
+} catch(e) {
+    clearTimeout(t);
+    return { ok: false, status: 0 };
+}
 "#;
 
 fn build_send_js(org_id: &Option<String>, conv_uuid: &str, model: &str, message: &str) -> String {

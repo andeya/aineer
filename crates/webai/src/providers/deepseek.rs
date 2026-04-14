@@ -36,6 +36,7 @@ impl DeepSeekProvider {
                         default: false,
                     },
                 ],
+                session_cookie_names: vec!["ds_session".into(), "token".into()],
             },
         }
     }
@@ -97,10 +98,8 @@ impl WebProviderClient for DeepSeekProvider {
     }
 
     async fn check_session(&self, page: &WebAiPage) -> WebAiResult<bool> {
-        page.evaluate::<bool>(
-            "const r = await fetch('https://chat.deepseek.com/api/v0/users/current', { credentials: 'include' }); return r.ok;",
-            None,
-        ).await
+        page.check_session_via_fetch("https://chat.deepseek.com/api/v0/users/current")
+            .await
     }
 }
 

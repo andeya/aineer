@@ -41,6 +41,7 @@ impl ChatGptProvider {
                         default: false,
                     },
                 ],
+                session_cookie_names: vec!["__Secure-next-auth.session-token".into()],
             },
         }
     }
@@ -116,12 +117,21 @@ impl WebProviderClient for ChatGptProvider {
 
     async fn check_session(&self, page: &WebAiPage) -> WebAiResult<bool> {
         let js = r#"
-const r = await fetch('https://chatgpt.com/api/auth/session', { credentials: 'include' });
-if (!r.ok) return false;
-const data = await r.json();
-return !!data.accessToken;
+const c = new AbortController();
+const t = setTimeout(() => c.abort(), 8000);
+try {
+    const r = await fetch('https://chatgpt.com/api/auth/session', { credentials: 'include', signal: c.signal });
+    clearTimeout(t);
+    if (!r.ok) return false;
+    const data = await r.json();
+    return !!data.accessToken;
+} catch(e) {
+    clearTimeout(t);
+    return false;
+}
 "#;
-        page.evaluate::<bool>(js, None).await
+        page.evaluate::<bool>(js, Some(std::time::Duration::from_secs(10)))
+            .await
     }
 }
 
@@ -160,6 +170,10 @@ if (!accessToken) {{
 const deviceId = session?.oaiDeviceId || crypto.randomUUID();
 const refUrl = location.href || 'https://chatgpt.com/';
 
+const __platform = navigator.userAgentData?.platform
+    || (navigator.platform?.startsWith('Win') ? 'Windows'
+        : navigator.platform?.startsWith('Linux') ? 'Linux' : 'macOS');
+
 function baseHeaders() {{
     return {{
         'Content-Type': 'application/json',
@@ -169,7 +183,7 @@ function baseHeaders() {{
         'Referer': refUrl,
         'sec-ch-ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
         'sec-ch-ua-mobile': '?0',
-        'sec-ch-ua-platform': '"macOS"',
+        'sec-ch-ua-platform': '"' + __platform + '"',
         ...(accessToken ? {{ Authorization: 'Bearer ' + accessToken }} : {{}}),
     }};
 }}

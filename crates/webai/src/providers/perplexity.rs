@@ -37,6 +37,7 @@ impl PerplexityWebProvider {
                         default: false,
                     },
                 ],
+                session_cookie_names: vec!["__Secure-next-auth.session-token".into()],
             },
         }
     }
@@ -82,10 +83,7 @@ return (nodes[nodes.length - 1].innerText || '').trim();
     }
 
     async fn check_session(&self, page: &WebAiPage) -> WebAiResult<bool> {
-        page.evaluate::<bool>(
-            "const r = await fetch('https://www.perplexity.ai/', { credentials: 'include' }); return r.ok;",
-            None,
-        )
-        .await
+        page.check_session_via_fetch("https://www.perplexity.ai/")
+            .await
     }
 }

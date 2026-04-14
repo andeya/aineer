@@ -35,6 +35,7 @@ impl GrokProvider {
                         default: false,
                     },
                 ],
+                session_cookie_names: vec!["sso".into(), "sso-rw".into()],
             },
         }
     }
@@ -99,10 +100,8 @@ impl WebProviderClient for GrokProvider {
     }
 
     async fn check_session(&self, page: &WebAiPage) -> WebAiResult<bool> {
-        page.evaluate::<bool>(
-            "const r = await fetch('https://grok.com/rest/app-chat/conversations?limit=1', { credentials: 'include' }); return r.ok;",
-            None,
-        ).await
+        page.check_session_via_fetch("https://grok.com/rest/app-chat/conversations?limit=1")
+            .await
     }
 }
 

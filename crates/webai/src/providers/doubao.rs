@@ -36,6 +36,7 @@ impl DoubaoProvider {
                         default: false,
                     },
                 ],
+                session_cookie_names: vec!["sessionid".into()],
             },
         }
     }
@@ -108,11 +109,8 @@ impl WebProviderClient for DoubaoProvider {
     }
 
     async fn check_session(&self, page: &WebAiPage) -> WebAiResult<bool> {
-        page.evaluate::<bool>(
-            "const r = await fetch('https://www.doubao.com/chat/', { credentials: 'include', method: 'GET' }); return r.ok;",
-            None,
-        )
-        .await
+        page.check_session_via_fetch("https://www.doubao.com/chat/")
+            .await
     }
 }
 

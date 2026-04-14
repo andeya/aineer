@@ -29,6 +29,7 @@ impl GlmProvider {
                     name: "GLM-4 Plus".into(),
                     default: true,
                 }],
+                session_cookie_names: vec!["chatglm_token".into()],
             },
         }
     }
@@ -101,11 +102,7 @@ impl WebProviderClient for GlmProvider {
     }
 
     async fn check_session(&self, page: &WebAiPage) -> WebAiResult<bool> {
-        page.evaluate::<bool>(
-            "const r = await fetch('https://chatglm.cn/', { credentials: 'include', method: 'GET' }); return r.ok;",
-            None,
-        )
-        .await
+        page.check_session_via_fetch("https://chatglm.cn/").await
     }
 }
 

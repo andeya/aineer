@@ -37,6 +37,7 @@ impl GeminiWebProvider {
                         default: false,
                     },
                 ],
+                session_cookie_names: vec!["SID".into(), "__Secure-1PSID".into()],
             },
         }
     }
@@ -83,10 +84,7 @@ return (last.innerText || '').trim();
     }
 
     async fn check_session(&self, page: &WebAiPage) -> WebAiResult<bool> {
-        page.evaluate::<bool>(
-            "const r = await fetch('https://gemini.google.com/app', { credentials: 'include' }); return r.ok;",
-            None,
-        )
-        .await
+        page.check_session_via_fetch("https://gemini.google.com/app")
+            .await
     }
 }

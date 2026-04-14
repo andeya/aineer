@@ -36,6 +36,7 @@ impl QwenCnProvider {
                         default: false,
                     },
                 ],
+                session_cookie_names: vec!["token".into(), "cna".into()],
             },
         }
     }
@@ -98,11 +99,8 @@ impl WebProviderClient for QwenCnProvider {
     }
 
     async fn check_session(&self, page: &WebAiPage) -> WebAiResult<bool> {
-        page.evaluate::<bool>(
-            "const r = await fetch('https://www.qianwen.com/', { credentials: 'include' }); return r.ok;",
-            None,
-        )
-        .await
+        page.check_session_via_fetch("https://www.qianwen.com/")
+            .await
     }
 }
 
