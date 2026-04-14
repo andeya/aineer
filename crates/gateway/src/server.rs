@@ -607,6 +607,32 @@ async fn handle_webai(
         Ok(OpenAiStreamResult::Completed(parsed)) => {
             webai_parsed_response(parsed, model, now, stream).into_response()
         }
+        Err(aineer_webai::WebAiError::NotAuthenticated { ref provider_id }) => (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse::new(
+                format!("Provider {provider_id} is not authenticated. Please log in via WebAI settings."),
+                "authentication_error",
+            )),
+        )
+            .into_response(),
+        Err(aineer_webai::WebAiError::SessionExpired { ref provider_id }) => (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse::new(
+                format!("Session expired for provider {provider_id}. Please log in again."),
+                "authentication_error",
+            )),
+        )
+            .into_response(),
+        Err(ref e @ aineer_webai::WebAiError::RateLimited { .. }) => (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(ErrorResponse::new(e.to_string(), "rate_limit_error")),
+        )
+            .into_response(),
+        Err(ref e @ aineer_webai::WebAiError::Timeout(_)) => (
+            StatusCode::GATEWAY_TIMEOUT,
+            Json(ErrorResponse::new(e.to_string(), "timeout_error")),
+        )
+            .into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse::new(format!("WebAI error: {e}"), "api_error")),
