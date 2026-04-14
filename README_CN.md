@@ -8,7 +8,6 @@
 <p align="center">
   <a href="https://github.com/andeya/aineer/actions"><img src="https://github.com/andeya/aineer/workflows/CI/badge.svg" alt="CI"></a>
   <a href="https://github.com/andeya/aineer/releases"><img src="https://img.shields.io/github/v/release/andeya/aineer" alt="Release"></a>
-  <a href="https://crates.io/crates/aineer"><img src="https://img.shields.io/crates/v/aineer.svg" alt="crates.io"></a>
   <img src="https://raw.githubusercontent.com/andeya/aineer/main/docs/images/badge-platforms.svg" alt="macOS | Linux | Windows">
   <br>
   <a href="README.md">English</a>
