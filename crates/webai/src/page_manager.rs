@@ -36,6 +36,21 @@ struct PageEntry {
 ///
 /// Each provider gets a dedicated `WebviewWindow` loaded on its domain
 /// so that in-page `fetch` and DOM operations carry the right cookies.
+///
+/// ## Cookie sharing with `webauth-*` windows
+///
+/// Both `webai-*` (hidden) and `webauth-*` (visible login) windows are
+/// created **without** an explicit `data_directory`.  This means the Tauri
+/// runtime maps them to the **same default `WebContext`**, which in turn
+/// gives them the same underlying cookie / website-data store:
+///
+/// - **macOS**: `WKWebsiteDataStore::defaultDataStore`
+/// - **Windows**: shared `ICoreWebView2Environment` (same user-data folder)
+/// - **Linux**: shared `WebContext` → shared `WebsiteDataManager` + cookie file
+///
+/// If we ever set `data_directory` on one but not the other, or use
+/// `data_store_identifier` / `with_environment`, the stores will diverge
+/// and login cookies will **not** be visible to automation pages.
 pub struct WebAiPageManager {
     app_handle: AppHandle,
     pages: HashMap<String, PageEntry>,
@@ -95,6 +110,11 @@ impl WebAiPageManager {
         self.pages.contains_key(provider_id)
     }
 
+    /// Get a reference to the underlying `WebviewWindow` for a provider (if it exists).
+    pub fn get_window(&self, provider_id: &str) -> Option<&tauri::WebviewWindow> {
+        self.pages.get(provider_id).map(|e| e.page.window())
+    }
+
     pub fn list_pages(&self) -> Vec<String> {
         self.pages.keys().cloned().collect()
     }
@@ -126,9 +146,14 @@ impl WebAiPageManager {
             existing
         } else {
             tracing::info!(provider = %provider_id, %label, "building new WebView window");
-            let w = WebviewWindowBuilder::new(&self.app_handle, &label, WebviewUrl::External(url))
-                .title(format!("WebAI - {provider_id}"))
-                .visible(false)
+            let mut wb =
+                WebviewWindowBuilder::new(&self.app_handle, &label, WebviewUrl::External(url))
+                    .title(format!("WebAI - {provider_id}"))
+                    .visible(false);
+            if let Some(ua) = crate::browser_user_agent() {
+                wb = wb.user_agent(ua);
+            }
+            let w = wb
                 .build()
                 .map_err(|e| WebAiError::WindowCreation(e.to_string()))?;
             tracing::info!(provider = %provider_id, "WebView window built successfully");
